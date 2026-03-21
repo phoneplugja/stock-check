@@ -1,11 +1,25 @@
+const https = require("https");
+
+function httpsGet(url, token) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { Authorization: "Bearer " + token } }, (res) => {
+      let data = "";
+      res.on("data", chunk => data += chunk);
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
+        catch (e) { reject(new Error("Invalid JSON")); }
+      });
+    }).on("error", reject);
+  });
+}
+
 exports.handler = async (event) => {
   const TOKEN = process.env.LOYVERSE_TOKEN;
+  const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
 
   if (!TOKEN) {
-    return { statusCode: 500, body: JSON.stringify({ error: "LOYVERSE_TOKEN not set in environment variables." }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "LOYVERSE_TOKEN not set." }) };
   }
-
-  const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
 
   const path = event.queryStringParameters?.path || "items";
   const storeId = event.queryStringParameters?.store_id || "";
@@ -20,11 +34,8 @@ exports.handler = async (event) => {
   }
 
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: "Bearer " + TOKEN }
-    });
-    const data = await res.json();
-    return { statusCode: res.status, headers, body: JSON.stringify(data) };
+    const result = await httpsGet(url, TOKEN);
+    return { statusCode: result.status, headers, body: JSON.stringify(result.body) };
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
