@@ -20,8 +20,6 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Inter', sans-serif; background: var(--black); color: var(--white); min-height: 100vh; }
   body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(41,181,232,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(41,181,232,0.04) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; z-index: 0; }
-
-  /* HEADER */
   header { position: sticky; top: 0; z-index: 100; background: rgba(8,12,16,0.95); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(41,181,232,0.2); padding: 0 2rem; height: 72px; display: flex; align-items: center; justify-content: space-between; }
   .header-brand { display: flex; align-items: center; gap: 14px; }
   .header-logo img { height: 48px; width: auto; object-fit: contain; filter: drop-shadow(0 0 14px rgba(41,181,232,0.5)); }
@@ -31,128 +29,46 @@
   .header-right { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: rgba(255,255,255,0.4); }
   .live-dot { width: 7px; height: 7px; background: var(--cyan); border-radius: 50%; animation: blink 2s infinite; box-shadow: 0 0 8px var(--cyan); }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
-  /* HERO */
   .hero { position: relative; z-index: 1; padding: 3.5rem 2rem 0; text-align: center; overflow: hidden; }
-
-  .hero-phones {
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 16px;
-    margin-bottom: 2.5rem;
-    position: relative;
-  }
-
-  .phone-frame {
-    position: relative;
-    border-radius: 28px;
-    border: 2px solid rgba(41,181,232,0.4);
-    background: var(--black-3);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 0 30px rgba(41,181,232,0.1), inset 0 0 20px rgba(41,181,232,0.03);
-    transition: transform 0.3s, box-shadow 0.3s;
-  }
-
+  .hero-phones { display: flex; align-items: flex-end; justify-content: center; gap: 16px; margin-bottom: 2.5rem; position: relative; }
+  .phone-frame { position: relative; border-radius: 28px; border: 2px solid rgba(41,181,232,0.4); background: var(--black-3); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 30px rgba(41,181,232,0.1), inset 0 0 20px rgba(41,181,232,0.03); transition: transform 0.3s, box-shadow 0.3s; }
   .phone-frame:hover { transform: translateY(-6px); box-shadow: 0 0 50px rgba(41,181,232,0.2); }
-
   .phone-lg { width: 90px; height: 170px; }
   .phone-sm { width: 75px; height: 140px; opacity: 0.6; }
-
   .phone-notch { width: 30px; height: 6px; background: rgba(41,181,232,0.3); border-radius: 99px; position: absolute; top: 12px; }
   .phone-screen { width: 70%; height: 55%; background: linear-gradient(135deg, rgba(41,181,232,0.08), rgba(41,181,232,0.02)); border-radius: 8px; border: 1px solid rgba(41,181,232,0.15); display: flex; align-items: center; justify-content: center; margin-top: 10px; }
   .phone-screen-icon { font-size: 1.2rem; opacity: 0.5; }
   .phone-home { width: 24px; height: 3px; background: rgba(41,181,232,0.25); border-radius: 99px; position: absolute; bottom: 10px; }
-
-  .phone-glow {
-    position: absolute;
-    width: 180px;
-    height: 180px;
-    background: radial-gradient(circle, rgba(41,181,232,0.12) 0%, transparent 70%);
-    border-radius: 50%;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-  }
-
-  .hero-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: rgba(41,181,232,0.08);
-    border: 1px solid rgba(41,181,232,0.2);
-    border-radius: 99px;
-    padding: 6px 16px;
-    margin-bottom: 1.25rem;
-    font-size: 0.72rem;
-    color: var(--cyan);
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
+  .phone-glow { position: absolute; width: 180px; height: 180px; background: radial-gradient(circle, rgba(41,181,232,0.12) 0%, transparent 70%); border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+  .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(41,181,232,0.08); border: 1px solid rgba(41,181,232,0.2); border-radius: 99px; padding: 6px 16px; margin-bottom: 1.25rem; font-size: 0.72rem; color: var(--cyan); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
   .hero-badge::before { content: ''; width: 5px; height: 5px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 6px var(--cyan); animation: blink 2s infinite; }
-
   .hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 2.75rem; font-weight: 700; color: var(--white); letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 0.75rem; }
   .hero h1 span { color: var(--cyan); text-shadow: 0 0 40px rgba(41,181,232,0.5); }
-  .hero-sub { font-size: 0.95rem; color: rgba(255,255,255,0.5); max-width: 380px; margin: 0 auto 2.5rem; }
-
-  /* FEATURE STRIPS */
-  .feature-strip {
-    display: flex;
-    justify-content: center;
-    gap: 0;
-    border-top: 1px solid rgba(41,181,232,0.1);
-    border-bottom: 1px solid rgba(41,181,232,0.1);
-    background: rgba(41,181,232,0.03);
-    margin: 0 -2rem;
-    padding: 0;
-  }
-
-  .feature-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0.875rem 1.5rem;
-    border-right: 1px solid rgba(41,181,232,0.1);
-    font-size: 0.75rem;
-    color: rgba(255,255,255,0.4);
-    flex: 1;
-    justify-content: center;
-  }
-
+  .hero-sub { font-size: 0.95rem; color: rgba(255,255,255,0.5); max-width: 420px; margin: 0 auto 2.5rem; }
+  .feature-strip { display: flex; justify-content: center; gap: 0; border-top: 1px solid rgba(41,181,232,0.1); border-bottom: 1px solid rgba(41,181,232,0.1); background: rgba(41,181,232,0.03); margin: 0 -2rem; padding: 0; }
+  .feature-item { display: flex; align-items: center; gap: 8px; padding: 0.875rem 1.5rem; border-right: 1px solid rgba(41,181,232,0.1); font-size: 0.75rem; color: rgba(255,255,255,0.4); flex: 1; justify-content: center; }
   .feature-item:last-child { border-right: none; }
   .feature-item svg { color: var(--cyan); flex-shrink: 0; }
   .feature-item strong { color: rgba(255,255,255,0.7); display: block; font-size: 0.78rem; }
-
-  /* MAIN */
   main { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
-
   .search-instruction { font-size: 1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
-
   .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .search-wrap { flex: 1; min-width: 200px; position: relative; }
   .search-wrap input { width: 100%; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px 13px 44px; font-family: 'Inter',sans-serif; font-size: 0.9rem; color: var(--white); outline: none; transition: all 0.2s; }
   .search-wrap input:focus { border-color: var(--cyan); background: rgba(41,181,232,0.05); box-shadow: 0 0 0 3px rgba(41,181,232,0.1); }
   .search-wrap input::placeholder { color: rgba(255,255,255,0.2); }
   .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.3); }
-
   select { background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px; font-family: 'Inter',sans-serif; font-size: 0.875rem; color: var(--white); outline: none; cursor: pointer; transition: border-color 0.2s; }
   select:focus { border-color: var(--cyan); }
   select option { background: var(--black-2); }
-
   .refresh-btn { display: flex; align-items: center; gap: 6px; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 16px; font-family: 'Inter',sans-serif; font-size: 0.875rem; cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s; white-space: nowrap; }
   .refresh-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(41,181,232,0.05); }
-
-  /* GRID */
   .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 12px; }
   .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); overflow: hidden; transition: all 0.2s; }
   .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
-  .card-img { width: 100%; height: 180px; object-fit: cover; display: block; background: var(--black-2); }
+  .card-img-wrap { width: 100%; height: 180px; background: var(--black-2); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card-img-placeholder { font-size: 2.5rem; opacity: 0.15; }
   .card-body { padding: 1rem; }
   .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .card-name { font-size: 0.9rem; font-weight: 500; line-height: 1.4; flex: 1; color: rgba(255,255,255,0.9); }
@@ -165,12 +81,9 @@
   .variants { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; }
   .variant-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
   .variant-name { color: rgba(255,255,255,0.4); }
-
-  /* STATES */
   .loading-state { grid-column: 1/-1; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-
   .prompt-state { grid-column: 1/-1; text-align: center; padding: 3rem 1rem; }
   .prompt-phone { width: 60px; height: 100px; border: 2px solid rgba(41,181,232,0.3); border-radius: 16px; margin: 0 auto 1.25rem; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--black-3); position: relative; box-shadow: 0 0 20px rgba(41,181,232,0.08); }
   .prompt-phone::before { content: ''; width: 18px; height: 3px; background: rgba(41,181,232,0.3); border-radius: 99px; position: absolute; top: 8px; }
@@ -178,12 +91,9 @@
   .prompt-phone-icon { font-size: 1.5rem; }
   .prompt-state strong { color: rgba(255,255,255,0.6); font-size: 0.95rem; display: block; margin-bottom: 0.4rem; }
   .prompt-state p { color: rgba(255,255,255,0.25); font-size: 0.825rem; }
-
   .empty-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
   .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
   .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
-
-  /* CONTACT */
   .contact { position: relative; z-index: 1; background: var(--black-3); border-top: 1px solid rgba(41,181,232,0.15); padding: 2.5rem 2rem; }
   .contact-inner { max-width: 980px; margin: 0 auto; }
   .contact-top { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
@@ -196,17 +106,14 @@
   .contact-icon { width: 36px; height: 36px; background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.2); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--cyan); }
   .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.3); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
   .contact-value { font-size: 0.85rem; color: rgba(255,255,255,0.8); font-weight: 500; }
-
-  /* FOOTER */
   footer { position: relative; z-index: 1; background: var(--black); border-top: 1px solid rgba(255,255,255,0.04); text-align: center; padding: 1.5rem; font-size: 0.72rem; color: rgba(255,255,255,0.12); }
   footer span { color: var(--cyan); opacity: 0.5; }
-
   @media (max-width: 580px) {
     .hero h1 { font-size: 1.9rem; }
     header { padding: 0 1.25rem; }
     .header-logo img { height: 38px; }
     .header-tagline { display: none; }
-    .feature-item { padding: 0.75rem 0.75rem; font-size: 0.68rem; }
+    .feature-item { padding: 0.75rem; font-size: 0.68rem; }
     .contact { padding: 2rem 1.25rem; }
     .phone-sm { display: none; }
   }
@@ -219,7 +126,7 @@
     <div class="header-logo"><img src="logo.png" alt="The Phone Plug"></div>
     <div class="header-tagline">
       <div class="line1">The Phone Plug</div>
-      <div class="line2">Jamaica's accessory destination</div>
+      <div class="line2">Jamaica's go to for phone accessories and parts</div>
     </div>
   </div>
   <div class="header-right"><div class="live-dot"></div>Live stock</div>
@@ -244,11 +151,9 @@
       <div class="phone-home"></div>
     </div>
   </div>
-
   <div class="hero-badge">Live inventory</div>
   <h1>The Phone <span>Plug</span></h1>
-  <p class="hero-sub">Jamaica's go-to for phone accessories — check what's in stock before you visit</p>
-
+  <p class="hero-sub">Jamaica's go to for phone accessories and parts — check what's in stock before you visit</p>
   <div class="feature-strip">
     <div class="feature-item">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -259,8 +164,8 @@
       <div><strong>Easy Search</strong>Search by name or SKU</div>
     </div>
     <div class="feature-item">
-      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5"/><path d="M22 16.92v3a2 2 0 0 1-2.18 2"/></svg>
-      <div><strong>Contact Us</strong>876-490-5515</div>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      <div><strong>Call Us</strong>876-490-5515</div>
     </div>
   </div>
 </div>
@@ -291,7 +196,7 @@
       <div class="contact-logo"><img src="logo.png" alt="The Phone Plug"></div>
       <div class="contact-top-text">
         <div class="t1">The Phone Plug</div>
-        <div class="t2">Jamaica's accessory destination — Samsung, Apple &amp; more</div>
+        <div class="t2">Jamaica's go to for phone accessories and parts</div>
       </div>
     </div>
     <h3>Contact &amp; Support</h3>
@@ -316,7 +221,7 @@
   </div>
 </div>
 
-<footer>&copy; 2026 <span>The Phone Plug</span> &nbsp;&middot;&nbsp; Jamaica's accessory destination &nbsp;&middot;&nbsp; Stock updates automatically</footer>
+<footer>&copy; 2026 <span>The Phone Plug</span> &nbsp;&middot;&nbsp; Jamaica's go to for phone accessories and parts &nbsp;&middot;&nbsp; Stock updates automatically</footer>
 
 <script>
   const ALLOWED_CATEGORIES = [
@@ -334,8 +239,28 @@
     return (item.variants || []).reduce((sum, v) => sum + (inventoryMap[v.variant_id] !== undefined ? inventoryMap[v.variant_id] : 999), 0);
   }
 
+  // Extract image from all possible Loyverse formats
+  function getImage(item) {
+    if (item.images && Array.isArray(item.images) && item.images.length > 0) {
+      const img = item.images[0];
+      if (typeof img === 'string') return img;
+      if (img.image_url) return img.image_url;
+      if (img.url) return img.url;
+      if (img.src) return img.src;
+    }
+    if (item.image_url) return item.image_url;
+    if (item.image) return item.image;
+    return null;
+  }
+
+  function cardImageHtml(item) {
+    if (item.image) {
+      return '<div class="card-img-wrap"><img class="card-img" src="' + esc(item.image) + '" alt="' + esc(item.name) + '" onerror="this.parentNode.innerHTML=\'<div class=card-img-placeholder>📱</div>\'"></div>';
+    }
+    return '<div class="card-img-wrap"><div class="card-img-placeholder">📱</div></div>';
+  }
+
   function onCatChange() {
-    // Reset search when category changes — don't show results
     document.getElementById('search').value = '';
     showPrompt();
   }
@@ -349,8 +274,6 @@
     const cat = document.getElementById('cat-filter').value;
     const grid = document.getElementById('grid');
     if (!loaded) return;
-
-    // Only show results when typing — category alone does NOT show results
     if (!q) { showPrompt(); return; }
 
     let filtered = allItems.filter(item => {
@@ -363,7 +286,7 @@
 
     grid.innerHTML = filtered.map(item => {
       const hasVariants = item.variants && item.variants.length > 1;
-      const imgHtml = item.image ? '<img class="card-img" src="' + esc(item.image) + '" alt="' + esc(item.name) + '" onerror="this.style.display=\'none\'">' : '';
+      const imgHtml = cardImageHtml(item);
 
       if (hasVariants) {
         const varRows = item.variants.map(v => {
@@ -413,8 +336,14 @@
       allItems = (itemsData.items || [])
         .map(item => {
           const catName = catMap[item.category_id] || item.category_name || '';
-          const image = (item.images && item.images[0] && item.images[0].image_url) ? item.images[0].image_url : null;
-          return { id: item.id, name: item.item_name, category: catName, sku: (item.variants&&item.variants[0]&&item.variants[0].sku)||'', image: image, variants: item.variants||[] };
+          return {
+            id: item.id,
+            name: item.item_name,
+            category: catName,
+            sku: (item.variants && item.variants[0] && item.variants[0].sku) || '',
+            image: getImage(item),
+            variants: item.variants || []
+          };
         })
         .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === item.category.toLowerCase()));
       loaded = true;
