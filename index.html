@@ -44,6 +44,7 @@
   .stat-n.green { color: #2ecc71; }
   .stat-n.red { color: #e74c3c; }
   .stat-l { font-size: 0.72rem; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  .search-instruction { font-size: 0.95rem; font-weight: 700; color: #ffffff; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
   .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .search-wrap { flex: 1; min-width: 200px; position: relative; }
   .search-wrap input { width: 100%; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 11px 14px 11px 40px; font-family: 'Inter',sans-serif; font-size: 0.875rem; color: var(--white); outline: none; transition: all 0.2s; }
@@ -55,9 +56,12 @@
   select option { background: var(--black-2); }
   .refresh-btn { display: flex; align-items: center; gap: 6px; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 11px 16px; font-family: 'Inter',sans-serif; font-size: 0.875rem; cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s; white-space: nowrap; }
   .refresh-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(41,181,232,0.05); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 12px; }
-  .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); padding: 1.25rem; transition: all 0.2s; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 12px; }
+  .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); overflow: hidden; transition: all 0.2s; }
   .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
+  .card-img { width: 100%; height: 180px; object-fit: cover; display: block; background: var(--black-2); }
+  .card-img-placeholder { width: 100%; height: 120px; background: var(--black-2); display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.1); font-size: 2rem; }
+  .card-body { padding: 1rem; }
   .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .card-name { font-size: 0.9rem; font-weight: 500; line-height: 1.4; flex: 1; color: rgba(255,255,255,0.9); }
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 99px; font-size: 0.68rem; font-weight: 600; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em; }
@@ -120,10 +124,13 @@
     <div class="stat green-top"><div class="stat-n green" id="s-in">—</div><div class="stat-l">In stock</div></div>
     <div class="stat red-top"><div class="stat-n red" id="s-out">—</div><div class="stat-l">Out of stock</div></div>
   </div>
+
+  <p class="search-instruction">ENTER ITEM NAME OR NUMBER TO CHECK IF IN STOCK</p>
+
   <div class="search-row">
     <div class="search-wrap">
       <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input type="text" id="search" placeholder="Search by name or SKU…" oninput="render()">
+      <input type="text" id="search" placeholder="e.g. 10173 or Samsung case…" oninput="render()">
     </div>
     <select id="cat-filter" onchange="render()"><option value="">All categories</option></select>
     <button class="refresh-btn" onclick="fetchAll()">
@@ -131,6 +138,7 @@
       Refresh
     </button>
   </div>
+
   <div class="grid" id="grid">
     <div class="loading-state"><div class="spinner"></div><p>Loading inventory…</p></div>
   </div>
@@ -176,7 +184,7 @@
   function statusLabel(qty) { return qty > 0 ? 'In stock' : 'Out of stock'; }
 
   function getItemQty(item) {
-    return (item.variants || []).reduce((sum, v) => sum + (inventoryMap[v.variant_id] || 0), 0);
+    return (item.variants || []).reduce((sum, v) => sum + (inventoryMap[v.variant_id] !== undefined ? inventoryMap[v.variant_id] : 999), 0);
   }
 
   function render() {
@@ -185,7 +193,7 @@
     const grid = document.getElementById('grid');
     if (!loaded) return;
     if (!q && !cat) {
-      grid.innerHTML = '<div class="prompt-state"><span class="prompt-icon">&#128269;</span><strong>Type to search</strong><p>Search by item name, SKU or select a category above</p></div>';
+      grid.innerHTML = '<div class="prompt-state"><span class="prompt-icon">&#128269;</span><strong>Type to search</strong><p>Enter an item name or style number above</p></div>';
       return;
     }
     let filtered = allItems.filter(item => {
@@ -194,21 +202,27 @@
       return matchQ && matchC;
     });
     if (!filtered.length) { grid.innerHTML = '<div class="empty-state">No items found matching your search.</div>'; return; }
+
     grid.innerHTML = filtered.map(item => {
       const hasVariants = item.variants && item.variants.length > 1;
+      const imgHtml = item.image
+        ? '<img class="card-img" src="' + esc(item.image) + '" alt="' + esc(item.name) + '" onerror="this.style.display=\'none\'">'
+        : '';
+
       if (hasVariants) {
         const varRows = item.variants.map(v => {
-          const qty = inventoryMap[v.variant_id] || 0;
+          const qty = inventoryMap[v.variant_id] !== undefined ? inventoryMap[v.variant_id] : 999;
           return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge ' + getStatus(qty) + '">' + statusLabel(qty) + '</span></div>';
         }).join('');
         const totalQty = getItemQty(item);
         const st = getStatus(totalQty);
-        return '<div class="card"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(totalQty) + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div><div class="variants">' + varRows + '</div></div>';
+        return '<div class="card">' + imgHtml + '<div class="card-body"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(totalQty) + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div><div class="variants">' + varRows + '</div></div></div>';
       }
+
       const varId = item.variants && item.variants[0] && item.variants[0].variant_id;
-      const qty = inventoryMap[varId] || 0;
+      const qty = inventoryMap[varId] !== undefined ? inventoryMap[varId] : 999;
       const st = getStatus(qty);
-      return '<div class="card"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(qty) + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div></div>';
+      return '<div class="card">' + imgHtml + '<div class="card-body"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(qty) + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div></div></div>';
     }).join('');
   }
 
@@ -245,11 +259,21 @@
       const invRes = await fetch('/api/loyverse?path=inventory' + (storeId ? '&store_id=' + storeId : ''));
       const invData = invRes.ok ? await invRes.json() : { inventory_levels: [] };
       inventoryMap = {};
-      (invData.inventory_levels || []).forEach(l => { inventoryMap[l.variant_id] = l.in_stock || 0; });
+      (invData.inventory_levels || []).forEach(l => {
+        inventoryMap[l.variant_id] = (l.in_stock === null || l.in_stock === undefined) ? 999 : l.in_stock;
+      });
       allItems = (itemsData.items || [])
         .map(item => {
           const catName = catMap[item.category_id] || item.category_name || '';
-          return { id: item.id, name: item.item_name, category: catName, sku: (item.variants&&item.variants[0]&&item.variants[0].sku)||'', variants: item.variants||[] };
+          const image = (item.images && item.images[0] && item.images[0].image_url) ? item.images[0].image_url : null;
+          return {
+            id: item.id,
+            name: item.item_name,
+            category: catName,
+            sku: (item.variants && item.variants[0] && item.variants[0].sku) || '',
+            image: image,
+            variants: item.variants || []
+          };
         })
         .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === item.category.toLowerCase()));
       loaded = true;
