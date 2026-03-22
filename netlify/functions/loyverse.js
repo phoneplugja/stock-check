@@ -29,6 +29,8 @@ exports.handler = async (event) => {
     url = `https://api.loyverse.com/v1.0/inventory${storeId ? "?store_id=" + storeId : ""}`;
   } else if (path === "stores") {
     url = "https://api.loyverse.com/v1.0/stores";
+  } else if (path === "categories") {
+    url = "https://api.loyverse.com/v1.0/categories?limit=250";
   } else {
     url = "https://api.loyverse.com/v1.0/items?limit=250";
   }
