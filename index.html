@@ -47,7 +47,7 @@
   .stat-n.green { color: #2ecc71; }
   .stat-n.red { color: #e74c3c; }
   .stat-l { font-size: 0.72rem; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
-  .search-row { display: flex; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap; }
+  .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .search-wrap { flex: 1; min-width: 200px; position: relative; }
   .search-wrap input { width: 100%; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 11px 14px 11px 40px; font-family: 'Inter',sans-serif; font-size: 0.875rem; color: var(--white); outline: none; transition: all 0.2s; }
   .search-wrap input:focus { border-color: var(--cyan); background: rgba(41,181,232,0.05); box-shadow: 0 0 0 3px rgba(41,181,232,0.1); }
@@ -58,10 +58,6 @@
   select option { background: var(--black-2); }
   .refresh-btn { display: flex; align-items: center; gap: 6px; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 11px 16px; font-family: 'Inter',sans-serif; font-size: 0.875rem; cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s; white-space: nowrap; }
   .refresh-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(41,181,232,0.05); }
-  .pills { display: flex; gap: 6px; margin-bottom: 1.5rem; flex-wrap: wrap; }
-  .pill { padding: 6px 16px; border-radius: 99px; border: 1px solid rgba(255,255,255,0.1); background: var(--black-3); font-size: 0.8rem; cursor: pointer; color: rgba(255,255,255,0.45); font-family: 'Inter',sans-serif; transition: all 0.2s; font-weight: 500; }
-  .pill:hover { border-color: var(--cyan); color: var(--cyan); }
-  .pill.active { background: var(--cyan); color: var(--black); border-color: var(--cyan); font-weight: 600; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 12px; }
   .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); padding: 1.25rem; transition: all 0.2s; }
   .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
@@ -80,8 +76,10 @@
   .loading-state { grid-column: 1/-1; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .prompt-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.9rem; }
+  .prompt-icon { font-size: 2.5rem; margin-bottom: 1rem; display: block; }
+  .prompt-state p { color: rgba(255,255,255,0.3); font-size: 0.875rem; margin-top: 0.4rem; }
   .empty-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
-  .empty-icon { font-size: 2rem; margin-bottom: 0.75rem; display: block; }
   .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
   .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
   .contact { position: relative; z-index: 1; background: var(--black-3); border-top: 1px solid rgba(41,181,232,0.15); padding: 2.5rem 2rem; }
@@ -136,12 +134,6 @@
       Refresh
     </button>
   </div>
-  <div class="pills">
-    <button class="pill active" onclick="setStatus(this,'')">All</button>
-    <button class="pill" onclick="setStatus(this,'in')">In stock</button>
-    <button class="pill" onclick="setStatus(this,'low')">Low stock</button>
-    <button class="pill" onclick="setStatus(this,'out')">Out of stock</button>
-  </div>
   <div class="grid" id="grid">
     <div class="loading-state"><div class="spinner"></div><p>Loading inventory…</p></div>
   </div>
@@ -181,35 +173,31 @@
     "Accessories - Samsung Cases"
   ];
 
-  let allItems = [], inventoryMap = {}, statusFilter = '';
+  let allItems = [], inventoryMap = {}, loaded = false;
 
   function getStatus(qty) { return qty <= 0 ? 'out' : qty <= 5 ? 'low' : 'in'; }
   function statusLabel(qty) { return qty <= 0 ? 'Out of stock' : qty <= 5 ? 'Low \u00b7 ' + qty + ' left' : 'In stock \u00b7 ' + qty; }
-
-  function setStatus(el, val) {
-    statusFilter = val;
-    document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
-    el.classList.add('active');
-    render();
-  }
 
   function render() {
     const q = document.getElementById('search').value.toLowerCase().trim();
     const cat = document.getElementById('cat-filter').value;
     const grid = document.getElementById('grid');
+
+    if (!loaded) return;
+
+    if (!q && !cat) {
+      grid.innerHTML = '<div class="prompt-state"><span class="prompt-icon">&#128269;</span><strong>Type to search</strong><p>Search by item name, SKU or select a category above</p></div>';
+      return;
+    }
+
     let filtered = allItems.filter(item => {
       const matchQ = !q || item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q);
       const matchC = !cat || item.category === cat;
       return matchQ && matchC;
     });
-    if (statusFilter) {
-      filtered = filtered.filter(item => {
-        if (item.variants && item.variants.length > 1)
-          return item.variants.some(v => getStatus(inventoryMap[v.variant_id] || 0) === statusFilter);
-        return getStatus(inventoryMap[item.variants && item.variants[0] && item.variants[0].variant_id] || 0) === statusFilter;
-      });
-    }
-    if (!filtered.length) { grid.innerHTML = '<div class="empty-state"><span class="empty-icon">&#128269;</span><p>No items match your search.</p></div>'; return; }
+
+    if (!filtered.length) { grid.innerHTML = '<div class="empty-state">No items found matching your search.</div>'; return; }
+
     grid.innerHTML = filtered.map(item => {
       const hasVariants = item.variants && item.variants.length > 1;
       if (hasVariants) {
@@ -241,8 +229,7 @@
   function populateCats() {
     const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort();
     const sel = document.getElementById('cat-filter');
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">All categories</option>' + cats.map(c => '<option value="' + esc(c) + '"' + (c===cur?' selected':'') + '>' + esc(c) + '</option>').join('');
+    sel.innerHTML = '<option value="">All categories</option>' + cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
   }
 
   async function fetchAll() {
@@ -271,13 +258,14 @@
           return { id: item.id, name: item.item_name, category: catName, sku: (item.variants&&item.variants[0]&&item.variants[0].sku)||'', variants: item.variants||[] };
         })
         .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === item.category.toLowerCase()));
+      loaded = true;
       populateCats();
       updateStats();
       render();
       document.getElementById('last-sync').textContent = 'Last synced: ' + new Date().toLocaleTimeString();
     } catch(err) {
       document.getElementById('error-area').innerHTML = '<div class="error-box">&#9888; ' + err.message + '</div>';
-      document.getElementById('grid').innerHTML = '<div class="empty-state"><span class="empty-icon">&#9888;</span><p>Could not connect. See error above.</p></div>';
+      document.getElementById('grid').innerHTML = '<div class="empty-state">Could not connect. See error above.</div>';
     }
   }
 
