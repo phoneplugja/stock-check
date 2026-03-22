@@ -13,9 +13,6 @@
     --cyan: #29b5e8;
     --cyan-dark: #1a8fc0;
     --white: #ffffff;
-    --gray-3: #8a9099;
-    --green: #0d7a3c;
-    --amber: #7a4f00;
     --red: #c5221f;
     --radius: 10px;
     --radius-lg: 14px;
@@ -66,7 +63,6 @@
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 99px; font-size: 0.68rem; font-weight: 600; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em; }
   .badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; display:inline-block; }
   .badge.in { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.2); }
-  .badge.low { background: rgba(243,156,18,0.12); color: #f39c12; border: 1px solid rgba(243,156,18,0.2); }
   .badge.out { background: rgba(231,76,60,0.12); color: #e74c3c; border: 1px solid rgba(231,76,60,0.2); }
   .card-meta { display: flex; gap: 6px; flex-wrap: wrap; }
   .meta-tag { font-size: 0.68rem; color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); }
@@ -76,9 +72,10 @@
   .loading-state { grid-column: 1/-1; display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .prompt-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.9rem; }
+  .prompt-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; }
   .prompt-icon { font-size: 2.5rem; margin-bottom: 1rem; display: block; }
-  .prompt-state p { color: rgba(255,255,255,0.3); font-size: 0.875rem; margin-top: 0.4rem; }
+  .prompt-state strong { color: rgba(255,255,255,0.5); font-size: 0.9rem; }
+  .prompt-state p { color: rgba(255,255,255,0.25); font-size: 0.825rem; margin-top: 0.4rem; }
   .empty-state { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
   .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
   .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
@@ -121,7 +118,7 @@
   <div class="stats">
     <div class="stat cyan-top"><div class="stat-n cyan" id="s-total">—</div><div class="stat-l">Total items</div></div>
     <div class="stat green-top"><div class="stat-n green" id="s-in">—</div><div class="stat-l">In stock</div></div>
-    <div class="stat red-top"><div class="stat-n red" id="s-out">—</div><div class="stat-l">Low / Out</div></div>
+    <div class="stat red-top"><div class="stat-n red" id="s-out">—</div><div class="stat-l">Out of stock</div></div>
   </div>
   <div class="search-row">
     <div class="search-wrap">
@@ -175,8 +172,14 @@
 
   let allItems = [], inventoryMap = {}, loaded = false;
 
-  function getStatus(qty) { return qty <= 0 ? 'out' : qty <= 5 ? 'low' : 'in'; }
-  function statusLabel(qty) { return qty <= 0 ? 'Out of stock' : qty <= 5 ? 'Low \u00b7 ' + qty + ' left' : 'In stock \u00b7 ' + qty; }
+  // Simple: any qty > 0 = in stock, 0 = out of stock
+  function getStatus(qty) { return qty > 0 ? 'in' : 'out'; }
+  function statusLabel(qty) { return qty > 0 ? 'In stock' : 'Out of stock'; }
+
+  // For items with variants, total all variant quantities
+  function getItemQty(item) {
+    return (item.variants || []).reduce((sum, v) => sum + (inventoryMap[v.variant_id] || 0), 0);
+  }
 
   function render() {
     const q = document.getElementById('search').value.toLowerCase().trim();
@@ -200,17 +203,18 @@
 
     grid.innerHTML = filtered.map(item => {
       const hasVariants = item.variants && item.variants.length > 1;
+
       if (hasVariants) {
         const varRows = item.variants.map(v => {
           const qty = inventoryMap[v.variant_id] || 0;
-          return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge ' + getStatus(qty) + '">' + statusLabel(qty) + '</span></div>';
+          const st = getStatus(qty);
+          return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge ' + st + '">' + statusLabel(qty) + '</span></div>';
         }).join('');
-        const anyIn = item.variants.some(v => (inventoryMap[v.variant_id] || 0) > 5);
-        const anyLow = item.variants.some(v => { const q = inventoryMap[v.variant_id] || 0; return q > 0 && q <= 5; });
-        const st = anyIn ? 'in' : anyLow ? 'low' : 'out';
-        const label = anyIn ? 'In stock' : anyLow ? 'Low stock' : 'Out of stock';
-        return '<div class="card"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + label + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div><div class="variants">' + varRows + '</div></div>';
+        const totalQty = getItemQty(item);
+        const st = getStatus(totalQty);
+        return '<div class="card"><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(totalQty) + '</span></div><div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div><div class="variants">' + varRows + '</div></div>';
       }
+
       const varId = item.variants && item.variants[0] && item.variants[0].variant_id;
       const qty = inventoryMap[varId] || 0;
       const st = getStatus(qty);
@@ -220,7 +224,7 @@
 
   function updateStats() {
     const total = allItems.length;
-    const inStock = allItems.filter(item => (item.variants||[]).some(v => (inventoryMap[v.variant_id]||0) > 5)).length;
+    const inStock = allItems.filter(item => getItemQty(item) > 0).length;
     document.getElementById('s-total').textContent = total;
     document.getElementById('s-in').textContent = inStock;
     document.getElementById('s-out').textContent = total - inStock;
