@@ -12,18 +12,11 @@
     --black-3: #161c24;
     --cyan: #29b5e8;
     --cyan-dark: #1a8fc0;
-    --cyan-glow: rgba(41,181,232,0.15);
     --white: #ffffff;
-    --gray-1: #f0f2f5;
-    --gray-2: #e2e6ea;
     --gray-3: #8a9099;
-    --gray-4: #555c66;
     --green: #0d7a3c;
-    --green-light: #e4f4ec;
     --amber: #7a4f00;
-    --amber-light: #fef3e2;
     --red: #c5221f;
-    --red-light: #fce8e6;
     --radius: 10px;
     --radius-lg: 14px;
   }
@@ -41,7 +34,7 @@
   .hero-tag::before { content: ''; width: 5px; height: 5px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 6px var(--cyan); animation: blink 2s infinite; }
   .hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 700; color: var(--white); letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 0.75rem; }
   .hero h1 span { color: var(--cyan); text-shadow: 0 0 30px rgba(41,181,232,0.4); }
-  .hero p { font-size: 0.95rem; color: rgba(255,255,255,0.4); max-width: 420px; margin: 0 auto; }
+  .hero p { font-size: 0.95rem; color: #ffffff; max-width: 420px; margin: 0 auto; }
   main { position: relative; z-index: 1; max-width: 980px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
   .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 1.75rem; }
   .stat { background: var(--black-3); border-radius: var(--radius-lg); padding: 1.25rem; border: 1px solid rgba(255,255,255,0.07); position: relative; overflow: hidden; }
@@ -115,19 +108,14 @@
 <body>
 
 <header>
-  <div class="logo">
-    <img src="logo.png" alt="The Phone Plug">
-  </div>
-  <div class="header-right">
-    <div class="live-dot"></div>
-    Live stock
-  </div>
+  <div class="logo"><img src="logo.png" alt="The Phone Plug"></div>
+  <div class="header-right"><div class="live-dot"></div>Live stock</div>
 </header>
 
 <div class="hero">
   <div class="hero-tag">Live inventory</div>
   <h1>Check What's <span>in Stock</span></h1>
-  <p>Search our accessories — updated live from our store</p>
+  <p style="color:#ffffff;">Search our accessories — updated live from our store</p>
 </div>
 
 <main>
@@ -165,40 +153,20 @@
     <h3>Contact &amp; Support</h3>
     <div class="contact-grid">
       <div class="contact-item">
-        <div class="contact-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-        </div>
-        <div>
-          <div class="contact-label">Phone</div>
-          <div class="contact-value">876-490-5515</div>
-        </div>
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+        <div><div class="contact-label">Phone</div><div class="contact-value">876-490-5515</div></div>
       </div>
       <div class="contact-item">
-        <div class="contact-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-        </div>
-        <div>
-          <div class="contact-label">WhatsApp</div>
-          <div class="contact-value">876-672-2442</div>
-        </div>
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+        <div><div class="contact-label">WhatsApp</div><div class="contact-value">876-672-2442</div></div>
       </div>
       <div class="contact-item">
-        <div class="contact-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
-        </div>
-        <div>
-          <div class="contact-label">Instagram</div>
-          <div class="contact-value">@phoneplug_ja</div>
-        </div>
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></div>
+        <div><div class="contact-label">Instagram</div><div class="contact-value">@phoneplug_ja</div></div>
       </div>
       <div class="contact-item">
-        <div class="contact-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        </div>
-        <div>
-          <div class="contact-label">Email</div>
-          <div class="contact-value">support@phoneplugja</div>
-        </div>
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+        <div><div class="contact-label">Email</div><div class="contact-value">support@phoneplugja</div></div>
       </div>
     </div>
   </div>
@@ -281,21 +249,28 @@
     document.getElementById('grid').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading inventory&hellip;</p></div>';
     document.getElementById('error-area').innerHTML = '';
     try {
-      const [itemsRes, storesRes] = await Promise.all([
+      const [itemsRes, storesRes, catsRes] = await Promise.all([
         fetch('/.netlify/functions/loyverse?path=items'),
-        fetch('/.netlify/functions/loyverse?path=stores')
+        fetch('/.netlify/functions/loyverse?path=stores'),
+        fetch('/.netlify/functions/loyverse?path=categories')
       ]);
       if (!itemsRes.ok) throw new Error('API error ' + itemsRes.status + '. Check LOYVERSE_TOKEN in Netlify.');
       const itemsData = await itemsRes.json();
       const storesData = storesRes.ok ? await storesRes.json() : null;
+      const catsData = catsRes.ok ? await catsRes.json() : { categories: [] };
+      const catMap = {};
+      (catsData.categories || []).forEach(c => { catMap[c.id] = c.name; });
       const storeId = storesData && storesData.stores && storesData.stores[0] ? storesData.stores[0].id : '';
       const invRes = await fetch('/.netlify/functions/loyverse?path=inventory' + (storeId ? '&store_id=' + storeId : ''));
       const invData = invRes.ok ? await invRes.json() : { inventory_levels: [] };
       inventoryMap = {};
       (invData.inventory_levels || []).forEach(l => { inventoryMap[l.variant_id] = l.in_stock || 0; });
       allItems = (itemsData.items || [])
-        .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === (item.category_name||'').toLowerCase()))
-        .map(item => ({ id: item.id, name: item.item_name, category: item.category_name||'', sku: (item.variants&&item.variants[0]&&item.variants[0].sku)||'', variants: item.variants||[] }));
+        .map(item => {
+          const catName = catMap[item.category_id] || item.category_name || '';
+          return { id: item.id, name: item.item_name, category: catName, sku: (item.variants&&item.variants[0]&&item.variants[0].sku)||'', variants: item.variants||[] };
+        })
+        .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === item.category.toLowerCase()));
       populateCats();
       updateStats();
       render();
