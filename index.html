@@ -66,12 +66,9 @@
   .grid { display: flex; flex-direction: column; gap: 12px; }
   .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); overflow: hidden; transition: all 0.2s; display: flex; flex-direction: row; min-height: 160px; }
   .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
-
-  /* IMAGE — full image always visible, white bg */
   .card-img-wrap { width: 220px; min-width: 220px; background: #ffffff; overflow: hidden; display: flex; align-items: center; justify-content: center; order: 2; border-left: 1px solid rgba(255,255,255,0.05); padding: 8px; }
   .card-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 220px; }
   .card-img-placeholder { font-size: 3rem; opacity: 0.1; }
-
   .card-body { padding: 1.25rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; order: 1; }
   .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .card-name { font-size: 1rem; font-weight: 600; line-height: 1.4; flex: 1; color: rgba(255,255,255,0.95); font-family: 'Space Grotesk', sans-serif; }
@@ -84,8 +81,8 @@
   .variants { padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
   .variant-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
   .variant-name { color: rgba(255,255,255,0.6); }
-  .card-cta { font-size: 0.72rem; color: var(--cyan); opacity: 0.7; margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(41,181,232,0.08); display: flex; align-items: center; gap: 6px; }
-  .card-cta::before { content: '📞'; font-size: 0.7rem; }
+  .card-cta { font-size: 0.78rem; font-weight: 600; color: #ffffff; margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(41,181,232,0.15); display: flex; align-items: center; gap: 6px; }
+  .card-cta::before { content: '📞'; font-size: 0.75rem; }
   .loading-state { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -103,14 +100,14 @@
   .contact-inner { max-width: 900px; margin: 0 auto; }
   .contact-top { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .contact-logo img { height: 36px; filter: drop-shadow(0 0 8px rgba(41,181,232,0.3)); }
-  .contact-top-text .t1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.9rem; font-weight: 600; color: rgba(255,255,255,0.8); }
+  .contact-top-text .t1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.9rem; font-weight: 600; color: #ffffff; }
   .contact-top-text .t2 { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin-top: 2px; }
   .contact h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.72rem; margin-bottom: 1rem; }
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
   .contact-item { display: flex; align-items: center; gap: 12px; }
   .contact-icon { width: 36px; height: 36px; background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.2); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--cyan); }
   .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.3); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .contact-value { font-size: 0.85rem; color: rgba(255,255,255,0.8); font-weight: 500; }
+  .contact-value { font-size: 0.85rem; color: #ffffff; font-weight: 600; }
   footer { position: relative; z-index: 1; background: var(--black); border-top: 1px solid rgba(255,255,255,0.04); text-align: center; padding: 1.5rem; font-size: 0.72rem; color: rgba(255,255,255,0.12); }
   footer span { color: var(--cyan); opacity: 0.5; }
   @media (max-width: 600px) {
@@ -173,7 +170,7 @@
     </div>
     <div class="feature-item">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-      <div><strong>Call Us</strong>876-490-5515</div>
+      <div><strong>Call Us</strong>(876) 672-2442</div>
     </div>
   </div>
 </div>
@@ -211,11 +208,11 @@
     <div class="contact-grid">
       <div class="contact-item">
         <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
-        <div><div class="contact-label">Phone</div><div class="contact-value">876-490-5515</div></div>
+        <div><div class="contact-label">Phone</div><div class="contact-value">(876) 672-2442</div></div>
       </div>
       <div class="contact-item">
         <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
-        <div><div class="contact-label">WhatsApp</div><div class="contact-value">876-672-2442</div></div>
+        <div><div class="contact-label">WhatsApp</div><div class="contact-value">(876) 490-5515</div></div>
       </div>
       <div class="contact-item">
         <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></div>
@@ -268,14 +265,13 @@
     return '<div class="card-img-wrap"><div class="card-img-placeholder">📱</div></div>';
   }
 
-  const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call us on 876-490-5515 to confirm availability</div>';
+  const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call or WhatsApp us at (876) 490-5515 to be sure</div>';
 
   function buildCard(item) {
     const imgHtml = cardImageHtml(item);
     const hasVariants = item.variants && item.variants.length > 1;
     const totalQty = getItemQty(item);
 
-    // All out of stock — simple response
     if (totalQty <= 0) {
       return '<div class="card">' +
         '<div class="card-body">' +
@@ -285,13 +281,11 @@
         '</div>' + imgHtml + '</div>';
     }
 
-    // Has variants — only show IN STOCK ones
     if (hasVariants) {
       const inStockVariants = item.variants.filter(v => getQty(v.variant_id) > 0);
       const varRows = inStockVariants.map(v => {
         return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge in">In stock</span></div>';
       }).join('');
-
       return '<div class="card">' +
         '<div class="card-body">' +
           '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
@@ -301,9 +295,6 @@
         '</div>' + imgHtml + '</div>';
     }
 
-    // Single item in stock
-    const varId = item.variants && item.variants[0] && item.variants[0].variant_id;
-    const qty = getQty(varId);
     return '<div class="card">' +
       '<div class="card-body">' +
         '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
@@ -327,18 +318,15 @@
     const grid = document.getElementById('grid');
     if (!loaded) return;
     if (!q) { showPrompt(); return; }
-
     let filtered = allItems.filter(item => {
       const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q);
       const matchC = !cat || item.category === cat;
       return matchQ && matchC;
     });
-
     if (!filtered.length) {
-      grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call us on 876-490-5515</span> to confirm availability.</div>';
+      grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
       return;
     }
-
     grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
 
