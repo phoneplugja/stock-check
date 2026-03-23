@@ -29,7 +29,6 @@
   .header-right { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: rgba(255,255,255,0.4); }
   .live-dot { width: 7px; height: 7px; background: var(--cyan); border-radius: 50%; animation: blink 2s infinite; box-shadow: 0 0 8px var(--cyan); }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
   .hero { position: relative; z-index: 1; padding: 3.5rem 2rem 0; text-align: center; overflow: hidden; }
   .hero-phones { display: flex; align-items: flex-end; justify-content: center; gap: 16px; margin-bottom: 2.5rem; position: relative; }
   .phone-frame { position: relative; border-radius: 28px; border: 2px solid rgba(41,181,232,0.4); background: var(--black-3); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 30px rgba(41,181,232,0.1), inset 0 0 20px rgba(41,181,232,0.03); transition: transform 0.3s, box-shadow 0.3s; }
@@ -51,7 +50,6 @@
   .feature-item:last-child { border-right: none; }
   .feature-item svg { color: var(--cyan); flex-shrink: 0; }
   .feature-item strong { color: rgba(255,255,255,0.7); display: block; font-size: 0.78rem; }
-
   main { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
   .search-instruction { font-size: 1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
   .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
@@ -65,72 +63,29 @@
   select option { background: var(--black-2); }
   .refresh-btn { display: flex; align-items: center; gap: 6px; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 16px; font-family: 'Inter',sans-serif; font-size: 0.875rem; cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s; white-space: nowrap; }
   .refresh-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(41,181,232,0.05); }
-
-  /* HORIZONTAL CARD LAYOUT */
   .grid { display: flex; flex-direction: column; gap: 12px; }
-
-  .card {
-    background: var(--black-3);
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(255,255,255,0.07);
-    overflow: hidden;
-    transition: all 0.2s;
-    display: flex;
-    flex-direction: row;
-    min-height: 180px;
-  }
-
+  .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); overflow: hidden; transition: all 0.2s; display: flex; flex-direction: row; min-height: 160px; }
   .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
 
-  .card-img-wrap {
-    width: 200px;
-    min-width: 200px;
-    background: var(--black-2);
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    order: 2;
-    border-left: 1px solid rgba(255,255,255,0.05);
-  }
-
-  .card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* IMAGE — full image always visible, white bg */
+  .card-img-wrap { width: 220px; min-width: 220px; background: #ffffff; overflow: hidden; display: flex; align-items: center; justify-content: center; order: 2; border-left: 1px solid rgba(255,255,255,0.05); padding: 8px; }
+  .card-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 220px; }
   .card-img-placeholder { font-size: 3rem; opacity: 0.1; }
 
   .card-body { padding: 1.25rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; order: 1; }
   .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
   .card-name { font-size: 1rem; font-weight: 600; line-height: 1.4; flex: 1; color: rgba(255,255,255,0.95); font-family: 'Space Grotesk', sans-serif; }
-
   .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 99px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em; }
   .badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; display:inline-block; }
   .badge.in { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.2); }
   .badge.out { background: rgba(231,76,60,0.12); color: #e74c3c; border: 1px solid rgba(231,76,60,0.2); }
-
   .card-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .meta-tag { font-size: 0.68rem; color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); }
-
   .variants { padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
   .variant-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
-  .variant-name { color: rgba(255,255,255,0.4); }
-
-  .card-cta {
-    font-size: 0.72rem;
-    color: var(--cyan);
-    opacity: 0.7;
-    margin-top: auto;
-    padding-top: 10px;
-    border-top: 1px solid rgba(41,181,232,0.08);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .card-cta::before {
-    content: '📞';
-    font-size: 0.7rem;
-  }
-
-  /* STATES */
+  .variant-name { color: rgba(255,255,255,0.6); }
+  .card-cta { font-size: 0.72rem; color: var(--cyan); opacity: 0.7; margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(41,181,232,0.08); display: flex; align-items: center; gap: 6px; }
+  .card-cta::before { content: '📞'; font-size: 0.7rem; }
   .loading-state { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -144,8 +99,6 @@
   .empty-state { text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
   .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
   .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
-
-  /* CONTACT */
   .contact { position: relative; z-index: 1; background: var(--black-3); border-top: 1px solid rgba(41,181,232,0.15); padding: 2.5rem 2rem; }
   .contact-inner { max-width: 900px; margin: 0 auto; }
   .contact-top { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
@@ -158,13 +111,11 @@
   .contact-icon { width: 36px; height: 36px; background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.2); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--cyan); }
   .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.3); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
   .contact-value { font-size: 0.85rem; color: rgba(255,255,255,0.8); font-weight: 500; }
-
   footer { position: relative; z-index: 1; background: var(--black); border-top: 1px solid rgba(255,255,255,0.04); text-align: center; padding: 1.5rem; font-size: 0.72rem; color: rgba(255,255,255,0.12); }
   footer span { color: var(--cyan); opacity: 0.5; }
-
   @media (max-width: 600px) {
     .card { flex-direction: column; }
-    .card-img-wrap { width: 100%; min-width: unset; height: 200px; order: 1; border-left: none; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .card-img-wrap { width: 100%; min-width: unset; height: 220px; order: 1; border-left: none; border-bottom: 1px solid rgba(255,255,255,0.05); }
     .card-body { order: 2; }
     .hero h1 { font-size: 1.9rem; }
     header { padding: 0 1.25rem; }
@@ -289,11 +240,12 @@
 
   let allItems = [], inventoryMap = {}, loaded = false;
 
-  function getStatus(qty) { return qty > 0 ? 'in' : 'out'; }
-  function statusLabel(qty) { return qty > 0 ? 'In stock' : 'Out of stock'; }
+  function getQty(variantId) {
+    return inventoryMap[variantId] !== undefined ? inventoryMap[variantId] : 999;
+  }
 
   function getItemQty(item) {
-    return (item.variants || []).reduce((sum, v) => sum + (inventoryMap[v.variant_id] !== undefined ? inventoryMap[v.variant_id] : 999), 0);
+    return (item.variants || []).reduce((sum, v) => sum + getQty(v.variant_id), 0);
   }
 
   function getImage(item) {
@@ -314,6 +266,50 @@
       return '<div class="card-img-wrap"><img class="card-img" src="' + esc(item.image) + '" alt="' + esc(item.name) + '" onerror="this.parentNode.innerHTML=\'<div class=card-img-placeholder>📱</div>\'"></div>';
     }
     return '<div class="card-img-wrap"><div class="card-img-placeholder">📱</div></div>';
+  }
+
+  const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call us on 876-490-5515 to confirm availability</div>';
+
+  function buildCard(item) {
+    const imgHtml = cardImageHtml(item);
+    const hasVariants = item.variants && item.variants.length > 1;
+    const totalQty = getItemQty(item);
+
+    // All out of stock — simple response
+    if (totalQty <= 0) {
+      return '<div class="card">' +
+        '<div class="card-body">' +
+          '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge out">Out of stock</span></div>' +
+          '<div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div></div>' +
+          CTA +
+        '</div>' + imgHtml + '</div>';
+    }
+
+    // Has variants — only show IN STOCK ones
+    if (hasVariants) {
+      const inStockVariants = item.variants.filter(v => getQty(v.variant_id) > 0);
+      const varRows = inStockVariants.map(v => {
+        return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge in">In stock</span></div>';
+      }).join('');
+
+      return '<div class="card">' +
+        '<div class="card-body">' +
+          '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
+          '<div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div>' +
+          '<div class="variants">' + varRows + '</div></div>' +
+          CTA +
+        '</div>' + imgHtml + '</div>';
+    }
+
+    // Single item in stock
+    const varId = item.variants && item.variants[0] && item.variants[0].variant_id;
+    const qty = getQty(varId);
+    return '<div class="card">' +
+      '<div class="card-body">' +
+        '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
+        '<div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div></div>' +
+        CTA +
+      '</div>' + imgHtml + '</div>';
   }
 
   function onCatChange() {
@@ -343,42 +339,7 @@
       return;
     }
 
-    const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call us on 876-490-5515 to confirm availability</div>';
-
-    grid.innerHTML = filtered.map(item => {
-      const hasVariants = item.variants && item.variants.length > 1;
-      const imgHtml = cardImageHtml(item);
-
-      if (hasVariants) {
-        const varRows = item.variants.map(v => {
-          const qty = inventoryMap[v.variant_id] !== undefined ? inventoryMap[v.variant_id] : 999;
-          return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge ' + getStatus(qty) + '">' + statusLabel(qty) + '</span></div>';
-        }).join('');
-        const totalQty = getItemQty(item);
-        const st = getStatus(totalQty);
-        return '<div class="card">' +
-          '<div class="card-body">' +
-            '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(totalQty) + '</span></div>' +
-            '<div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div>' +
-            '<div class="variants">' + varRows + '</div></div>' +
-            CTA +
-          '</div>' +
-          imgHtml +
-        '</div>';
-      }
-
-      const varId = item.variants && item.variants[0] && item.variants[0].variant_id;
-      const qty = inventoryMap[varId] !== undefined ? inventoryMap[varId] : 999;
-      const st = getStatus(qty);
-      return '<div class="card">' +
-        '<div class="card-body">' +
-          '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge ' + st + '">' + statusLabel(qty) + '</span></div>' +
-          '<div class="card-meta">' + (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') + (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') + '</div></div>' +
-          CTA +
-        '</div>' +
-        imgHtml +
-      '</div>';
-    }).join('');
+    grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
 
   function populateCats() {
