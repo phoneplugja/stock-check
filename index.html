@@ -327,11 +327,15 @@
     const grid = document.getElementById('grid');
     if (!loaded) return;
     if (!q) { showPrompt(); return; }
-    let filtered = allItems.filter(item => {
-      const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q);
-      const matchC = !cat || item.category === cat;
-      return matchQ && matchC;
-    });
+   let filtered = allItems.filter(item => {
+  const variantMatch = (item.variants || []).some(v =>
+    (v.option1_value || '').toLowerCase().includes(q) ||
+    (v.option2_value || '').toLowerCase().includes(q)
+  );
+  const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
+  const matchC = !cat || item.category === cat;
+  return matchQ && matchC;
+});
     if (!filtered.length) {
       grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
       return;
