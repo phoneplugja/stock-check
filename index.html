@@ -323,13 +323,13 @@
 
   function render() {
     const q = document.getElementById('search').value.toLowerCase().trim();
+    const cleanQ = q.replace(/\./g, '');
     const cat = document.getElementById('cat-filter').value;
     const grid = document.getElementById('grid');
     if (!loaded) return;
     if (!q) { showPrompt(); return; }
 
     let filtered = allItems.filter(item => {
-      // Exact match on in-stock variant names (e.g. "S22")
       const variantMatch = (item.variants || []).some(v => {
         const v1 = (v.option1_value || '').toLowerCase().trim();
         const v2 = (v.option2_value || '').toLowerCase().trim();
@@ -337,33 +337,33 @@
         const inStock = getQty(v.variant_id) > 0;
         return nameMatch && inStock;
       });
-      // Partial match on item name and SKU
-      const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
+      const cleanName = item.name.toLowerCase().replace(/\./g, '');
+      const matchQ = cleanName.includes(cleanQ) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
       const matchC = !cat || item.category === cat;
       return matchQ && matchC;
     });
 
-   if (!filtered.length) {
-  grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
-  return;
-}
+    if (!filtered.length) {
+      grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
+      return;
+    }
 
-// Sort by relevance — exact matches first, then starts with, then contains
-filtered.sort((a, b) => {
-  function score(item) {
-    const name = item.name.toLowerCase();
-    const sku = (item.sku || '').toLowerCase();
-    if (name === q || sku === q) return 0;
-    if (name.startsWith(q) || sku.startsWith(q)) return 1;
-    const words = name.split(/\s+/);
-    if (words.some(w => w === q)) return 2;
-    if (words.some(w => w.startsWith(q))) return 3;
-    return 4;
-  }
-  return score(a) - score(b);
-});
+    // Sort by relevance — exact matches first, starts with, word match, then contains
+    filtered.sort((a, b) => {
+      function score(item) {
+        const name = item.name.toLowerCase().replace(/\./g, '');
+        const sku = (item.sku || '').toLowerCase();
+        if (name === cleanQ || sku === cleanQ) return 0;
+        if (name.startsWith(cleanQ) || sku.startsWith(cleanQ)) return 1;
+        const words = name.split(/\s+/);
+        if (words.some(w => w === cleanQ)) return 2;
+        if (words.some(w => w.startsWith(cleanQ))) return 3;
+        return 4;
+      }
+      return score(a) - score(b);
+    });
 
-grid.innerHTML = filtered.map(item => buildCard(item)).join('');
+    grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
 
   function populateCats() {
