@@ -343,11 +343,27 @@
       return matchQ && matchC;
     });
 
-    if (!filtered.length) {
-      grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
-      return;
-    }
-    grid.innerHTML = filtered.map(item => buildCard(item)).join('');
+   if (!filtered.length) {
+  grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
+  return;
+}
+
+// Sort by relevance — exact matches first, then starts with, then contains
+filtered.sort((a, b) => {
+  function score(item) {
+    const name = item.name.toLowerCase();
+    const sku = (item.sku || '').toLowerCase();
+    if (name === q || sku === q) return 0;
+    if (name.startsWith(q) || sku.startsWith(q)) return 1;
+    const words = name.split(/\s+/);
+    if (words.some(w => w === q)) return 2;
+    if (words.some(w => w.startsWith(q))) return 3;
+    return 4;
+  }
+  return score(a) - score(b);
+});
+
+grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
 
   function populateCats() {
