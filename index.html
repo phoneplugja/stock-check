@@ -1,3 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Phone Plug — Stock Checker</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #080c10;
+    --black-2: #0f1318;
+    --black-3: #161c24;
+    --cyan: #29b5e8;
+    --cyan-dark: #1a8fc0;
+    --white: #ffffff;
+    --red: #c5221f;
+    --radius: 10px;
+    --radius-lg: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--black); color: var(--white); min-height: 100vh; }
+  body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(41,181,232,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(41,181,232,0.04) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; z-index: 0; }
+  header { position: sticky; top: 0; z-index: 100; background: rgba(8,12,16,0.95); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(41,181,232,0.2); padding: 0 2rem; height: 72px; display: flex; align-items: center; justify-content: space-between; }
+  .header-brand { display: flex; align-items: center; gap: 14px; }
+  .header-logo img { height: 48px; width: auto; object-fit: contain; filter: drop-shadow(0 0 14px rgba(41,181,232,0.5)); }
+  .header-tagline { border-left: 1px solid rgba(41,181,232,0.25); padding-left: 14px; }
+  .header-tagline .line1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.8rem; font-weight: 700; color: var(--cyan); letter-spacing: 0.08em; text-transform: uppercase; }
+  .header-tagline .line2 { font-size: 0.7rem; color: rgba(255,255,255,0.35); margin-top: 2px; }
+  .header-right { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: rgba(255,255,255,0.4); }
+  .live-dot { width: 7px; height: 7px; background: var(--cyan); border-radius: 50%; animation: blink 2s infinite; box-shadow: 0 0 8px var(--cyan); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .hero { position: relative; z-index: 1; padding: 3.5rem 2rem 0; text-align: center; overflow: hidden; }
+  .hero-phones { display: flex; align-items: flex-end; justify-content: center; gap: 16px; margin-bottom: 2.5rem; position: relative; }
+  .phone-frame { position: relative; border-radius: 28px; border: 2px solid rgba(41,181,232,0.4); background: var(--black-3); display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 0 30px rgba(41,181,232,0.1), inset 0 0 20px rgba(41,181,232,0.03); transition: transform 0.3s, box-shadow 0.3s; }
+  .phone-frame:hover { transform: translateY(-6px); box-shadow: 0 0 50px rgba(41,181,232,0.2); }
+  .phone-lg { width: 90px; height: 170px; }
+  .phone-sm { width: 75px; height: 140px; opacity: 0.6; }
+  .phone-notch { width: 30px; height: 6px; background: rgba(41,181,232,0.3); border-radius: 99px; position: absolute; top: 12px; }
+  .phone-screen { width: 70%; height: 55%; background: linear-gradient(135deg, rgba(41,181,232,0.08), rgba(41,181,232,0.02)); border-radius: 8px; border: 1px solid rgba(41,181,232,0.15); display: flex; align-items: center; justify-content: center; margin-top: 10px; }
+  .phone-screen-icon { font-size: 1.2rem; opacity: 0.5; }
+  .phone-home { width: 24px; height: 3px; background: rgba(41,181,232,0.25); border-radius: 99px; position: absolute; bottom: 10px; }
+  .phone-glow { position: absolute; width: 180px; height: 180px; background: radial-gradient(circle, rgba(41,181,232,0.12) 0%, transparent 70%); border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+  .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(41,181,232,0.08); border: 1px solid rgba(41,181,232,0.2); border-radius: 99px; padding: 6px 16px; margin-bottom: 1.25rem; font-size: 0.72rem; color: var(--cyan); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+  .hero-badge::before { content: ''; width: 5px; height: 5px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 6px var(--cyan); animation: blink 2s infinite; }
+  .hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 2.75rem; font-weight: 700; color: var(--white); letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 0.75rem; }
+  .hero h1 span { color: var(--cyan); text-shadow: 0 0 40px rgba(41,181,232,0.5); }
+  .hero-sub { font-size: 0.95rem; color: rgba(255,255,255,0.5); max-width: 420px; margin: 0 auto 2.5rem; }
+  .feature-strip { display: flex; justify-content: center; border-top: 1px solid rgba(41,181,232,0.1); border-bottom: 1px solid rgba(41,181,232,0.1); background: rgba(41,181,232,0.03); margin: 0 -2rem; }
+  .feature-item { display: flex; align-items: center; gap: 8px; padding: 0.875rem 1.5rem; border-right: 1px solid rgba(41,181,232,0.1); font-size: 0.75rem; color: rgba(255,255,255,0.4); flex: 1; justify-content: center; }
+  .feature-item:last-child { border-right: none; }
+  .feature-item svg { color: var(--cyan); flex-shrink: 0; }
+  .feature-item strong { color: rgba(255,255,255,0.7); display: block; font-size: 0.78rem; }
+  main { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  .search-instruction { font-size: 1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
+  .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .search-wrap { flex: 1; min-width: 200px; position: relative; }
+  .search-wrap input { width: 100%; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px 13px 44px; font-family: 'Inter',sans-serif; font-size: 0.9rem; color: var(--white); outline: none; transition: all 0.2s; }
+  .search-wrap input:focus { border-color: var(--cyan); background: rgba(41,181,232,0.05); box-shadow: 0 0 0 3px rgba(41,181,232,0.1); }
+  .search-wrap input::placeholder { color: rgba(255,255,255,0.2); }
+  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.3); }
+  select { background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px; font-family: 'Inter',sans-serif; font-size: 0.875rem; color: var(--white); outline: none; cursor: pointer; transition: border-color 0.2s; }
+  select:focus { border-color: var(--cyan); }
+  select option { background: var(--black-2); }
+  .refresh-btn { display: flex; align-items: center; gap: 6px; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 16px; font-family: 'Inter',sans-serif; font-size: 0.875rem; cursor: pointer; color: rgba(255,255,255,0.5); transition: all 0.2s; white-space: nowrap; }
+  .refresh-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(41,181,232,0.05); }
+  .grid { display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--black-3); border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.07); overflow: hidden; transition: all 0.2s; display: flex; flex-direction: row; align-items: flex-start; }
+  .card:hover { border-color: rgba(41,181,232,0.35); background: rgba(41,181,232,0.04); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3), 0 0 0 1px rgba(41,181,232,0.1); }
+  .card-img-wrap { width: 200px; min-width: 200px; height: 200px; background: #ffffff; overflow: hidden; display: flex; align-items: center; justify-content: center; order: 2; border-left: 1px solid rgba(255,255,255,0.05); padding: 8px; flex-shrink: 0; align-self: flex-start; position: sticky; top: 0; }
+  .card-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .card-img-placeholder { font-size: 3rem; opacity: 0.1; }
+  .card-body { padding: 1.25rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; order: 1; min-width: 0; }
+  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .card-name { font-size: 1rem; font-weight: 600; line-height: 1.4; flex: 1; color: rgba(255,255,255,0.95); font-family: 'Space Grotesk', sans-serif; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 99px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; flex-shrink: 0; letter-spacing: 0.03em; }
+  .badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; display:inline-block; }
+  .badge.in { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.2); }
+  .badge.out { background: rgba(231,76,60,0.12); color: #e74c3c; border: 1px solid rgba(231,76,60,0.2); }
+  .card-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .meta-tag { font-size: 0.68rem; color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); }
+  .variants { padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
+  .variant-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
+  .variant-name { color: rgba(255,255,255,0.6); }
+  .card-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(41,181,232,0.15); }
+  .card-cta { font-size: 0.78rem; font-weight: 600; color: #ffffff; display: flex; align-items: center; gap: 6px; }
+  .card-cta::before { content: '📞'; font-size: 0.75rem; }
+  .wa-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; background: #25D366; color: #ffffff; font-family: 'Inter', sans-serif; font-size: 0.82rem; font-weight: 600; border-radius: 99px; text-decoration: none; transition: background 0.2s, transform 0.15s; align-self: flex-start; }
+  .wa-btn:hover { background: #1ebe5d; transform: translateY(-1px); }
+  .wa-btn svg { flex-shrink: 0; }
+  .loading-state { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
+  .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .prompt-state { text-align: center; padding: 3rem 1rem; }
+  .prompt-phone { width: 60px; height: 100px; border: 2px solid rgba(41,181,232,0.3); border-radius: 16px; margin: 0 auto 1.25rem; display: flex; align-items: center; justify-content: center; background: var(--black-3); position: relative; box-shadow: 0 0 20px rgba(41,181,232,0.08); }
+  .prompt-phone::before { content: ''; width: 18px; height: 3px; background: rgba(41,181,232,0.3); border-radius: 99px; position: absolute; top: 8px; }
+  .prompt-phone::after { content: ''; width: 14px; height: 2px; background: rgba(41,181,232,0.2); border-radius: 99px; position: absolute; bottom: 8px; }
+  .prompt-phone-icon { font-size: 1.5rem; }
+  .prompt-state strong { color: rgba(255,255,255,0.6); font-size: 0.95rem; display: block; margin-bottom: 0.4rem; }
+  .prompt-state p { color: rgba(255,255,255,0.25); font-size: 0.825rem; }
+  .empty-state { text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
+  .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
+  .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
+  .contact { position: relative; z-index: 1; background: var(--black-3); border-top: 1px solid rgba(41,181,232,0.15); padding: 2.5rem 2rem; }
+  .contact-inner { max-width: 900px; margin: 0 auto; }
+  .contact-top { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .contact-logo img { height: 36px; filter: drop-shadow(0 0 8px rgba(41,181,232,0.3)); }
+  .contact-top-text .t1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.9rem; font-weight: 600; color: #ffffff; }
+  .contact-top-text .t2 { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin-top: 2px; }
+  .contact h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.72rem; margin-bottom: 1rem; }
+  .contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+  .contact-item { display: flex; align-items: center; gap: 12px; }
+  .contact-icon { width: 36px; height: 36px; background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.2); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--cyan); }
+  .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.3); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .contact-value { font-size: 0.85rem; color: #ffffff; font-weight: 600; }
+  footer { position: relative; z-index: 1; background: var(--black); border-top: 1px solid rgba(255,255,255,0.04); text-align: center; padding: 1.5rem; font-size: 0.72rem; color: rgba(255,255,255,0.12); }
+  footer span { color: var(--cyan); opacity: 0.5; }
+  @media (max-width: 600px) {
+    .card { flex-direction: column; }
+    .card-img-wrap { width: 100%; min-width: unset; height: 200px; order: 1; border-left: none; border-bottom: 1px solid rgba(255,255,255,0.05); position: relative; }
+    .card-body { order: 2; }
+    .hero h1 { font-size: 1.9rem; }
+    header { padding: 0 1.25rem; }
+    .header-logo img { height: 38px; }
+    .header-tagline { display: none; }
+    .feature-item { padding: 0.75rem; font-size: 0.68rem; }
+    .contact { padding: 2rem 1.25rem; }
+    .phone-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-brand">
+    <div class="header-logo"><img src="logo.png" alt="The Phone Plug"></div>
+    <div class="header-tagline">
+      <div class="line1">The Phone Plug</div>
+      <div class="line2">Jamaica's go to for phone accessories and parts</div>
+    </div>
+  </div>
+  <div class="header-right"><div class="live-dot"></div>Live stock</div>
+</header>
+
+<div class="hero">
+  <div class="hero-phones">
+    <div class="phone-glow"></div>
+    <div class="phone-frame phone-sm">
+      <div class="phone-notch"></div>
+      <div class="phone-screen"><div class="phone-screen-icon">📱</div></div>
+      <div class="phone-home"></div>
+    </div>
+    <div class="phone-frame phone-lg">
+      <div class="phone-notch"></div>
+      <div class="phone-screen"><div class="phone-screen-icon">🔌</div></div>
+      <div class="phone-home"></div>
+    </div>
+    <div class="phone-frame phone-sm">
+      <div class="phone-notch"></div>
+      <div class="phone-screen"><div class="phone-screen-icon">🎧</div></div>
+      <div class="phone-home"></div>
+    </div>
+  </div>
+  <div class="hero-badge">Live inventory</div>
+  <h1>The Phone <span>Plug</span></h1>
+  <p class="hero-sub">Jamaica's go to for phone accessories and parts — check what's in stock before you visit</p>
+  <div class="feature-strip">
+    <div class="feature-item">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <div><strong>Live Updates</strong>Synced with our store</div>
+    </div>
+    <div class="feature-item">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <div><strong>Easy Search</strong>Search by name or SKU</div>
+    </div>
+    <div class="feature-item">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+      <div><strong>Call Us</strong>(876) 490-5515 or (876) 672-2442</div>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div id="error-area"></div>
+  <p class="search-instruction">ENTER ITEM NAME OR NUMBER TO CHECK IF IN STOCK</p>
+  <div class="search-row">
+    <div class="search-wrap">
+      <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="search" placeholder="e.g. S22, iPhone 13, or item number…" oninput="render()">
+    </div>
+    <select id="cat-filter" onchange="onCatChange()"><option value="">All categories</option></select>
+    <button class="refresh-btn" onclick="fetchAll()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+      Refresh
+    </button>
+  </div>
+  <div class="grid" id="grid">
+    <div class="loading-state"><div class="spinner"></div><p>Loading inventory…</p></div>
+  </div>
+  <div class="last-sync" id="last-sync"></div>
+</main>
+
+<div class="contact">
+  <div class="contact-inner">
+    <div class="contact-top">
+      <div class="contact-logo"><img src="logo.png" alt="The Phone Plug"></div>
+      <div class="contact-top-text">
+        <div class="t1">The Phone Plug</div>
+        <div class="t2">Jamaica's go to for phone accessories and parts</div>
+      </div>
+    </div>
+    <h3>Contact &amp; Support</h3>
+    <div class="contact-grid">
+      <div class="contact-item">
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+        <div><div class="contact-label">Phone</div><div class="contact-value">(876) 672-2442</div></div>
+      </div>
+      <div class="contact-item">
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+        <div><div class="contact-label">WhatsApp</div><div class="contact-value">(876) 490-5515</div></div>
+      </div>
+      <div class="contact-item">
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></div>
+        <div><div class="contact-label">Instagram</div><div class="contact-value">@phoneplug_ja</div></div>
+      </div>
+      <div class="contact-item">
+        <div class="contact-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+        <div><div class="contact-label">Email</div><div class="contact-value">support@phoneplugja.com</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>&copy; 2026 <span>The Phone Plug</span> &nbsp;&middot;&nbsp; Jamaica's go to for phone accessories and parts &nbsp;&middot;&nbsp; Stock updates automatically</footer>
+
 <script>
   const ALLOWED_CATEGORIES = [
     "Accessories- Samsung",
@@ -42,13 +276,10 @@
 
   const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call or WhatsApp us at (876) 490-5515 to be sure</div>';
 
-  function buildCard(item, filteredVariants) {
+  function buildCard(item) {
     const imgHtml = cardImageHtml(item);
-    const displayVariants = filteredVariants || (item.variants || []).filter(v => getQty(v.variant_id) > 0);
-    const hasVariants = displayVariants.length > 0 && item.variants && item.variants.length > 1;
-    const totalQty = filteredVariants
-      ? filteredVariants.reduce((sum, v) => sum + getQty(v.variant_id), 0)
-      : getItemQty(item);
+    const hasVariants = item.variants && item.variants.length > 1;
+    const totalQty = getItemQty(item);
 
     if (totalQty <= 0) {
       return '<div class="card">' +
@@ -60,9 +291,10 @@
     }
 
     if (hasVariants) {
-      const varRows = displayVariants.map(v =>
-        '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge in">In stock</span></div>'
-      ).join('');
+      const inStockVariants = item.variants.filter(v => getQty(v.variant_id) > 0);
+      const varRows = inStockVariants.map(v => {
+        return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge in">In stock</span></div>';
+      }).join('');
       return '<div class="card">' +
         '<div class="card-body">' +
           '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
@@ -86,7 +318,7 @@
   }
 
   function showPrompt() {
-    document.getElementById('grid').innerHTML = '<div class="prompt-state"><div class="prompt-phone"><div class="prompt-phone-icon">🔍</div></div><strong>Type to search</strong><p>Enter an item name or style number above</p></div>';
+    document.getElementById('grid').innerHTML = '<div class="prompt-state"><div class="prompt-phone"><div class="prompt-phone-icon">🔍</div></div><strong>Type to search</strong><p>Search by phone model (e.g. S22) or item name / number</p></div>';
   }
 
   function render() {
@@ -96,37 +328,26 @@
     if (!loaded) return;
     if (!q) { showPrompt(); return; }
 
-    const filtered = allItems.map(item => {
-      const matchC = !cat || item.category === cat;
-      if (!matchC) return null;
-
-      const matchingVariants = (item.variants || []).filter(v => {
+    let filtered = allItems.filter(item => {
+      // Exact match on in-stock variant names (e.g. "S22")
+      const variantMatch = (item.variants || []).some(v => {
         const v1 = (v.option1_value || '').toLowerCase().trim();
         const v2 = (v.option2_value || '').toLowerCase().trim();
-        return v1.includes(q) || v2.includes(q);
+        const nameMatch = v1 === q || v2 === q;
+        const inStock = getQty(v.variant_id) > 0;
+        return nameMatch && inStock;
       });
-
-      const nameOrSkuMatch = item.name.toLowerCase().includes(q) || (item.sku || '').toLowerCase().includes(q);
-
-      if (matchingVariants.length > 0) {
-        const inStockMatches = matchingVariants.filter(v => getQty(v.variant_id) > 0);
-        if (inStockMatches.length === 0) return null;
-        return { ...item, _filteredVariants: inStockMatches };
-      }
-
-      if (nameOrSkuMatch) {
-        return { ...item, _filteredVariants: null };
-      }
-
-      return null;
-    }).filter(Boolean);
+      // Partial match on item name and SKU
+      const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
+      const matchC = !cat || item.category === cat;
+      return matchQ && matchC;
+    });
 
     if (!filtered.length) {
       grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
       return;
     }
-
-    grid.innerHTML = filtered.map(item => buildCard(item, item._filteredVariants)).join('');
+    grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
 
   function populateCats() {
@@ -185,3 +406,5 @@
   fetchAll();
   setInterval(fetchAll, 300000);
 </script>
+</body>
+</html>
