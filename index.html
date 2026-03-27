@@ -349,19 +349,21 @@
     }
 
     // Sort by relevance — exact matches first, starts with, word match, then contains
-    filtered.sort((a, b) => {
-      function score(item) {
-        const name = item.name.toLowerCase().replace(/\./g, '');
-        const sku = (item.sku || '').toLowerCase();
-        if (name === cleanQ || sku === cleanQ) return 0;
-        if (name.startsWith(cleanQ) || sku.startsWith(cleanQ)) return 1;
-        const words = name.split(/\s+/);
-        if (words.some(w => w === cleanQ)) return 2;
-        if (words.some(w => w.startsWith(cleanQ))) return 3;
-        return 4;
-      }
-      return score(a) - score(b);
-    });
+filtered.sort((a, b) => {
+  function score(item) {
+    const name = item.name.toLowerCase().replace(/\./g, '').trim();
+    const sku = (item.sku || '').toLowerCase();
+    const words = name.split(/\s+/);
+    const firstWord = words[0] || '';
+    if (name === cleanQ || sku === cleanQ) return 0;
+    if (firstWord === cleanQ) return 1;
+    if (words.some(w => w === cleanQ)) return 2;
+    if (firstWord.startsWith(cleanQ)) return 3;
+    if (words.some(w => w.startsWith(cleanQ))) return 4;
+    return 5;
+  }
+  return score(a) - score(b);
+});
 
     grid.innerHTML = filtered.map(item => buildCard(item)).join('');
   }
