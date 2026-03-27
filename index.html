@@ -328,10 +328,11 @@
     if (!loaded) return;
     if (!q) { showPrompt(); return; }
    let filtered = allItems.filter(item => {
-  const variantMatch = (item.variants || []).some(v =>
-    (v.option1_value || '').toLowerCase().includes(q) ||
-    (v.option2_value || '').toLowerCase().includes(q)
-  );
+  const variantMatch = (item.variants || []).some(v => {
+  const v1 = (v.option1_value || '').toLowerCase().trim();
+  const v2 = (v.option2_value || '').toLowerCase().trim();
+  return v1 === q || v2 === q;
+});
   const matchQ = item.name.toLowerCase().includes(q) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
   const matchC = !cat || item.category === cat;
   return matchQ && matchC;
