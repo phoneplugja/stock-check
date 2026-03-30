@@ -416,10 +416,13 @@
       allItems = (itemsData.items || [])
         .map(item => {
           const catName = catMap[item.category_id] || item.category_name || '';
+          // Only use IN STOCK variant prices to avoid inflated ranges
           const prices = (item.variants || [])
-  .filter(v => (inventoryMap[v.variant_id] === undefined || inventoryMap[v.variant_id] > 0))
-  .map(v => parseFloat(v.price || v.default_price || 0))
-  .filter(p => p > 0);
+            .filter(v => (inventoryMap[v.variant_id] === undefined || inventoryMap[v.variant_id] > 0))
+            .map(v => parseFloat(v.price || v.default_price || 0))
+            .filter(p => p > 0);
+          const minPrice = prices.length ? Math.min(...prices) : 0;
+          const maxPrice = prices.length ? Math.max(...prices) : 0;
           return {
             id: item.id,
             name: item.item_name,
