@@ -272,9 +272,10 @@
 
   function priceTag(item) {
     if (!item.minPrice || item.minPrice <= 0) return '';
+    const fmt = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const p = item.minPrice === item.maxPrice
-      ? 'JMD $' + item.minPrice.toLocaleString()
-      : 'JMD $' + item.minPrice.toLocaleString() + ' \u2013 $' + item.maxPrice.toLocaleString();
+      ? 'JMD $' + fmt(item.minPrice)
+      : 'JMD $' + fmt(item.minPrice) + ' \u2013 $' + fmt(item.maxPrice);
     return '<span class="price-tag">' + p + '</span>';
   }
 
@@ -415,7 +416,9 @@
       allItems = (itemsData.items || [])
         .map(item => {
           const catName = catMap[item.category_id] || item.category_name || '';
-          const prices = (item.variants || []).map(v => v.price || 0).filter(p => p > 0);
+          const prices = (item.variants || [])
+            .map(v => parseFloat(v.price || v.default_price || 0))
+            .filter(p => p > 0);
           const minPrice = prices.length ? Math.min(...prices) : 0;
           const maxPrice = prices.length ? Math.max(...prices) : 0;
           return {
