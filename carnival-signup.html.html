@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Phone Plug × Carnival Cool Down — Exclusive Offer</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700;800&family=Black+Ops+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --pink: #ff1f8e;
+    --pink-dark: #cc1070;
+    --pink-light: rgba(255,31,142,0.12);
+    --cyan: #00d4d4;
+    --cyan-dark: #00a8a8;
+    --gold: #f5c842;
+    --black: #0a0a0a;
+    --black-2: #111111;
+    --black-3: #1a1a1a;
+    --white: #ffffff;
+    --radius: 12px;
+    --radius-lg: 20px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--black);
+    color: var(--white);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,31,142,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,212,0.03) 1px, transparent 1px);
+    background-size: 36px 36px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 60vh;
+    background: radial-gradient(ellipse at 30% 0%, rgba(255,31,142,0.1) 0%, rgba(0,212,212,0.06) 50%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .page {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 500px;
+    padding: 1.5rem 1.25rem 4rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* HEADER */
+  .top-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.75rem;
+  }
+
+  .top-logo img {
+    height: 65px;
+    width: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 0 12px rgba(255,31,142,0.4));
+  }
+
+  .top-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 99px;
+    padding: 7px 14px;
+    font-size: 0.72rem;
+  }
+
+  .brand-name { font-weight: 700; color: var(--white); }
+  .brand-name .plug { color: var(--cyan); }
+  .brand-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--pink); }
+  .brand-sub { color: rgba(255,255,255,0.4); font-size: 0.68rem; }
+
+  /* EVENT HEADER */
+  .event-host {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,31,142,0.1);
+    border: 1px solid rgba(255,31,142,0.3);
+    border-radius: 99px;
+    padding: 5px 14px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--pink);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  .event-title {
+    font-family: 'Black Ops One', cursive;
+    text-align: center;
+    line-height: 0.95;
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.02em;
+  }
+
+  .event-title .carnival {
+    font-size: 3.2rem;
+    color: var(--white);
+    display: block;
+    text-shadow: 3px 3px 0px var(--pink);
+  }
+
+  .event-title .cooldown {
+    font-size: 3.2rem;
+    color: var(--cyan);
+    display: block;
+    text-shadow: 3px 3px 0px var(--cyan-dark);
+  }
+
+  /* EVENT INFO STRIP */
+  .event-info {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    width: 100%;
+    background: var(--black-3);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin: 1.25rem 0;
+  }
+
+  .event-info-item {
+    flex: 1;
+    padding: 10px 8px;
+    text-align: center;
+    border-right: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .event-info-item:last-child { border-right: none; }
+
+  .event-info-label {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 3px;
+    font-weight: 600;
+  }
+
+  .event-info-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.2;
+  }
+
+  .event-info-value.pink { color: var(--pink); }
+  .event-info-value.cyan { color: var(--cyan); }
+
+  /* EXCLUSIVE BANNER */
+  .exclusive-banner {
+    width: 100%;
+    background: linear-gradient(135deg, var(--pink), #ff6b2b);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .exclusive-banner::before {
+    content: '★';
+    position: absolute;
+    font-size: 6rem;
+    color: rgba(255,255,255,0.05);
+    top: -20px;
+    right: -10px;
+  }
+
+  .exclusive-banner-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(255,255,255,0.7);
+    margin-bottom: 4px;
+  }
+
+  .exclusive-banner-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--white);
+    line-height: 1.3;
+  }
+
+  /* DEAL CARDS */
+  .deals { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 1.25rem; }
+
+  .deal-card {
+    background: var(--black-3);
+    border: 1px solid rgba(0,212,212,0.2);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .deal-card:first-child { border-color: rgba(255,31,142,0.25); }
+
+  .deal-icon { font-size: 1.6rem; flex-shrink: 0; }
+  .deal-label { font-size: 0.65rem; color: var(--cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
+  .deal-card:first-child .deal-label { color: var(--pink); }
+  .deal-text { font-family: 'Space Grotesk', sans-serif; font-size: 0.95rem; font-weight: 700; color: var(--white); line-height: 1.3; }
+  .deal-sub { font-size: 0.7rem; color: rgba(255,255,255,0.35); margin-top: 2px; }
+  .deal-or { text-align: center; font-size: 0.7rem; color: rgba(255,255,255,0.25); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* FORM */
+  .form-card {
+    background: var(--black-3);
+    border: 1px solid rgba(255,31,142,0.2);
+    border-radius: var(--radius-lg);
+    padding: 1.75rem;
+    width: 100%;
+    margin-bottom: 1.25rem;
+  }
+
+  .form-title { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
+  .form-subtitle { font-size: 0.78rem; color: rgba(255,255,255,0.35); margin-bottom: 1.25rem; line-height: 1.5; }
+
+  .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+  .form-group label { font-size: 0.68rem; font-weight: 700; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.07em; }
+
+  .form-group input {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    color: var(--white);
+    outline: none;
+    transition: all 0.2s;
+    width: 100%;
+  }
+
+  .form-group input:focus { border-color: var(--pink); background: rgba(255,31,142,0.05); box-shadow: 0 0 0 3px rgba(255,31,142,0.1); }
+  .form-group input::placeholder { color: rgba(255,255,255,0.2); }
+
+  .submit-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--pink), #ff6b2b);
+    color: var(--white);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 800;
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.03em;
+    margin-top: 6px;
+  }
+
+  .submit-btn:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(255,31,142,0.3); }
+  .submit-btn:active { transform: translateY(0); }
+  .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .error-msg { color: #e74c3c; font-size: 0.78rem; margin-top: 8px; display: none; }
+
+  /* CONFIRMATION */
+  .confirm-screen { display: none; flex-direction: column; align-items: center; text-align: center; width: 100%; }
+
+  .confirm-glow {
+    width: 90px; height: 90px;
+    background: linear-gradient(135deg, var(--pink), #ff6b2b);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 0 40px rgba(255,31,142,0.4), 0 0 80px rgba(255,31,142,0.15);
+    animation: pulse-glow 2s infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 40px rgba(255,31,142,0.4), 0 0 80px rgba(255,31,142,0.15); }
+    50% { box-shadow: 0 0 60px rgba(255,31,142,0.6), 0 0 100px rgba(255,31,142,0.25); }
+  }
+
+  .confirm-title { font-family: 'Black Ops One', cursive; font-size: 2rem; color: var(--pink); margin-bottom: 0.5rem; text-shadow: 2px 2px 0 var(--pink-dark); }
+  .confirm-sub { font-size: 0.9rem; color: rgba(255,255,255,0.5); margin-bottom: 1.75rem; line-height: 1.6; max-width: 340px; }
+
+  .confirm-card {
+    background: linear-gradient(135deg, rgba(255,31,142,0.08), rgba(0,212,212,0.05));
+    border: 1px solid rgba(255,31,142,0.25);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    width: 100%;
+    margin-bottom: 1rem;
+  }
+
+  .confirm-card-title { font-size: 0.65rem; font-weight: 700; color: var(--pink); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem; }
+  .confirm-deal { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 4px; line-height: 1.4; }
+  .confirm-deal span { color: var(--cyan); }
+
+  .confirm-steps { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,31,142,0.15); display: flex; flex-direction: column; gap: 8px; }
+  .confirm-step { display: flex; align-items: flex-start; gap: 10px; font-size: 0.82rem; color: rgba(255,255,255,0.65); line-height: 1.4; text-align: left; }
+  .confirm-step-num { width: 20px; height: 20px; background: var(--pink); color: var(--white); border-radius: 50%; font-size: 0.65rem; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
+  .confirm-name { font-size: 0.78rem; color: rgba(255,255,255,0.3); margin-top: 0.5rem; }
+  .confirm-name strong { color: var(--pink); }
+
+  /* CONTACT CARD ON CONFIRM */
+  .contact-confirm {
+    width: 100%;
+    background: var(--black-3);
+    border: 1px solid rgba(0,212,212,0.15);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .contact-confirm-title { font-size: 0.65rem; font-weight: 700; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem; }
+
+  .contact-confirm-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .contact-confirm-item:last-child { margin-bottom: 0; }
+
+  .contact-confirm-icon { width: 32px; height: 32px; background: rgba(0,212,212,0.1); border: 1px solid rgba(0,212,212,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .contact-confirm-label { font-size: 0.62rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+  .contact-confirm-value { font-size: 0.82rem; font-weight: 600; color: var(--white); }
+  .contact-confirm-value.pink { color: var(--pink); }
+
+  /* EXPIRED */
+  .expired-screen { display: none; flex-direction: column; align-items: center; text-align: center; padding: 2rem 0; }
+  .expired-icon { font-size: 3rem; margin-bottom: 1rem; }
+  .expired-title { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-bottom: 0.5rem; }
+  .expired-sub { font-size: 0.875rem; color: rgba(255,255,255,0.3); line-height: 1.6; }
+
+  /* FOOTER */
+  .page-footer { text-align: center; font-size: 0.68rem; color: rgba(255,255,255,0.18); line-height: 1.6; margin-top: 0.5rem; }
+  .page-footer a { color: var(--pink); opacity: 0.8; text-decoration: none; }
+
+  @media (max-width: 480px) {
+    .event-title .carnival, .event-title .cooldown { font-size: 2.6rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- TOP BAR -->
+  <div class="top-bar">
+    <div class="top-logo"><img src="logo.png" alt="The Phone Plug"></div>
+    <div class="top-brand">
+      <span class="brand-name">THE PHONE <span class="plug">PLUG</span></span>
+      <div class="brand-dot"></div>
+      <span class="brand-sub">&times; Soca Camp</span>
+    </div>
+  </div>
+
+  <!-- EVENT HEADER -->
+  <div class="event-host">🎪 Soca Camp Presents</div>
+
+  <div class="event-title">
+    <span class="carnival">CARNIVAL</span>
+    <span class="cooldown">COOLDOWN</span>
+  </div>
+
+  <!-- EVENT INFO -->
+  <div class="event-info" id="main-content">
+    <div class="event-info-item">
+      <div class="event-info-label">Date</div>
+      <div class="event-info-value pink">April 19</div>
+    </div>
+    <div class="event-info-item">
+      <div class="event-info-label">Time</div>
+      <div class="event-info-value cyan">4PM – 10PM</div>
+    </div>
+    <div class="event-info-item">
+      <div class="event-info-label">Venue</div>
+      <div class="event-info-value" style="font-size:0.72rem;">Jangas Soundbar</div>
+    </div>
+  </div>
+
+  <!-- EXCLUSIVE BANNER -->
+  <div class="exclusive-banner">
+    <div class="exclusive-banner-label">⚡ Exclusive Attendee Offer — The Phone Plug</div>
+    <div class="exclusive-banner-title">Lock In Your Discount Before You Leave Tonight</div>
+  </div>
+
+  <!-- DEALS -->
+  <div class="deals">
+    <div class="deal-card">
+      <div class="deal-icon">📱</div>
+      <div>
+        <div class="deal-label">Option 1</div>
+        <div class="deal-text">30% OFF any accessories purchase</div>
+        <div class="deal-sub">Cases, chargers, earphones & more</div>
+      </div>
+    </div>
+    <div class="deal-or">— or —</div>
+    <div class="deal-card">
+      <div class="deal-icon">💰</div>
+      <div>
+        <div class="deal-label">Option 2</div>
+        <div class="deal-text">$5,000 JMD off a qualifying purchase</div>
+        <div class="deal-sub">Phones, tablets & electronic gadgets</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FORM -->
+  <div class="form-card" id="form-card">
+    <div class="form-title">Claim Your Discount</div>
+    <div class="form-subtitle">Enter your details to lock in your deal. No coupon needed — just give us your name and email when you visit us in store.</div>
+    <div class="form-group">
+      <label>Your Name</label>
+      <input type="text" id="input-name" placeholder="e.g. Roselyn Henry" autocomplete="name">
+    </div>
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" id="input-email" placeholder="e.g. roselyn@gmail.com" autocomplete="email">
+    </div>
+    <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">🎪 Lock In My Discount</button>
+    <div class="error-msg" id="error-msg">Please enter a valid name and email address.</div>
+  </div>
+
+  <!-- CONFIRMATION SCREEN -->
+  <div class="confirm-screen" id="confirm-screen">
+    <div class="confirm-glow">🎉</div>
+    <div class="confirm-title">You're Locked In!</div>
+    <p class="confirm-sub">Welcome to the exclusive circle. Your Phone Plug discount is secured and ready whenever you walk through our doors.</p>
+
+    <div class="confirm-card">
+      <div class="confirm-card-title">Your Exclusive Deal</div>
+      <div class="confirm-deal"><span>30% OFF</span> any accessories purchase</div>
+      <div class="confirm-deal" style="font-size:0.82rem;color:rgba(255,255,255,0.4);font-weight:500;">— or —</div>
+      <div class="confirm-deal"><span>$5,000 JMD OFF</span> a qualifying phone, tablet or gadget</div>
+      <div class="confirm-steps">
+        <div class="confirm-step">
+          <div class="confirm-step-num">1</div>
+          <span>Visit <strong style="color:#fff">The Phone Plug</strong> in store — your discount has no expiry.</span>
+        </div>
+        <div class="confirm-step">
+          <div class="confirm-step-num">2</div>
+          <span>Tell the team your <strong style="color:#fff">name</strong> and the <strong style="color:#fff">email</strong> you used to sign up.</span>
+        </div>
+        <div class="confirm-step">
+          <div class="confirm-step-num">3</div>
+          <span>Choose your deal and <strong style="color:#fff">save big</strong>. That's it! 🔥</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="confirm-name" id="confirm-name-display"></div>
+
+    <div class="contact-confirm">
+      <div class="contact-confirm-title">Stay Connected with Us</div>
+      <div class="contact-confirm-item">
+        <div class="contact-confirm-icon">📸</div>
+        <div>
+          <div class="contact-confirm-label">Instagram — Follow Us!</div>
+          <div class="contact-confirm-value pink">@phoneplug_ja</div>
+        </div>
+      </div>
+      <div class="contact-confirm-item">
+        <div class="contact-confirm-icon">📞</div>
+        <div>
+          <div class="contact-confirm-label">Cell / WhatsApp</div>
+          <div class="contact-confirm-value">(876) 490-5515</div>
+        </div>
+      </div>
+      <div class="contact-confirm-item">
+        <div class="contact-confirm-icon">☎️</div>
+        <div>
+          <div class="contact-confirm-label">Landline</div>
+          <div class="contact-confirm-value">(876) 672-2442</div>
+        </div>
+      </div>
+      <div class="contact-confirm-item">
+        <div class="contact-confirm-icon">✉️</div>
+        <div>
+          <div class="contact-confirm-label">Email</div>
+          <div class="contact-confirm-value">support@phoneplugja.com</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPIRED -->
+  <div class="expired-screen" id="expired-screen">
+    <div class="expired-icon">⏰</div>
+    <div class="expired-title">This Offer Has Closed</div>
+    <p class="expired-sub">The Carnival Cool Down exclusive has ended.<br>Visit The Phone Plug in store or contact us for our latest deals!</p>
+  </div>
+
+  <div class="page-footer">
+    <strong style="color:rgba(255,255,255,0.35)">The Phone Plug</strong> &nbsp;·&nbsp;
+    <a href="https://wa.me/18764905515">WhatsApp Us</a> &nbsp;·&nbsp;
+    @phoneplug_ja
+  </div>
+
+</div>
+
+<script>
+  const EXPIRY = new Date('2026-04-22T04:59:00Z');
+  const SHEET_URL = 'https://script.google.com/macros/s/AKfycbySX8baQFCKrPL83QdEaO7saxtcAq0aOOV_ljFgxOx0QcGgUyUWNnbSyykTpJAUAOkWmQ/exec';
+
+  function checkExpiry() {
+    if (new Date() > EXPIRY) {
+      document.getElementById('main-content').style.display = 'none';
+      document.getElementById('form-card').style.display = 'none';
+      document.getElementById('expired-screen').style.display = 'flex';
+    }
+  }
+
+  async function handleSubmit() {
+    const name = document.getElementById('input-name').value.trim();
+    const email = document.getElementById('input-email').value.trim();
+    const errEl = document.getElementById('error-msg');
+    const btn = document.getElementById('submit-btn');
+    errEl.style.display = 'none';
+    if (!name || !email || !email.includes('@') || !email.includes('.')) {
+      errEl.style.display = 'block';
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Locking in your deal...';
+    try {
+      await fetch(SHEET_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, timestamp: new Date().toISOString() })
+      });
+    } catch(e) {}
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('form-card').style.display = 'none';
+    document.getElementById('confirm-screen').style.display = 'flex';
+    document.getElementById('confirm-name-display').innerHTML = 'Signed up as <strong>' + esc(name) + '</strong> · ' + esc(email);
+  }
+
+  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  checkExpiry();
+</script>
+</body>
+</html>
