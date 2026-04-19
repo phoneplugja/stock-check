@@ -12,7 +12,6 @@
     --pink-light: rgba(255,31,142,0.12);
     --cyan: #00d4d4;
     --cyan-dark: #00a8a8;
-    --gold: #f5c842;
     --black: #0a0a0a;
     --black-2: #111111;
     --black-3: #1a1a1a;
@@ -60,13 +59,12 @@
     z-index: 1;
     width: 100%;
     max-width: 500px;
-    padding: 1.5rem 1.25rem 4rem;
+    padding: 1.5rem 1.25rem 3rem;
     display: flex;
     flex-direction: column;
     align-items: center;
   }
 
-  /* HEADER */
   .top-bar {
     width: 100%;
     display: flex;
@@ -98,7 +96,6 @@
   .brand-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--pink); }
   .brand-sub { color: rgba(255,255,255,0.4); font-size: 0.68rem; }
 
-  /* EVENT HEADER */
   .event-host {
     display: inline-flex;
     align-items: center;
@@ -123,21 +120,70 @@
     letter-spacing: 0.02em;
   }
 
-  .event-title .carnival {
-    font-size: 3.2rem;
+  .event-title .carnival { font-size: 3.2rem; color: var(--white); display: block; text-shadow: 3px 3px 0px var(--pink); }
+  .event-title .cooldown { font-size: 3.2rem; color: var(--cyan); display: block; text-shadow: 3px 3px 0px var(--cyan-dark); }
+
+  /* COUNTDOWN */
+  .countdown-wrap {
+    width: 100%;
+    background: var(--black-3);
+    border: 1px solid rgba(255,31,142,0.25);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+    margin: 1.25rem 0;
+  }
+
+  .countdown-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--pink);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.75rem;
+  }
+
+  .countdown-timer {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .countdown-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: var(--black-2);
+    border: 1px solid rgba(255,31,142,0.2);
+    border-radius: 8px;
+    padding: 8px 14px;
+    min-width: 64px;
+  }
+
+  .countdown-num {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.75rem;
+    font-weight: 800;
     color: var(--white);
-    display: block;
-    text-shadow: 3px 3px 0px var(--pink);
+    line-height: 1;
   }
 
-  .event-title .cooldown {
-    font-size: 3.2rem;
-    color: var(--cyan);
-    display: block;
-    text-shadow: 3px 3px 0px var(--cyan-dark);
+  .countdown-unit {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
   }
 
-  /* EVENT INFO STRIP */
+  .countdown-sep {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--pink);
+    margin-bottom: 12px;
+  }
+
   .event-info {
     display: flex;
     align-items: center;
@@ -148,39 +194,16 @@
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: var(--radius);
     overflow: hidden;
-    margin: 1.25rem 0;
+    margin-bottom: 1.25rem;
   }
 
-  .event-info-item {
-    flex: 1;
-    padding: 10px 8px;
-    text-align: center;
-    border-right: 1px solid rgba(255,255,255,0.06);
-  }
-
+  .event-info-item { flex: 1; padding: 10px 8px; text-align: center; border-right: 1px solid rgba(255,255,255,0.06); }
   .event-info-item:last-child { border-right: none; }
-
-  .event-info-label {
-    font-size: 0.6rem;
-    color: rgba(255,255,255,0.3);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 3px;
-    font-weight: 600;
-  }
-
-  .event-info-value {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: var(--white);
-    line-height: 1.2;
-  }
-
+  .event-info-label { font-size: 0.6rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; font-weight: 600; }
+  .event-info-value { font-family: 'Space Grotesk', sans-serif; font-size: 0.82rem; font-weight: 700; color: var(--white); line-height: 1.2; }
   .event-info-value.pink { color: var(--pink); }
   .event-info-value.cyan { color: var(--cyan); }
 
-  /* EXCLUSIVE BANNER */
   .exclusive-banner {
     width: 100%;
     background: linear-gradient(135deg, var(--pink), #ff6b2b);
@@ -192,38 +215,15 @@
     overflow: hidden;
   }
 
-  .exclusive-banner::before {
-    content: '★';
-    position: absolute;
-    font-size: 6rem;
-    color: rgba(255,255,255,0.05);
-    top: -20px;
-    right: -10px;
-  }
+  .exclusive-banner::before { content: '★'; position: absolute; font-size: 6rem; color: rgba(255,255,255,0.05); top: -20px; right: -10px; }
+  .exclusive-banner-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(255,255,255,0.7); margin-bottom: 4px; }
+  .exclusive-banner-title { font-family: 'Space Grotesk', sans-serif; font-size: 1.1rem; font-weight: 800; color: var(--white); line-height: 1.3; }
 
-  .exclusive-banner-label {
-    font-size: 0.65rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: rgba(255,255,255,0.7);
-    margin-bottom: 4px;
-  }
-
-  .exclusive-banner-title {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: var(--white);
-    line-height: 1.3;
-  }
-
-  /* DEAL CARDS */
   .deals { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-bottom: 1.25rem; }
 
   .deal-card {
     background: var(--black-3);
-    border: 1px solid rgba(0,212,212,0.2);
+    border: 1px solid rgba(255,255,255,0.12);
     border-radius: var(--radius);
     padding: 1rem 1.25rem;
     display: flex;
@@ -231,16 +231,12 @@
     gap: 12px;
   }
 
-  .deal-card:first-child { border-color: rgba(255,31,142,0.25); }
-
   .deal-icon { font-size: 1.6rem; flex-shrink: 0; }
-  .deal-label { font-size: 0.65rem; color: var(--cyan); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
-  .deal-card:first-child .deal-label { color: var(--pink); }
+  .deal-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
   .deal-text { font-family: 'Space Grotesk', sans-serif; font-size: 0.95rem; font-weight: 700; color: var(--white); line-height: 1.3; }
   .deal-sub { font-size: 0.7rem; color: rgba(255,255,255,0.35); margin-top: 2px; }
   .deal-or { text-align: center; font-size: 0.7rem; color: rgba(255,255,255,0.25); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
 
-  /* FORM */
   .form-card {
     background: var(--black-3);
     border: 1px solid rgba(255,31,142,0.2);
@@ -251,7 +247,28 @@
   }
 
   .form-title { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
-  .form-subtitle { font-size: 0.78rem; color: rgba(255,255,255,0.35); margin-bottom: 1.25rem; line-height: 1.5; }
+  .form-subtitle { font-size: 0.78rem; color: rgba(255,255,255,0.35); margin-bottom: 6px; line-height: 1.5; }
+
+  .form-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 1.25rem;
+    padding: 10px 12px;
+    background: rgba(255,31,142,0.07);
+    border: 1px solid rgba(255,31,142,0.2);
+    border-radius: 8px;
+  }
+
+  .form-notice-item {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.7);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .form-notice-item span { color: var(--pink); font-weight: 700; }
 
   .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
   .form-group label { font-size: 0.68rem; font-weight: 700; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.07em; }
@@ -326,15 +343,13 @@
 
   .confirm-card-title { font-size: 0.65rem; font-weight: 700; color: var(--pink); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem; }
   .confirm-deal { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 4px; line-height: 1.4; }
-  .confirm-deal span { color: var(--cyan); }
 
   .confirm-steps { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,31,142,0.15); display: flex; flex-direction: column; gap: 8px; }
   .confirm-step { display: flex; align-items: flex-start; gap: 10px; font-size: 0.82rem; color: rgba(255,255,255,0.65); line-height: 1.4; text-align: left; }
   .confirm-step-num { width: 20px; height: 20px; background: var(--pink); color: var(--white); border-radius: 50%; font-size: 0.65rem; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
-  .confirm-name { font-size: 0.78rem; color: rgba(255,255,255,0.3); margin-top: 0.5rem; }
-  .confirm-name strong { color: var(--pink); }
+  .confirm-name { font-size: 0.78rem; color: rgba(255,255,255,0.4); margin-top: 0.5rem; margin-bottom: 1rem; }
+  .confirm-name strong { color: var(--white); }
 
-  /* CONTACT CARD ON CONFIRM */
   .contact-confirm {
     width: 100%;
     background: var(--black-3);
@@ -345,14 +360,11 @@
   }
 
   .contact-confirm-title { font-size: 0.65rem; font-weight: 700; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem; }
-
   .contact-confirm-item { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
   .contact-confirm-item:last-child { margin-bottom: 0; }
-
   .contact-confirm-icon { width: 32px; height: 32px; background: rgba(0,212,212,0.1); border: 1px solid rgba(0,212,212,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
   .contact-confirm-label { font-size: 0.62rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
   .contact-confirm-value { font-size: 0.82rem; font-weight: 600; color: var(--white); }
-  .contact-confirm-value.pink { color: var(--pink); }
 
   /* EXPIRED */
   .expired-screen { display: none; flex-direction: column; align-items: center; text-align: center; padding: 2rem 0; }
@@ -361,11 +373,55 @@
   .expired-sub { font-size: 0.875rem; color: rgba(255,255,255,0.3); line-height: 1.6; }
 
   /* FOOTER */
-  .page-footer { text-align: center; font-size: 0.68rem; color: rgba(255,255,255,0.18); line-height: 1.6; margin-top: 0.5rem; }
-  .page-footer a { color: var(--pink); opacity: 0.8; text-decoration: none; }
+  .page-footer {
+    text-align: center;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    width: 100%;
+  }
+
+  .footer-brand {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--white);
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+  }
+
+  .footer-brand .plug { color: var(--cyan); }
+
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .footer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 18px;
+    border-radius: 99px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-decoration: none;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+  }
+
+  .footer-btn.whatsapp { background: #25D366; color: var(--white); }
+  .footer-btn.whatsapp:hover { background: #1ebe5d; transform: translateY(-1px); }
+
+  .footer-btn.instagram { background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: var(--white); }
+  .footer-btn.instagram:hover { opacity: 0.9; transform: translateY(-1px); }
 
   @media (max-width: 480px) {
     .event-title .carnival, .event-title .cooldown { font-size: 2.6rem; }
+    .countdown-block { min-width: 54px; padding: 8px 10px; }
+    .countdown-num { font-size: 1.5rem; }
   }
 </style>
 </head>
@@ -373,7 +429,6 @@
 
 <div class="page">
 
-  <!-- TOP BAR -->
   <div class="top-bar">
     <div class="top-logo"><img src="logo.png" alt="The Phone Plug"></div>
     <div class="top-brand">
@@ -383,7 +438,6 @@
     </div>
   </div>
 
-  <!-- EVENT HEADER -->
   <div class="event-host">🎪 Soca Camp Presents</div>
 
   <div class="event-title">
@@ -391,8 +445,19 @@
     <span class="cooldown">COOLDOWN</span>
   </div>
 
-  <!-- EVENT INFO -->
-  <div class="event-info" id="main-content">
+  <!-- COUNTDOWN -->
+  <div class="countdown-wrap" id="main-content">
+    <div class="countdown-label">⏰ Offer closes in</div>
+    <div class="countdown-timer">
+      <div class="countdown-block"><div class="countdown-num" id="cd-hours">00</div><div class="countdown-unit">Hours</div></div>
+      <div class="countdown-sep">:</div>
+      <div class="countdown-block"><div class="countdown-num" id="cd-mins">00</div><div class="countdown-unit">Mins</div></div>
+      <div class="countdown-sep">:</div>
+      <div class="countdown-block"><div class="countdown-num" id="cd-secs">00</div><div class="countdown-unit">Secs</div></div>
+    </div>
+  </div>
+
+  <div class="event-info">
     <div class="event-info-item">
       <div class="event-info-label">Date</div>
       <div class="event-info-value pink">April 19</div>
@@ -407,13 +472,11 @@
     </div>
   </div>
 
-  <!-- EXCLUSIVE BANNER -->
   <div class="exclusive-banner">
     <div class="exclusive-banner-label">⚡ Exclusive Attendee Offer — The Phone Plug</div>
-    <div class="exclusive-banner-title">Lock In Your Discount Before You Leave Tonight</div>
+    <div class="exclusive-banner-title">Lock In Your Discount Before It's Gone!</div>
   </div>
 
-  <!-- DEALS -->
   <div class="deals">
     <div class="deal-card">
       <div class="deal-icon">📱</div>
@@ -428,29 +491,35 @@
       <div class="deal-icon">💰</div>
       <div>
         <div class="deal-label">Option 2</div>
-        <div class="deal-text">$5,000 JMD off a qualifying purchase</div>
+        <div class="deal-text">Up to $5,000 JMD off a qualifying purchase</div>
         <div class="deal-sub">Phones, tablets & electronic gadgets</div>
       </div>
     </div>
   </div>
 
-  <!-- FORM -->
   <div class="form-card" id="form-card">
     <div class="form-title">Claim Your Discount</div>
-    <div class="form-subtitle">Enter your details to lock in your deal. No coupon needed — just give us your name and email when you visit us in store.</div>
+    <div class="form-subtitle">Enter your details below to lock in your exclusive deal — redeemable in store at your convenience.</div>
+
+    <div class="form-notice">
+      <div class="form-notice-item">✅ <span>No code needed</span> — just your name & email in store</div>
+      <div class="form-notice-item">🎯 <span>One-time discount</span> per person</div>
+      <div class="form-notice-item">♾️ <span>No expiry</span> — redeem whenever suits you</div>
+    </div>
+
     <div class="form-group">
       <label>Your Name</label>
-      <input type="text" id="input-name" placeholder="e.g. Roselyn Henry" autocomplete="name">
+      <input type="text" id="input-name" placeholder="e.g. Marcus Thompson" autocomplete="name">
     </div>
     <div class="form-group">
       <label>Email Address</label>
-      <input type="email" id="input-email" placeholder="e.g. roselyn@gmail.com" autocomplete="email">
+      <input type="email" id="input-email" placeholder="e.g. marcus.t@gmail.com" autocomplete="email">
     </div>
     <button class="submit-btn" id="submit-btn" onclick="handleSubmit()">🎪 Lock In My Discount</button>
-    <div class="error-msg" id="error-msg">Please enter a valid name and email address.</div>
+    <div class="error-msg" id="error-msg">Please enter your name and a valid email address.</div>
   </div>
 
-  <!-- CONFIRMATION SCREEN -->
+  <!-- CONFIRMATION -->
   <div class="confirm-screen" id="confirm-screen">
     <div class="confirm-glow">🎉</div>
     <div class="confirm-title">You're Locked In!</div>
@@ -458,9 +527,9 @@
 
     <div class="confirm-card">
       <div class="confirm-card-title">Your Exclusive Deal</div>
-      <div class="confirm-deal"><span>30% OFF</span> any accessories purchase</div>
+      <div class="confirm-deal">30% OFF any accessories purchase</div>
       <div class="confirm-deal" style="font-size:0.82rem;color:rgba(255,255,255,0.4);font-weight:500;">— or —</div>
-      <div class="confirm-deal"><span>$5,000 JMD OFF</span> a qualifying phone, tablet or gadget</div>
+      <div class="confirm-deal">Up to $5,000 JMD OFF a qualifying phone, tablet or gadget</div>
       <div class="confirm-steps">
         <div class="confirm-step">
           <div class="confirm-step-num">1</div>
@@ -472,7 +541,7 @@
         </div>
         <div class="confirm-step">
           <div class="confirm-step-num">3</div>
-          <span>Choose your deal and <strong style="color:#fff">save big</strong>. That's it! 🔥</span>
+          <span><strong style="color:#fff">No code needed</strong> — we'll look you up and apply your discount on the spot. 🔥</span>
         </div>
       </div>
     </div>
@@ -485,7 +554,7 @@
         <div class="contact-confirm-icon">📸</div>
         <div>
           <div class="contact-confirm-label">Instagram — Follow Us!</div>
-          <div class="contact-confirm-value pink">@phoneplug_ja</div>
+          <div class="contact-confirm-value" style="color:var(--pink);">@phoneplug_ja</div>
         </div>
       </div>
       <div class="contact-confirm-item">
@@ -519,24 +588,44 @@
     <p class="expired-sub">The Carnival Cool Down exclusive has ended.<br>Visit The Phone Plug in store or contact us for our latest deals!</p>
   </div>
 
+  <!-- FOOTER -->
   <div class="page-footer">
-    <strong style="color:rgba(255,255,255,0.35)">The Phone Plug</strong> &nbsp;·&nbsp;
-    <a href="https://wa.me/18764905515">WhatsApp Us</a> &nbsp;·&nbsp;
-    @phoneplug_ja
+    <div class="footer-brand">THE PHONE <span class="plug">PLUG</span></div>
+    <div class="footer-links">
+      <a href="https://wa.me/18764905515" class="footer-btn whatsapp" target="_blank">💬 WhatsApp Us</a>
+      <a href="https://www.instagram.com/phoneplug_ja" class="footer-btn instagram" target="_blank">📸 @phoneplug_ja</a>
+    </div>
   </div>
 
 </div>
 
 <script>
   const EXPIRY = new Date('2026-04-22T04:59:00Z');
-  const SHEET_URL = 'https://script.google.com/macros/s/AKfycbySX8baQFCKrPL83QdEaO7saxtcAq0aOOV_ljFgxOx0QcGgUyUWNnbSyykTpJAUAOkWmQ/exec';
+  const SHEET_URL = 'AIzaSyDHjrul0_yuMA54Ooa-Xtjgiazt6GnAB9Y';
 
   function checkExpiry() {
     if (new Date() > EXPIRY) {
       document.getElementById('main-content').style.display = 'none';
       document.getElementById('form-card').style.display = 'none';
       document.getElementById('expired-screen').style.display = 'flex';
+      return true;
     }
+    return false;
+  }
+
+  function updateCountdown() {
+    const now = new Date();
+    const diff = EXPIRY - now;
+    if (diff <= 0) {
+      checkExpiry();
+      return;
+    }
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const secs = Math.floor((diff % (1000 * 60)) / 1000);
+    document.getElementById('cd-hours').textContent = String(hours).padStart(2, '0');
+    document.getElementById('cd-mins').textContent = String(mins).padStart(2, '0');
+    document.getElementById('cd-secs').textContent = String(secs).padStart(2, '0');
   }
 
   async function handleSubmit() {
@@ -545,7 +634,8 @@
     const errEl = document.getElementById('error-msg');
     const btn = document.getElementById('submit-btn');
     errEl.style.display = 'none';
-    if (!name || !email || !email.includes('@') || !email.includes('.')) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!name || !email || !emailRegex.test(email)) {
       errEl.style.display = 'block';
       return;
     }
@@ -567,7 +657,10 @@
 
   function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  checkExpiry();
+  if (!checkExpiry()) {
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
+  }
 </script>
 </body>
 </html>
