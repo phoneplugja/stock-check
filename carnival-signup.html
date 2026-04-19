@@ -522,7 +522,7 @@
   <!-- CONFIRMATION -->
   <div class="confirm-screen" id="confirm-screen">
     <div class="confirm-glow">🎉</div>
-    <div class="confirm-title">You're Locked In!</div>
+    <div class="confirm-title" id="confirm-title">You're Locked In!</div>
     <p class="confirm-sub">Welcome to the exclusive circle. Your Phone Plug discount is secured and ready whenever you walk through our doors.</p>
 
     <div class="confirm-card">
@@ -653,6 +653,7 @@
     document.getElementById('form-card').style.display = 'none';
     document.getElementById('confirm-screen').style.display = 'flex';
     document.getElementById('confirm-name-display').innerHTML = 'Signed up as <strong>' + esc(name) + '</strong> · ' + esc(email);
+document.getElementById('confirm-title').textContent = esc(name.split(' ')[0]) + ', You\'re Locked In!';
   }
 
   function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
