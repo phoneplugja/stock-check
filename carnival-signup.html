@@ -123,7 +123,6 @@
   .event-title .carnival { font-size: 3.2rem; color: var(--white); display: block; text-shadow: 3px 3px 0px var(--pink); }
   .event-title .cooldown { font-size: 3.2rem; color: var(--cyan); display: block; text-shadow: 3px 3px 0px var(--cyan-dark); }
 
-  /* COUNTDOWN */
   .countdown-wrap {
     width: 100%;
     background: var(--black-3);
@@ -188,7 +187,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0;
     width: 100%;
     background: var(--black-3);
     border: 1px solid rgba(255,255,255,0.08);
@@ -247,7 +245,7 @@
   }
 
   .form-title { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 700; color: var(--white); margin-bottom: 4px; }
-  .form-subtitle { font-size: 0.78rem; color: rgba(255,255,255,0.35); margin-bottom: 6px; line-height: 1.5; }
+  .form-subtitle { font-size: 0.78rem; color: rgba(255,255,255,0.35); margin-bottom: 10px; line-height: 1.5; }
 
   .form-notice {
     display: flex;
@@ -260,14 +258,7 @@
     border-radius: 8px;
   }
 
-  .form-notice-item {
-    font-size: 0.75rem;
-    color: rgba(255,255,255,0.7);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
+  .form-notice-item { font-size: 0.75rem; color: rgba(255,255,255,0.7); display: flex; align-items: flex-start; gap: 6px; line-height: 1.4; }
   .form-notice-item span { color: var(--pink); font-weight: 700; }
 
   .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
@@ -310,7 +301,6 @@
   .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
   .error-msg { color: #e74c3c; font-size: 0.78rem; margin-top: 8px; display: none; }
 
-  /* CONFIRMATION */
   .confirm-screen { display: none; flex-direction: column; align-items: center; text-align: center; width: 100%; }
 
   .confirm-glow {
@@ -329,7 +319,7 @@
     50% { box-shadow: 0 0 60px rgba(255,31,142,0.6), 0 0 100px rgba(255,31,142,0.25); }
   }
 
-  .confirm-title { font-family: 'Black Ops One', cursive; font-size: 2rem; color: var(--pink); margin-bottom: 0.5rem; text-shadow: 2px 2px 0 var(--pink-dark); }
+  .confirm-title { font-family: 'Black Ops One', cursive; font-size: 1.75rem; color: var(--pink); margin-bottom: 0.5rem; text-shadow: 2px 2px 0 var(--pink-dark); line-height: 1.2; }
   .confirm-sub { font-size: 0.9rem; color: rgba(255,255,255,0.5); margin-bottom: 1.75rem; line-height: 1.6; max-width: 340px; }
 
   .confirm-card {
@@ -366,13 +356,11 @@
   .contact-confirm-label { font-size: 0.62rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
   .contact-confirm-value { font-size: 0.82rem; font-weight: 600; color: var(--white); }
 
-  /* EXPIRED */
   .expired-screen { display: none; flex-direction: column; align-items: center; text-align: center; padding: 2rem 0; }
   .expired-icon { font-size: 3rem; margin-bottom: 1rem; }
   .expired-title { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; font-weight: 700; color: rgba(255,255,255,0.5); margin-bottom: 0.5rem; }
   .expired-sub { font-size: 0.875rem; color: rgba(255,255,255,0.3); line-height: 1.6; }
 
-  /* FOOTER */
   .page-footer {
     text-align: center;
     margin-top: 1.5rem;
@@ -381,23 +369,10 @@
     width: 100%;
   }
 
-  .footer-brand {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 1rem;
-    font-weight: 800;
-    color: var(--white);
-    letter-spacing: 0.05em;
-    margin-bottom: 1rem;
-  }
-
+  .footer-brand { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; font-weight: 800; color: var(--white); letter-spacing: 0.05em; margin-bottom: 1rem; }
   .footer-brand .plug { color: var(--cyan); }
 
-  .footer-links {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
+  .footer-links { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
 
   .footer-btn {
     display: inline-flex;
@@ -414,7 +389,6 @@
 
   .footer-btn.whatsapp { background: #25D366; color: var(--white); }
   .footer-btn.whatsapp:hover { background: #1ebe5d; transform: translateY(-1px); }
-
   .footer-btn.instagram { background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: var(--white); }
   .footer-btn.instagram:hover { opacity: 0.9; transform: translateY(-1px); }
 
@@ -445,7 +419,6 @@
     <span class="cooldown">COOLDOWN</span>
   </div>
 
-  <!-- COUNTDOWN -->
   <div class="countdown-wrap" id="main-content">
     <div class="countdown-label">⏰ Offer closes in</div>
     <div class="countdown-timer">
@@ -499,11 +472,11 @@
 
   <div class="form-card" id="form-card">
     <div class="form-title">Claim Your Discount</div>
-    <div class="form-subtitle">Enter your details below to lock in your exclusive deal — redeemable in store at your convenience.</div>
+    <div class="form-subtitle">Enter your details below to lock in your exclusive deal — redeemable in store at your convenience. Please note this is a one-time offer per person and duplicate entries will not be honoured.</div>
 
     <div class="form-notice">
       <div class="form-notice-item">✅ <span>No code needed</span> — just your name & email in store</div>
-      <div class="form-subtitle">Enter your details below to lock in your exclusive deal — redeemable in store at your convenience.</div>
+      <div class="form-notice-item">🎯 <span>One-time discount</span> per person — duplicate entries won't be honoured</div>
       <div class="form-notice-item">♾️ <span>No expiry</span> — redeem whenever suits you</div>
     </div>
 
@@ -616,10 +589,7 @@
   function updateCountdown() {
     const now = new Date();
     const diff = EXPIRY - now;
-    if (diff <= 0) {
-      checkExpiry();
-      return;
-    }
+    if (diff <= 0) { checkExpiry(); return; }
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const secs = Math.floor((diff % (1000 * 60)) / 1000);
@@ -652,8 +622,9 @@
     document.getElementById('main-content').style.display = 'none';
     document.getElementById('form-card').style.display = 'none';
     document.getElementById('confirm-screen').style.display = 'flex';
+    const firstName = esc(name.split(' ')[0]);
+    document.getElementById('confirm-title').textContent = firstName + ', You\'re Locked In!';
     document.getElementById('confirm-name-display').innerHTML = 'Signed up as <strong>' + esc(name) + '</strong> · ' + esc(email);
-document.getElementById('confirm-title').textContent = esc(name.split(' ')[0]) + ', You\'re Locked In!';
   }
 
   function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
