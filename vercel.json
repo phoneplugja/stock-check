@@ -1,5 +1,7 @@
 {
   "rewrites": [
-    { "source": "/carnival-cooldown", "destination": "/carnival-signup.html" }
+    { "source": "/carnival-cooldown", "destination": "/carnival-signup.html" },
+    { "source": "/repairs", "destination": "/repairs.html" },
+    { "source": "/manage",  "destination": "/manage.html"  }
   ]
 }
