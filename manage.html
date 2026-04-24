@@ -11,7 +11,12 @@
 
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
   <script>
+    // Firebase init
     firebase.initializeApp({
       apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
       authDomain: "phone-plug-3a7fe.firebaseapp.com",
@@ -20,16 +25,14 @@
       messagingSenderId: "847520590345",
       appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
     });
-    const _db = firebase.firestore();
-  </script>
+    var _db = firebase.firestore();
 
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-  <script>
-    const { useState, useEffect, useRef, useCallback } = React;
-    const XLSX = window.XLSX;
+    // React hooks - must be var so they're accessible everywhere
+    var useState    = React.useState;
+    var useEffect   = React.useEffect;
+    var useRef      = React.useRef;
+    var useCallback = React.useCallback;
+    var XLSX        = window.XLSX;
 
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 /* @jsx React.createElement */
