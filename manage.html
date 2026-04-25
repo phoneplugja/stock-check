@@ -179,8 +179,8 @@ const currentYear = new Date().getFullYear();
 // _db set globally
 const load = async key => {
   try {
-    const s = await getDoc(doc(_db, "tpp", key));
-    return s.exists() ? s.data().v : null;
+    const s = await _db.collection('tpp').doc(key).get();
+    return s.exists ? s.data().v : null;
   } catch (e) {
     console.error("FB load:", e);
     return null;
@@ -188,10 +188,7 @@ const load = async key => {
 };
 const save = async (key, val) => {
   try {
-    await setDoc(doc(_db, "tpp", key), {
-      v: val,
-      ts: Date.now()
-    });
+    await _db.collection('tpp').doc(key).set({ v: val, ts: Date.now() });
   } catch (e) {
     console.error("FB save:", e);
   }
