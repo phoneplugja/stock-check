@@ -8,15 +8,17 @@
 </head>
 <body>
   <div id="root"></div>
-
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js" defer></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js" defer></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js" defer></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
   <script>
-    firebase.initializeApp({
+    function startApp() {
+      if (typeof firebase === 'undefined' || typeof firebase.firestore === 'undefined') {
+        setTimeout(startApp, 50);
+        return;
+      }
       apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
       authDomain: "phone-plug-3a7fe.firebaseapp.com",
       projectId: "phone-plug-3a7fe",
@@ -151,14 +153,7 @@ const fmtMoney = n => {
 const isRegression = (from, to) => STATUS_ORDER.indexOf(to) < STATUS_ORDER.indexOf(from);
 const currentYear = new Date().getFullYear();
 // ── Firebase ──────────────────────────────────────────────────────────────────
-const _fbAppIgnore = ({
-  apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
-  authDomain: "phone-plug-3a7fe.firebaseapp.com",
-  projectId: "phone-plug-3a7fe",
-  storageBucket: "phone-plug-3a7fe.firebasestorage.app",
-  messagingSenderId: "847520590345",
-  appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
-});
+// firebase init in HTML
 // _db set in HTML
 const load = async key => {
   try {
@@ -1888,10 +1883,14 @@ function EodForm({
   };
   const [f, setF] = useState(empty);
   const [saved, setSaved] = useState(false);
-  const set = (k, v) => setF(p => ({
-    ...p,
-    [k]: v
-  }));
+  const [balErr, setBalErr] = useState("");
+  const set = (k, v) => {
+    setF(p => ({
+      ...p,
+      [k]: v
+    }));
+    setBalErr("");
+  };
   const n = k => parseFloat(f[k]) || 0;
   const totalCashAfter = n("float_start") + n("cash_sales") + n("other_cash_in") - n("cash_out");
   const totalCard = n("debit_card") + n("credit_card") + n("other_card") + n("card_prev_days");
@@ -1902,6 +1901,16 @@ function EodForm({
       alert("Select a date.");
       return;
     }
+    // ── Cash balance check ────────────────────────────────────────────────────
+    const allExp = await loadArr("tpp-expenses");
+    const cashExpForDay = allExp.filter(e => !e.voided && e.date === f.date && e.payment_method === "Cash").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+    const cashOut = n("cash_out");
+    if (Math.abs(cashOut - cashExpForDay) > 0.01) {
+      const diff = cashOut - cashExpForDay;
+      setBalErr(diff > 0 ? `⚠️ Cash Out (JMD ${cashOut.toLocaleString()}) is JMD ${diff.toLocaleString()} more than cash expenses logged for ${f.date} (JMD ${cashExpForDay.toLocaleString()}). Please log the missing expense entry first.` : `⚠️ Cash Out (JMD ${cashOut.toLocaleString()}) is JMD ${Math.abs(diff).toLocaleString()} less than cash expenses logged for ${f.date} (JMD ${cashExpForDay.toLocaleString()}). Please correct the Cash Out figure or check your expense entries.`);
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
     const ex = await loadArr("tpp-eod");
     await save("tpp-eod", [{
       ...f,
@@ -1915,6 +1924,7 @@ function EodForm({
     setTimeout(() => {
       setSaved(false);
       setF(empty);
+      setBalErr("");
       if (onDone) onDone();
     }, 2000);
   };
@@ -2126,13 +2136,24 @@ function EodForm({
     }
   }, fmtMoney(totalRevenue))), /*#__PURE__*/React.createElement(Card, {
     style: {
-      marginBottom: 20
+      marginBottom: 14
     }
   }, /*#__PURE__*/React.createElement(ST, null, "\uD83D\uDCDD Notes"), /*#__PURE__*/React.createElement(Textarea, {
     placeholder: "Discrepancies, unusual events...",
     value: f.notes,
     onChange: e => set("notes", e.target.value)
-  })), /*#__PURE__*/React.createElement(Btn, {
+  })), balErr && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.redLt,
+      border: `1px solid #FECACA`,
+      borderRadius: 10,
+      padding: "14px 16px",
+      fontSize: 13,
+      color: T.red,
+      marginBottom: 14,
+      lineHeight: 1.6
+    }
+  }, balErr), /*#__PURE__*/React.createElement(Btn, {
     full: true,
     onClick: submit
   }, "\u2705 Submit EOD Report"));
@@ -3081,9 +3102,9 @@ function OwnerDashboard({
     const d = new Date(iso);
     return d.getMonth() === sm && d.getFullYear() === sy;
   };
-  const mE = eod.filter(r => inM(r.date || r.createdAt));
-  const mX = expenses.filter(e => inM(e.date || e.createdAt));
-  const mD = deposits.filter(d => inM(d.date || d.createdAt));
+  const mE = eod.filter(r => inM(r.date || r.createdAt) && !r.voided);
+  const mX = expenses.filter(e => inM(e.date || e.createdAt) && !e.voided);
+  const mD = deposits.filter(d => inM(d.date || d.createdAt) && !d.voided);
   const tR = mE.reduce((s, r) => s + (parseFloat(r.totalRevenue) || 0), 0);
   const tX = mX.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const tD = mD.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
@@ -3401,7 +3422,7 @@ function OwnerDashboard({
       letterSpacing: "0.5px",
       fontSize: 10
     }
-  }, ["Date", "By", "Cash", "Card", "Transfer", "Total", "Notes"].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Date", "By", "Cash", "Card", "Transfer", "Total", "Notes", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "8px 10px",
@@ -3409,10 +3430,12 @@ function OwnerDashboard({
       borderBottom: `1px solid ${T.border}`,
       whiteSpace: "nowrap"
     }
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...mE].sort((a, b) => a.date > b.date ? 1 : -1).map((r, i) => /*#__PURE__*/React.createElement("tr", {
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...eod.filter(r => inM(r.date || r.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((r, i) => /*#__PURE__*/React.createElement("tr", {
     key: i,
     style: {
-      borderBottom: `1px solid ${T.border}`
+      borderBottom: `1px solid ${T.border}`,
+      opacity: r.voided ? 0.45 : 1,
+      textDecoration: r.voided ? "line-through" : "none"
     }
   }, /*#__PURE__*/React.createElement("td", {
     style: {
@@ -3438,7 +3461,7 @@ function OwnerDashboard({
   }, fmtMoney(parseFloat(r.totalTransfer) || 0)), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px",
-      color: T.green,
+      color: r.voided ? T.muted : T.green,
       fontWeight: 700
     }
   }, fmtMoney(parseFloat(r.totalRevenue) || 0)), /*#__PURE__*/React.createElement("td", {
@@ -3450,11 +3473,42 @@ function OwnerDashboard({
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, r.notes || "—"))))))), mX.length > 0 && /*#__PURE__*/React.createElement(Card, {
+  }, r.voided ? `VOIDED: ${r.voidReason || ""}` : r.notes || "—"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: "9px 10px"
+    }
+  }, !r.voided && /*#__PURE__*/React.createElement("button", {
+    onClick: async () => {
+      const reason = prompt("Reason for voiding this EOD entry:");
+      if (!reason) return;
+      const next = eod.map((x, j) => i === eod.filter(e => inM(e.date || e.createdAt)).indexOf(r) ? {
+        ...x,
+        voided: true,
+        voidReason: reason,
+        voidedAt: new Date().toISOString()
+      } : x);
+      await save("tpp-eod", next);
+      data.eod = next;
+      setData({
+        ...data
+      });
+    },
+    style: {
+      background: T.redLt,
+      color: T.red,
+      border: "none",
+      borderRadius: 5,
+      padding: "3px 8px",
+      fontSize: 10,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
+    }
+  }, "Void")))))))), mX.length > 0 && /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement(ST, null, "Expenses \u2014 ", MONTHS[sm], " (", mX.length, ")"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(ST, null, "Expenses \u2014 ", MONTHS[sm], " (", mX.length, " active)"), /*#__PURE__*/React.createElement("div", {
     style: {
       overflowX: "auto"
     }
@@ -3471,7 +3525,7 @@ function OwnerDashboard({
       letterSpacing: "0.5px",
       fontSize: 10
     }
-  }, ["Date", "Category", "Method", "Amount", "Details", "By"].map(h => /*#__PURE__*/React.createElement("th", {
+  }, ["Date", "Category", "Method", "Amount", "Details", "By", ""].map(h => /*#__PURE__*/React.createElement("th", {
     key: h,
     style: {
       padding: "8px 10px",
@@ -3479,10 +3533,12 @@ function OwnerDashboard({
       borderBottom: `1px solid ${T.border}`,
       whiteSpace: "nowrap"
     }
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...mX].sort((a, b) => a.date > b.date ? 1 : -1).map((e, i) => /*#__PURE__*/React.createElement("tr", {
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...expenses.filter(e => inM(e.date || e.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((e, i) => /*#__PURE__*/React.createElement("tr", {
     key: i,
     style: {
-      borderBottom: `1px solid ${T.border}`
+      borderBottom: `1px solid ${T.border}`,
+      opacity: e.voided ? 0.45 : 1,
+      textDecoration: e.voided ? "line-through" : "none"
     }
   }, /*#__PURE__*/React.createElement("td", {
     style: {
@@ -3501,35 +3557,68 @@ function OwnerDashboard({
   }, e.payment_method), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px",
-      color: T.red,
+      color: e.voided ? T.muted : T.red,
       fontWeight: 700
     }
   }, fmtMoney(parseFloat(e.amount) || 0)), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px",
       color: T.muted,
-      maxWidth: 160,
+      maxWidth: 140,
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap"
     }
-  }, e.details || "—"), /*#__PURE__*/React.createElement("td", {
+  }, e.voided ? `VOIDED: ${e.voidReason || ""}` : e.details || "—"), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px"
     }
-  }, e.logged_by))))))), mD.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(ST, null, "Cash Deposits \u2014 ", MONTHS[sm]), [...mD].sort((a, b) => a.date > b.date ? 1 : -1).map((d, i) => /*#__PURE__*/React.createElement("div", {
+  }, e.logged_by), /*#__PURE__*/React.createElement("td", {
+    style: {
+      padding: "9px 10px"
+    }
+  }, !e.voided && /*#__PURE__*/React.createElement("button", {
+    onClick: async () => {
+      const reason = prompt("Reason for voiding this expense?");
+      if (!reason) return;
+      const next = expenses.map(x => x === e ? {
+        ...x,
+        voided: true,
+        voidReason: reason,
+        voidedAt: new Date().toISOString()
+      } : x);
+      await save("tpp-expenses", next);
+      setData({
+        ...data,
+        expenses: next
+      });
+    },
+    style: {
+      background: T.redLt,
+      color: T.red,
+      border: "none",
+      borderRadius: 5,
+      padding: "3px 8px",
+      fontSize: 10,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
+    }
+  }, "Void")))))))), mD.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(ST, null, "Cash Deposits \u2014 ", MONTHS[sm]), [...deposits.filter(d => inM(d.date || d.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((d, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
       padding: "10px 0",
-      borderBottom: i < mD.length - 1 ? `1px solid ${T.border}` : "none",
-      fontSize: 13
+      borderBottom: i < deposits.filter(x => inM(x.date || x.createdAt)).length - 1 ? `1px solid ${T.border}` : "none",
+      fontSize: 13,
+      opacity: d.voided ? 0.45 : 1,
+      textDecoration: d.voided ? "line-through" : "none"
     }
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
     style: {
-      color: T.blue,
+      color: d.voided ? T.muted : T.blue,
       fontWeight: 700
     }
   }, fmtMoney(parseFloat(d.amount) || 0)), /*#__PURE__*/React.createElement("span", {
@@ -3537,17 +3626,56 @@ function OwnerDashboard({
       color: T.muted,
       marginLeft: 12
     }
-  }, d.bank, " \xB7 ", d.date), d.notes && /*#__PURE__*/React.createElement("span", {
+  }, d.bank, " \xB7 ", d.date), d.voided ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: T.red,
+      marginLeft: 8,
+      fontSize: 11
+    }
+  }, "VOIDED: ", d.voidReason) : d.notes && /*#__PURE__*/React.createElement("span", {
     style: {
       color: T.muted,
       marginLeft: 8
     }
-  }, "\u2014 ", d.notes)), /*#__PURE__*/React.createElement("span", {
+  }, "\u2014 ", d.notes)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
       color: T.muted
     }
-  }, d.logged_by)))), mE.length === 0 && mX.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, d.logged_by), !d.voided && /*#__PURE__*/React.createElement("button", {
+    onClick: async () => {
+      const reason = prompt("Reason for voiding this deposit?");
+      if (!reason) return;
+      const next = deposits.map(x => x === d ? {
+        ...x,
+        voided: true,
+        voidReason: reason,
+        voidedAt: new Date().toISOString()
+      } : x);
+      await save("tpp-deposits", next);
+      setData({
+        ...data,
+        deposits: next
+      });
+    },
+    style: {
+      background: T.redLt,
+      color: T.red,
+      border: "none",
+      borderRadius: 5,
+      padding: "3px 8px",
+      fontSize: 10,
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
+    }
+  }, "Void"))))), mE.length === 0 && mX.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "60px 20px",
@@ -3562,6 +3690,9 @@ function OwnerDashboard({
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 function Login({
   onSelect
 }) {
@@ -3570,44 +3701,67 @@ function Login({
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
+  const [attempts, setAttempts] = useState({});
   useEffect(() => {
     load("tpp-staff").then(s => setStaffList(s || []));
   }, []);
+  const getLockKey = (role, name = "") => `lockout_${role}_${name}`;
+  const isLocked = key => {
+    const data = JSON.parse(localStorage.getItem(key) || "{}");
+    if (data.until && Date.now() < data.until) return data.until;
+    return false;
+  };
+  const recordFail = key => {
+    const data = JSON.parse(localStorage.getItem(key) || "{}");
+    const count = (data.count || 0) + 1;
+    if (count >= MAX_ATTEMPTS) {
+      localStorage.setItem(key, JSON.stringify({
+        count,
+        until: Date.now() + LOCKOUT_MS
+      }));
+      return true; // locked
+    }
+    localStorage.setItem(key, JSON.stringify({
+      count
+    }));
+    return false;
+  };
+  const clearLock = key => localStorage.removeItem(key);
   const checkPin = async (role, enteredPin, staff = null) => {
-    if (role === "owner") {
-      if (enteredPin === OWNER_PIN) onSelect({
-        role: "owner",
-        name: "Owner"
-      });else {
-        setErr("Incorrect PIN.");
-        setPin("");
-      }
-    } else if (role === "staff") {
-      if (staff && enteredPin === staff.pin) onSelect({
-        role: "staff",
-        name: staff.name
-      });else {
-        setErr("Incorrect PIN.");
-        setPin("");
-      }
-    } else if (role === "dad") {
+    const key = getLockKey(role, staff?.name || "");
+    const lockedUntil = isLocked(key);
+    if (lockedUntil) {
+      const mins = Math.ceil((lockedUntil - Date.now()) / 60000);
+      setErr(`Account locked. Try again in ${mins} minute${mins !== 1 ? "s" : ""}.`);
+      setPin("");
+      return;
+    }
+    let correct = false;
+    if (role === "owner") correct = enteredPin === OWNER_PIN;else if (role === "staff") correct = staff && enteredPin === staff.pin;else if (role === "dad") {
       const dp = (await load("tpp-dad-pin")) || "0000";
-      if (enteredPin === dp) onSelect({
-        role: "dad",
-        name: "Dad"
-      });else {
-        setErr("Incorrect PIN.");
-        setPin("");
-      }
+      correct = enteredPin === dp;
     } else if (role === "technician") {
       const tp = (await load("tpp-tech-pin")) || "9999";
-      if (enteredPin === tp) onSelect({
-        role: "technician",
-        name: "Technician"
-      });else {
-        setErr("Incorrect PIN.");
-        setPin("");
+      correct = enteredPin === tp;
+    }
+    if (correct) {
+      clearLock(key);
+      const names = {
+        owner: "Owner",
+        dad: "Management",
+        technician: "Technician"
+      };
+      onSelect({
+        role,
+        name: staff?.name || names[role] || role
+      });
+    } else {
+      const locked = recordFail(key);
+      if (locked) setErr(`Too many attempts. Account locked for 30 minutes.`);else {
+        const remaining = MAX_ATTEMPTS - (JSON.parse(localStorage.getItem(key) || "{}").count || 0);
+        setErr(`Incorrect PIN. ${remaining} attempt${remaining !== 1 ? "s" : ""} remaining.`);
       }
+      setPin("");
     }
   };
   const PinEntry = ({
@@ -3746,7 +3900,7 @@ function Login({
     onSubmit: p => checkPin("owner", p)
   }));
   if (step === "dadPin") return /*#__PURE__*/React.createElement(Wrap, null, /*#__PURE__*/React.createElement(PinEntry, {
-    title: "\uD83D\uDC68 Dad",
+    title: "\uD83D\uDC68 Management",
     onBack: "role",
     onSubmit: p => checkPin("dad", p)
   }));
@@ -3894,7 +4048,7 @@ function Login({
   }, {
     id: "dadPin",
     icon: "👨",
-    label: "Dad",
+    label: "Management",
     desc: "EOD, expenses & deposits"
   }, {
     id: "technicianPin",
@@ -3965,6 +4119,9 @@ function StaffShell({
   }, {
     id: "deposit",
     label: "🏦 Deposit"
+  }, {
+    id: "reimburse",
+    label: "↩️ Reimburse"
   }, {
     id: "repairs",
     label: "🔧 Repairs"
@@ -4061,6 +4218,8 @@ function StaffShell({
   }), tab === "expense" && /*#__PURE__*/React.createElement(ExpenseForm, {
     user: user
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
+    user: user
+  }), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementForm, {
     user: user
   }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null)));
 }
@@ -4184,6 +4343,9 @@ function OwnerShell({
   }, {
     id: "staff",
     label: "👥 Staff"
+  }, {
+    id: "reimburse",
+    label: "↩️ Reimburse"
   }, {
     id: "eod",
     label: "📋 EOD"
@@ -4354,7 +4516,7 @@ function OwnerShell({
     }
   }, "Loading...") : /*#__PURE__*/React.createElement(React.Fragment, null, tab === "dashboard" && /*#__PURE__*/React.createElement(OwnerDashboard, {
     data: data
-  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
+  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementManager, null), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
     user: user,
     onDone: fetchAll
   }), tab === "staff" && /*#__PURE__*/React.createElement(StaffManager, null), tab === "phones" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -4396,6 +4558,386 @@ function OwnerShell({
   }))));
 }
 
+// ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
+function ReimbursementForm({
+  user
+}) {
+  const empty = {
+    date: todayStr(),
+    submitted_by: user?.name || "",
+    amount: "",
+    category: "",
+    payment_method_used: "Cash",
+    details: "",
+    receipt_ref: ""
+  };
+  const [f, setF] = useState(empty);
+  const [saved, setSaved] = useState(false);
+  const set = (k, v) => setF(p => ({
+    ...p,
+    [k]: v
+  }));
+  const [myReqs, setMyReqs] = useState([]);
+  useEffect(() => {
+    loadArr("tpp-reimbursements").then(all => setMyReqs(all.filter(r => r.submitted_by === user?.name).slice(0, 10)));
+  }, []);
+  const submit = async () => {
+    if (!f.amount || !f.details) {
+      alert("Please fill in Amount and Details.");
+      return;
+    }
+    const ex = await loadArr("tpp-reimbursements");
+    const rec = {
+      ...f,
+      status: "pending",
+      createdAt: new Date().toISOString()
+    };
+    await save("tpp-reimbursements", [rec, ...ex]);
+    setMyReqs(p => [rec, ...p]);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      setF(empty);
+    }, 2000);
+  };
+  const statusColor = {
+    pending: T.amber,
+    approved: T.blue,
+    paid: T.green,
+    rejected: T.red
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 520,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontFamily: "'Syne',sans-serif",
+      fontSize: 20,
+      fontWeight: 800,
+      color: T.text,
+      margin: 0
+    }
+  }, "Request Reimbursement"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: T.muted,
+      fontSize: 13,
+      marginTop: 5
+    }
+  }, "Log any money you spent out of pocket on behalf of the business.")), saved && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.greenLt,
+      border: "1px solid #A7F3D0",
+      borderRadius: 10,
+      padding: "12px 16px",
+      fontSize: 13,
+      color: T.green,
+      marginBottom: 16,
+      fontWeight: 600
+    }
+  }, "\u2705 Request submitted! The owner will review it."), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement(R2, null, /*#__PURE__*/React.createElement(Field, {
+    label: "Date",
+    required: true
+  }, /*#__PURE__*/React.createElement(Input, {
+    type: "date",
+    value: f.date,
+    onChange: e => set("date", e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Your Name"
+  }, /*#__PURE__*/React.createElement(Input, {
+    placeholder: "Your name",
+    value: f.submitted_by,
+    onChange: e => set("submitted_by", e.target.value)
+  }))), /*#__PURE__*/React.createElement(R2, null, /*#__PURE__*/React.createElement(Field, {
+    label: "Amount Spent (JMD)",
+    required: true
+  }, /*#__PURE__*/React.createElement(Input, {
+    type: "number",
+    placeholder: "0",
+    value: f.amount,
+    onChange: e => set("amount", e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Expense Category"
+  }, /*#__PURE__*/React.createElement(Sel, {
+    value: f.category,
+    onChange: e => set("category", e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "\u2014 Select \u2014"), EXPENSE_CATEGORIES.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c
+  }, c))))), /*#__PURE__*/React.createElement(Field, {
+    label: "How Did You Pay?"
+  }, /*#__PURE__*/React.createElement(Sel, {
+    value: f.payment_method_used,
+    onChange: e => set("payment_method_used", e.target.value)
+  }, /*#__PURE__*/React.createElement("option", null, "Cash"), /*#__PURE__*/React.createElement("option", null, "Personal Card"), /*#__PURE__*/React.createElement("option", null, "Bank Transfer"), /*#__PURE__*/React.createElement("option", null, "Other"))), /*#__PURE__*/React.createElement(Field, {
+    label: "Details (what was purchased)",
+    required: true
+  }, /*#__PURE__*/React.createElement(Textarea, {
+    placeholder: "e.g. Cleaning supplies from Hi-Lo \u2014 tissues, Lysol, garbage bags",
+    value: f.details,
+    onChange: e => set("details", e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Receipt / Reference No.",
+    hint: "Optional but helpful"
+  }, /*#__PURE__*/React.createElement(Input, {
+    placeholder: "e.g. receipt #4421",
+    value: f.receipt_ref,
+    onChange: e => set("receipt_ref", e.target.value)
+  })), /*#__PURE__*/React.createElement(Btn, {
+    full: true,
+    onClick: submit
+  }, "\uD83D\uDCB8 Submit Reimbursement Request")), myReqs.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(ST, null, "My Recent Requests"), myReqs.map((r, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      padding: "10px 0",
+      borderBottom: i < myReqs.length - 1 ? `1px solid ${T.border}` : "none",
+      fontSize: 13
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 600
+    }
+  }, r.details?.slice(0, 50), r.details?.length > 50 ? "..." : ""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: T.muted,
+      marginTop: 3
+    }
+  }, r.date, " \xB7 ", fmtMoney(r.amount)), r.status === "paid" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: T.green,
+      marginTop: 3
+    }
+  }, "Paid via ", r.paid_method, " on ", r.paid_date)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      background: `${statusColor[r.status] || T.muted}18`,
+      color: statusColor[r.status] || T.muted,
+      border: `1px solid ${statusColor[r.status] || T.muted}30`,
+      borderRadius: 20,
+      padding: "3px 10px",
+      fontSize: 11,
+      fontWeight: 700,
+      textTransform: "capitalize",
+      flexShrink: 0
+    }
+  }, r.status || "pending")))));
+}
+
+// ── Reimbursement Manager (Owner view) ────────────────────────────────────────
+function ReimbursementManager() {
+  const [reqs, setReqs] = useState([]);
+  const [filter, setFilter] = useState("pending");
+  useEffect(() => {
+    loadArr("tpp-reimbursements").then(setReqs);
+  }, []);
+  const update = async (idx, updates) => {
+    const next = reqs.map((r, i) => i === idx ? {
+      ...r,
+      ...updates
+    } : r);
+    await save("tpp-reimbursements", next);
+    setReqs(next);
+  };
+  const statusColor = {
+    pending: T.amber,
+    approved: T.blue,
+    paid: T.green,
+    rejected: T.red
+  };
+  const visible = reqs.filter(r => filter === "all" || r.status === filter || filter === "pending" && !r.status);
+  const pending = reqs.filter(r => !r.status || r.status === "pending").length;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 680
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 20,
+      flexWrap: "wrap",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontFamily: "'Syne',sans-serif",
+      fontSize: 20,
+      fontWeight: 800,
+      color: T.text,
+      margin: 0
+    }
+  }, "Reimbursement Requests"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: T.muted,
+      fontSize: 13,
+      marginTop: 4
+    }
+  }, pending, " pending approval")), /*#__PURE__*/React.createElement(Sel, {
+    value: filter,
+    onChange: e => setFilter(e.target.value),
+    style: {
+      width: "auto"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "pending"
+  }, "Pending (", pending, ")"), /*#__PURE__*/React.createElement("option", {
+    value: "approved"
+  }, "Approved"), /*#__PURE__*/React.createElement("option", {
+    value: "paid"
+  }, "Paid"), /*#__PURE__*/React.createElement("option", {
+    value: "rejected"
+  }, "Rejected"), /*#__PURE__*/React.createElement("option", {
+    value: "all"
+  }, "All"))), visible.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "60px 20px",
+      color: T.muted
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 12
+    }
+  }, "\uD83D\uDCB8"), /*#__PURE__*/React.createElement("div", null, "No ", filter, " requests.")) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 12
+    }
+  }, visible.map((r, i) => {
+    const idx = reqs.indexOf(r);
+    return /*#__PURE__*/React.createElement(Card, {
+      key: i
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start",
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700,
+        fontSize: 14
+      }
+    }, r.submitted_by), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.muted,
+        marginTop: 2
+      }
+    }, r.date, " \xB7 ", r.payment_method_used)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "right"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: "'Syne',sans-serif",
+        fontWeight: 800,
+        fontSize: 18,
+        color: T.blue
+      }
+    }, fmtMoney(r.amount)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        background: `${statusColor[r.status || "pending"]}18`,
+        color: statusColor[r.status || "pending"],
+        border: `1px solid ${statusColor[r.status || "pending"]}30`,
+        borderRadius: 20,
+        padding: "2px 10px",
+        fontSize: 11,
+        fontWeight: 700,
+        textTransform: "capitalize"
+      }
+    }, r.status || "pending"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: "#F9FAFB",
+        borderRadius: 8,
+        padding: "10px 12px",
+        fontSize: 13,
+        marginBottom: 12
+      }
+    }, r.details), r.category && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.muted,
+        marginBottom: 8
+      }
+    }, "Category: ", r.category, r.receipt_ref ? ` · Ref: ${r.receipt_ref}` : ""), r.status === "paid" && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.green,
+        marginBottom: 8
+      }
+    }, "\u2705 Paid via ", r.paid_method, " on ", r.paid_date), (!r.status || r.status === "pending") && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement(Btn, {
+      variant: "green",
+      style: {
+        fontSize: 12,
+        padding: "7px 14px"
+      },
+      onClick: () => update(idx, {
+        status: "approved",
+        approvedAt: new Date().toISOString()
+      })
+    }, "\u2705 Approve"), /*#__PURE__*/React.createElement(Btn, {
+      variant: "danger",
+      style: {
+        fontSize: 12,
+        padding: "7px 14px"
+      },
+      onClick: () => {
+        const reason = prompt("Reason for rejection:");
+        if (reason !== null) update(idx, {
+          status: "rejected",
+          rejectedReason: reason
+        });
+      }
+    }, "\u274C Reject")), r.status === "approved" && /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        alignItems: "center"
+      }
+    }, /*#__PURE__*/React.createElement("select", {
+      style: {
+        ...iS,
+        width: "auto",
+        fontSize: 12,
+        padding: "7px 10px"
+      },
+      onChange: e => update(idx, {
+        status: "paid",
+        paid_method: e.target.value,
+        paid_date: new Date().toLocaleDateString("en-GB")
+      })
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Mark as Paid via..."), /*#__PURE__*/React.createElement("option", null, "NCB Bank Transfer"), /*#__PURE__*/React.createElement("option", null, "Cash"), /*#__PURE__*/React.createElement("option", null, "PayPal"), /*#__PURE__*/React.createElement("option", null, "Other"))));
+  })));
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 function App() {
   const [user, setUser] = useState(null);
@@ -4422,7 +4964,11 @@ function App() {
 }
 
 
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      startApp();
+    });
   </script>
 </body>
 </html>
