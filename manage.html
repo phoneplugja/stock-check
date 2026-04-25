@@ -5,14 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Phone Plug — Business Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- All CDN scripts loaded synchronously in <head> so they are ready before body scripts run -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script>
-    // Firebase init — runs immediately after CDN scripts above
     firebase.initializeApp({
       apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
       authDomain: "phone-plug-3a7fe.firebaseapp.com",
@@ -21,25 +19,22 @@
       messagingSenderId: "847520590345",
       appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
     });
-    // Globals available to the app script below
     var _db        = firebase.firestore();
     var useState   = React.useState;
     var useEffect  = React.useEffect;
     var useRef     = React.useRef;
     var useCallback= React.useCallback;
     var XLSX       = window.XLSX;
-    // In-memory lockout store (avoids localStorage which is blocked by Edge tracking prevention)
     var _lockStore = {};
     var _localStorage = {
-      getItem:    function(k) { return _lockStore[k] !== undefined ? JSON.stringify(_lockStore[k]) : null; },
-      setItem:    function(k, v) { try { _lockStore[k] = JSON.parse(v); } catch(e) { _lockStore[k] = v; } },
-      removeItem: function(k) { delete _lockStore[k]; }
+      getItem:    function(k){ return _lockStore[k]!==undefined?JSON.stringify(_lockStore[k]):null; },
+      setItem:    function(k,v){ try{_lockStore[k]=JSON.parse(v);}catch(e){_lockStore[k]=v;} },
+      removeItem: function(k){ delete _lockStore[k]; }
     };
   </script>
 </head>
 <body>
   <div id="root"></div>
-  <!-- App script runs after body is parsed — root div exists -->
   <script>
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 /* @jsx React.createElement */
@@ -1369,8 +1364,57 @@ function TicketDetail({
   };
   const emailConfirmation = () => {
     const subject = encodeURIComponent(`Repair Confirmation — ${ticket.id}`);
-    const body = encodeURIComponent(`Dear ${ticket.customerName},\n\nThank you for choosing The Phone Plug!\n\nTicket: ${ticket.id}\nDevice: ${ticket.deviceBrand} ${ticket.deviceModel}\nIssue: ${ticket.faultDescription}\nStatus: ${STATUSES.find(s => s.id === ticket.status)?.label}` + (ticket.estimatedCost ? `\nEst. Cost: ${fmtMoney(ticket.estimatedCost)}` : "") + (ticket.estimatedCompletion ? `\nEst. Ready: ${fmtDate(ticket.estimatedCompletion)}` : "") + `\n\nTrack at ${STORE_URL}/repairs\nCollect within 3 days once notified.\n\n${ADDRESS}\n📞 ${PHONE_1} | ${PHONE_2}\n📷 ${INSTAGRAM}\n\nThe Phone Plug Team`);
-    window.open(ticket.customerEmail ? `mailto:${ticket.customerEmail}?subject=${subject}&body=${body}` : `mailto:?subject=${subject}&body=${body}`);
+    const body = encodeURIComponent(`Dear ${ticket.customerName},\n\nThank you for choosing The Phone Plug!\n\nTicket: ${ticket.id}\nDevice: ${ticket.deviceBrand} ${ticket.deviceModel}\nIssue: ${ticket.faultDescription}\nStatus: ${STATUSES.find(s => s.id === ticket.status)?.label}` + (ticket.estimatedCost ? `\nEst. Cost: ${fmtMoney(ticket.estimatedCost)}` : "") + (ticket.estimatedCompletion ? `\nEst. Ready: ${fmtDate(ticket.estimatedCompletion)}` : "") + `\n\nTrack your repair at phoneplugja.com/repairs\nPlease collect within 3 days of being notified your device is ready.\n\n${ADDRESS}\n📞 ${PHONE_1} | ${PHONE_2}\n📷 ${INSTAGRAM}\n\nThe Phone Plug Team`);
+    const to = ticket.customerEmail || "";
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`);
+  };
+  const printReceipt = () => {
+    const s = STATUSES.find(x => x.id === ticket.status) || STATUSES[0];
+    const w = window.open("", "_blank", "width=420,height=700");
+    w.document.write(`<!DOCTYPE html><html><head><title>Receipt ${ticket.id}</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0;}
+      body{font-family:Arial,sans-serif;font-size:11px;width:302px;padding:8px;}
+      .center{text-align:center;} .bold{font-weight:bold;} .line{border-top:1px dashed #000;margin:6px 0;}
+      .row{display:flex;justify-content:space-between;margin:3px 0;}
+      h1{font-size:14px;} h2{font-size:12px;margin:4px 0;}
+      .status{background:#eee;padding:3px 8px;border-radius:4px;font-weight:bold;}
+    </style></head><body>
+    <div class="center"><img src="/logo.png" style="height:40px;margin-bottom:4px;"><h1>THE PHONE PLUG</h1><p>${ADDRESS}</p><p>📞 ${PHONE_1} | ${PHONE_2}</p><p>📷 ${INSTAGRAM}</p></div>
+    <div class="line"></div>
+    <div class="center bold" style="font-size:13px;">${ticket.id}</div>
+    <div class="center" style="color:#555;font-size:10px;">${new Date(ticket.createdAt).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric"
+    })}</div>
+    <div class="center" style="margin:4px 0;"><span class="status">${s.label}</span></div>
+    <div class="line"></div>
+    <h2>CUSTOMER</h2>
+    <div class="row"><span>${ticket.customerName}</span></div>
+    <div class="row"><span>${ticket.customerPhone}</span>${ticket.customerEmail ? `<span>${ticket.customerEmail}</span>` : ""}</div>
+    <div class="line"></div>
+    <h2>DEVICE</h2>
+    <div class="row"><span>${ticket.deviceBrand} ${ticket.deviceModel}</span><span>${ticket.deviceColor || ""}</span></div>
+    ${ticket.deviceImei ? `<div class="row"><span>IMEI: ${ticket.deviceImei}</span></div>` : ""}
+    <div class="line"></div>
+    <h2>REPORTED ISSUE</h2>
+    <p style="margin:3px 0;">${ticket.faultDescription}</p>
+    ${ticket.conditions?.length ? `<p style="margin:3px 0;font-size:10px;color:#555;">Pre-existing: ${ticket.conditions.join(", ")}</p>` : ""}
+    <div class="line"></div>
+    <h2>COST & TIMELINE</h2>
+    <div class="row"><span>Estimated Cost:</span><span class="bold">${ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD"}</span></div>
+    ${ticket.finalCost ? `<div class="row"><span>FINAL COST:</span><span class="bold">${fmtMoney(ticket.finalCost)}</span></div>` : ""}
+    <div class="row"><span>Est. Ready:</span><span>${ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD"}</span></div>
+    <div class="line"></div>
+    <p style="font-size:9px;">Terms: Not liable for data loss or pre-existing damage. Collect within 3 days of pickup notification or storage fees may apply. 7-day warranty on specific repair only.</p>
+    <div class="row" style="margin-top:4px;"><span style="font-size:10px;">Terms agreed:</span><span style="font-size:10px;">${ticket.termsAgreed ? "✓ Yes — signed digitally" : "Not recorded"}</span></div>
+    ${ticket.signature ? `<div style="margin-top:6px;"><p style="font-size:10px;">Customer signature:</p><img src="${ticket.signature}" style="max-width:100%;height:50px;border:1px solid #ddd;border-radius:4px;"></div>` : `<div style="margin-top:20px;border-top:1px solid #000;padding-top:2px;font-size:10px;">Customer Signature</div>`}
+    <div class="line"></div>
+    <div class="center" style="font-size:9px;color:#777;">Track at phoneplugja.com/repairs · ${ticket.id}</div>
+    <script>window.onload=function(){window.print();}<\/script>
+    </body></html>`);
+    w.document.close();
   };
   const IR = ({
     label,
@@ -1454,6 +1498,9 @@ function TicketDetail({
     variant: "ghost",
     onClick: emailConfirmation
   }, "\uD83D\uDCE7 Email Confirmation"), /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    onClick: printReceipt
+  }, "\uD83D\uDDA8\uFE0F Print Receipt"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => setStatusMenu(!statusMenu)
   }, "\u270F\uFE0F Update Status"))), /*#__PURE__*/React.createElement(Card, {
     style: {
@@ -3093,7 +3140,8 @@ function PhoneInventory({
 
 // ── Owner Dashboard ───────────────────────────────────────────────────────────
 function OwnerDashboard({
-  data
+  data,
+  onRefresh
 }) {
   const {
     eod,
@@ -3105,6 +3153,9 @@ function OwnerDashboard({
   const [sm, setSm] = useState(now.getMonth());
   const [sy, setSy] = useState(now.getFullYear());
   const [exporting, setExporting] = useState(false);
+  const [eodSearch, setEodSearch] = useState("");
+  const [expSearch, setExpSearch] = useState("");
+  const [depSearch, setDepSearch] = useState("");
   const inM = iso => {
     if (!iso) return false;
     const d = new Date(iso);
@@ -3126,6 +3177,39 @@ function OwnerDashboard({
   const years = Array.from({
     length: 4
   }, (_, i) => currentYear - 1 + i);
+
+  // All entries for selected month (including voided) for display
+  const allMonthEod = eod.filter(r => inM(r.date || r.createdAt));
+  const allMonthExp = expenses.filter(e => inM(e.date || e.createdAt));
+  const allMonthDep = deposits.filter(d => inM(d.date || d.createdAt));
+
+  // Searched subsets
+  const searchedEod = allMonthEod.filter(r => !eodSearch || r.date?.includes(eodSearch) || r.submitted_by?.toLowerCase().includes(eodSearch.toLowerCase()) || r.notes?.toLowerCase().includes(eodSearch.toLowerCase()));
+  const searchedExp = allMonthExp.filter(e => !expSearch || e.date?.includes(expSearch) || e.category?.toLowerCase().includes(expSearch.toLowerCase()) || e.details?.toLowerCase().includes(expSearch.toLowerCase()) || e.logged_by?.toLowerCase().includes(expSearch.toLowerCase()));
+  const searchedDep = allMonthDep.filter(d => !depSearch || d.date?.includes(depSearch) || d.bank?.toLowerCase().includes(depSearch.toLowerCase()) || d.notes?.toLowerCase().includes(depSearch.toLowerCase()) || d.logged_by?.toLowerCase().includes(depSearch.toLowerCase()));
+  const voidEntry = async (collection, item, key) => {
+    const reason = prompt(`Reason for voiding this ${collection} entry?`);
+    if (!reason) return;
+    const arr = collection === "EOD" ? eod : collection === "Expense" ? expenses : deposits;
+    const storageKey = collection === "EOD" ? "tpp-eod" : collection === "Expense" ? "tpp-expenses" : "tpp-deposits";
+    const next = arr.map(x => x === item ? {
+      ...x,
+      voided: true,
+      voidReason: reason,
+      voidedAt: new Date().toISOString()
+    } : x);
+    await save(storageKey, next);
+    if (onRefresh) onRefresh();
+  };
+  const confirmDeposit = async dep => {
+    const next = deposits.map(d => d === dep ? {
+      ...d,
+      confirmed: true,
+      confirmedAt: new Date().toISOString()
+    } : d);
+    await save("tpp-deposits", next);
+    if (onRefresh) onRefresh();
+  };
   const exportExcel = async scope => {
     setExporting(true);
     try {
@@ -3409,11 +3493,34 @@ function OwnerDashboard({
     style: {
       color: T.red
     }
-  }, fmtMoney(tX))))), mE.length > 0 && /*#__PURE__*/React.createElement(Card, {
+  }, fmtMoney(tX))))), allMonthEod.length > 0 && /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement(ST, null, "EOD Reports \u2014 ", MONTHS[sm]), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+      flexWrap: "wrap",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(ST, {
+    style: {
+      margin: 0
+    }
+  }, "EOD Reports \u2014 ", MONTHS[sm]), /*#__PURE__*/React.createElement("input", {
+    placeholder: "\uD83D\uDD0E Search date, name, notes...",
+    value: eodSearch,
+    onChange: e => setEodSearch(e.target.value),
+    style: {
+      ...iS,
+      width: 220,
+      fontSize: 12,
+      padding: "6px 10px"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       overflowX: "auto"
     }
@@ -3438,7 +3545,7 @@ function OwnerDashboard({
       borderBottom: `1px solid ${T.border}`,
       whiteSpace: "nowrap"
     }
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...eod.filter(r => inM(r.date || r.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((r, i) => /*#__PURE__*/React.createElement("tr", {
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...searchedEod].sort((a, b) => a.date > b.date ? 1 : -1).map((r, i) => /*#__PURE__*/React.createElement("tr", {
     key: i,
     style: {
       borderBottom: `1px solid ${T.border}`,
@@ -3486,21 +3593,7 @@ function OwnerDashboard({
       padding: "9px 10px"
     }
   }, !r.voided && /*#__PURE__*/React.createElement("button", {
-    onClick: async () => {
-      const reason = prompt("Reason for voiding this EOD entry:");
-      if (!reason) return;
-      const next = eod.map((x, j) => i === eod.filter(e => inM(e.date || e.createdAt)).indexOf(r) ? {
-        ...x,
-        voided: true,
-        voidReason: reason,
-        voidedAt: new Date().toISOString()
-      } : x);
-      await save("tpp-eod", next);
-      data.eod = next;
-      setData({
-        ...data
-      });
-    },
+    onClick: () => voidEntry("EOD", r),
     style: {
       background: T.redLt,
       color: T.red,
@@ -3512,11 +3605,34 @@ function OwnerDashboard({
       fontFamily: "inherit",
       fontWeight: 600
     }
-  }, "Void")))))))), mX.length > 0 && /*#__PURE__*/React.createElement(Card, {
+  }, "Void")))))))), allMonthExp.length > 0 && /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 16
     }
-  }, /*#__PURE__*/React.createElement(ST, null, "Expenses \u2014 ", MONTHS[sm], " (", mX.length, " active)"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+      flexWrap: "wrap",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(ST, {
+    style: {
+      margin: 0
+    }
+  }, "Expenses \u2014 ", MONTHS[sm], " (", mX.length, " active)"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "\uD83D\uDD0E Search category, details, name...",
+    value: expSearch,
+    onChange: e => setExpSearch(e.target.value),
+    style: {
+      ...iS,
+      width: 240,
+      fontSize: 12,
+      padding: "6px 10px"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       overflowX: "auto"
     }
@@ -3541,7 +3657,7 @@ function OwnerDashboard({
       borderBottom: `1px solid ${T.border}`,
       whiteSpace: "nowrap"
     }
-  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...expenses.filter(e => inM(e.date || e.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((e, i) => /*#__PURE__*/React.createElement("tr", {
+  }, h)))), /*#__PURE__*/React.createElement("tbody", null, [...searchedExp].sort((a, b) => a.date > b.date ? 1 : -1).map((e, i) => /*#__PURE__*/React.createElement("tr", {
     key: i,
     style: {
       borderBottom: `1px solid ${T.border}`,
@@ -3586,21 +3702,7 @@ function OwnerDashboard({
       padding: "9px 10px"
     }
   }, !e.voided && /*#__PURE__*/React.createElement("button", {
-    onClick: async () => {
-      const reason = prompt("Reason for voiding this expense?");
-      if (!reason) return;
-      const next = expenses.map(x => x === e ? {
-        ...x,
-        voided: true,
-        voidReason: reason,
-        voidedAt: new Date().toISOString()
-      } : x);
-      await save("tpp-expenses", next);
-      setData({
-        ...data,
-        expenses: next
-      });
-    },
+    onClick: () => voidEntry("Expense", e),
     style: {
       background: T.redLt,
       color: T.red,
@@ -3612,29 +3714,68 @@ function OwnerDashboard({
       fontFamily: "inherit",
       fontWeight: 600
     }
-  }, "Void")))))))), mD.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(ST, null, "Cash Deposits \u2014 ", MONTHS[sm]), [...deposits.filter(d => inM(d.date || d.createdAt))].sort((a, b) => a.date > b.date ? 1 : -1).map((d, i) => /*#__PURE__*/React.createElement("div", {
+  }, "Void")))))))), allMonthDep.length > 0 && /*#__PURE__*/React.createElement(Card, {
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12,
+      flexWrap: "wrap",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(ST, {
+    style: {
+      margin: 0
+    }
+  }, "Cash Deposits \u2014 ", MONTHS[sm]), /*#__PURE__*/React.createElement("input", {
+    placeholder: "\uD83D\uDD0E Search bank, name, notes...",
+    value: depSearch,
+    onChange: e => setDepSearch(e.target.value),
+    style: {
+      ...iS,
+      width: 220,
+      fontSize: 12,
+      padding: "6px 10px"
+    }
+  })), [...searchedDep].sort((a, b) => a.date > b.date ? 1 : -1).map((d, i, arr) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: "10px 0",
-      borderBottom: i < deposits.filter(x => inM(x.date || x.createdAt)).length - 1 ? `1px solid ${T.border}` : "none",
+      padding: "12px 0",
+      borderBottom: i < arr.length - 1 ? `1px solid ${T.border}` : "none",
       fontSize: 13,
       opacity: d.voided ? 0.45 : 1,
-      textDecoration: d.voided ? "line-through" : "none"
+      flexWrap: "wrap",
+      gap: 8
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("span", {
     style: {
       color: d.voided ? T.muted : T.blue,
-      fontWeight: 700
+      fontWeight: 700,
+      textDecoration: d.voided ? "line-through" : "none"
     }
   }, fmtMoney(parseFloat(d.amount) || 0)), /*#__PURE__*/React.createElement("span", {
     style: {
       color: T.muted,
       marginLeft: 12
     }
-  }, d.bank, " \xB7 ", d.date), d.voided ? /*#__PURE__*/React.createElement("span", {
+  }, d.bank, " \xB7 ", d.date), d.reference && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: T.muted,
+      marginLeft: 8,
+      fontSize: 11
+    }
+  }, "Ref: ", d.reference), d.voided ? /*#__PURE__*/React.createElement("span", {
     style: {
       color: T.red,
       marginLeft: 8,
@@ -3645,39 +3786,53 @@ function OwnerDashboard({
       color: T.muted,
       marginLeft: 8
     }
-  }, "\u2014 ", d.notes)), /*#__PURE__*/React.createElement("div", {
+  }, "\u2014 ", d.notes), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: T.muted,
+      marginTop: 3
+    }
+  }, "By: ", d.logged_by)), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
-      alignItems: "center"
+      alignItems: "center",
+      flexShrink: 0
     }
-  }, /*#__PURE__*/React.createElement("span", {
+  }, !d.voided && !d.confirmed && /*#__PURE__*/React.createElement("button", {
+    onClick: () => confirmDeposit(d),
     style: {
+      background: T.greenLt,
+      color: T.green,
+      border: "1px solid #A7F3D0",
+      borderRadius: 6,
+      padding: "4px 10px",
       fontSize: 11,
-      color: T.muted
+      cursor: "pointer",
+      fontFamily: "inherit",
+      fontWeight: 600
     }
-  }, d.logged_by), !d.voided && /*#__PURE__*/React.createElement("button", {
-    onClick: async () => {
-      const reason = prompt("Reason for voiding this deposit?");
-      if (!reason) return;
-      const next = deposits.map(x => x === d ? {
-        ...x,
-        voided: true,
-        voidReason: reason,
-        voidedAt: new Date().toISOString()
-      } : x);
-      await save("tpp-deposits", next);
-      setData({
-        ...data,
-        deposits: next
-      });
-    },
+  }, "\u2713 Confirm Deposited"), d.confirmed && /*#__PURE__*/React.createElement("span", {
+    style: {
+      background: T.greenLt,
+      color: T.green,
+      border: "1px solid #A7F3D0",
+      borderRadius: 6,
+      padding: "4px 10px",
+      fontSize: 11,
+      fontWeight: 700
+    }
+  }, "\u2705 Confirmed ", d.confirmedAt ? new Date(d.confirmedAt).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short"
+  }) : ""), !d.voided && /*#__PURE__*/React.createElement("button", {
+    onClick: () => voidEntry("Deposit", d),
     style: {
       background: T.redLt,
       color: T.red,
       border: "none",
       borderRadius: 5,
-      padding: "3px 8px",
+      padding: "4px 8px",
       fontSize: 10,
       cursor: "pointer",
       fontFamily: "inherit",
@@ -3896,7 +4051,7 @@ function Login({
   }, "THE PHONE PLUG"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       marginTop: 3,
       textTransform: "uppercase",
       letterSpacing: "0.5px"
@@ -3925,7 +4080,7 @@ function Login({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       textAlign: "center",
       marginBottom: 18,
       textTransform: "uppercase",
@@ -3935,7 +4090,7 @@ function Login({
     style: {
       textAlign: "center",
       padding: "40px 20px",
-      color: "rgba(255,255,255,0.4)"
+      color: "rgba(255,255,255,0.9)"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4007,7 +4162,7 @@ function Login({
   }, s.name), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       marginTop: 2
     }
   }, s.role || "Staff"))))), /*#__PURE__*/React.createElement("button", {
@@ -4015,7 +4170,7 @@ function Login({
     style: {
       background: "none",
       border: "none",
-      color: "rgba(255,255,255,0.3)",
+      color: "rgba(255,255,255,0.85)",
       cursor: "pointer",
       fontSize: 13,
       display: "block",
@@ -4036,7 +4191,7 @@ function Login({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       textAlign: "center",
       marginBottom: 18,
       textTransform: "uppercase",
@@ -4106,7 +4261,7 @@ function Login({
   }, r.label), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       marginTop: 3
     }
   }, r.desc)))))));
@@ -4179,7 +4334,7 @@ function StaffShell({
   }, "THE PHONE PLUG"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.4)"
+      color: "rgba(255,255,255,0.9)"
     }
   }, "Logged in as ", user.name))), /*#__PURE__*/React.createElement("button", {
     onClick: onLogout,
@@ -4282,7 +4437,7 @@ function TechnicianShell({
   }, "THE PHONE PLUG"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.4)"
+      color: "rgba(255,255,255,0.9)"
     }
   }, "\uD83D\uDD27 Technician"))), /*#__PURE__*/React.createElement("button", {
     onClick: onLogout,
@@ -4415,7 +4570,7 @@ function OwnerShell({
   }, "THE PHONE PLUG"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
-      color: "rgba(255,255,255,0.4)",
+      color: "rgba(255,255,255,0.9)",
       marginTop: 3,
       textTransform: "uppercase",
       letterSpacing: "0.5px"
@@ -4431,7 +4586,7 @@ function OwnerShell({
       display: "flex",
       gap: 10,
       fontSize: 12,
-      color: "rgba(255,255,255,0.4)"
+      color: "rgba(255,255,255,0.9)"
     }
   }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCCB ", data.eod.length), /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCB8 ", data.expenses.length), /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCF1 ", data.phones.length)), /*#__PURE__*/React.createElement("button", {
     onClick: fetchAll,
@@ -4467,12 +4622,12 @@ function OwnerShell({
   }, /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: "rgba(255,255,255,0.35)"
+      color: "rgba(255,255,255,0.85)"
     }
   }, "\uD83D\uDCCD ", ADDRESS), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: "rgba(255,255,255,0.35)"
+      color: "rgba(255,255,255,0.85)"
     }
   }, "\uD83D\uDCDE ", PHONE_1, " | ", PHONE_2), /*#__PURE__*/React.createElement("span", {
     style: {
@@ -4523,7 +4678,8 @@ function OwnerShell({
       color: T.muted
     }
   }, "Loading...") : /*#__PURE__*/React.createElement(React.Fragment, null, tab === "dashboard" && /*#__PURE__*/React.createElement(OwnerDashboard, {
-    data: data
+    data: data,
+    onRefresh: fetchAll
   }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementManager, null), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
     user: user,
     onDone: fetchAll
@@ -4970,7 +5126,6 @@ function App() {
     onLogout: () => setUser(null)
   }));
 }
-
 
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
   </script>
