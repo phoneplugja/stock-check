@@ -1519,69 +1519,46 @@ function TicketDetail({
       if (!characteristic) throw new Error("No writable characteristic found");
       const s = STATUSES.find(x => x.id === ticket.status) || STATUSES[0];
       const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString("en-GB", {day:"2-digit",month:"short",year:"numeric"}) : "";
-      const sep = "--------------------------------
-";
+      const ESC = "\x1B";
+      const GS = "\x1D";
+      const NL = "\x0A";
+      const sep = "--------------------------------" + NL;
       const lines = [
-        "@",
-        "a",
-        "!0", "THE PHONE PLUG
-",
-        "! ",
-        "Shop 5D, Hagley Park Plaza
-",
-        "Half Way Tree, Kingston
-",
-        "Tel: " + PHONE_1 + "
-",
-        "a ", sep,
-        "a",
-        "!", ticket.id + "
-",
-        "! ",
-        date + "  [" + s.label.toUpperCase() + "]
-",
-        "a ", sep,
-        "CUSTOMER
-",
-        "E", ticket.customerName + "
-", "E ",
-        ticket.customerPhone + "
-",
-        (ticket.customerEmail ? ticket.customerEmail + "
-" : ""),
+        ESC + "@",
+        ESC + "a\x01",
+        ESC + "!\x30", "THE PHONE PLUG" + NL,
+        ESC + "!\x00",
+        "Shop 5D, Hagley Park Plaza" + NL,
+        "Half Way Tree, Kingston" + NL,
+        "Tel: " + PHONE_1 + NL,
+        ESC + "a\x00", sep,
+        ESC + "a\x01",
+        ESC + "!\x10", ticket.id + NL,
+        ESC + "!\x00",
+        date + "  [" + s.label.toUpperCase() + "]" + NL,
+        ESC + "a\x00", sep,
+        "CUSTOMER" + NL,
+        ESC + "E\x01", ticket.customerName + NL, ESC + "E\x00",
+        ticket.customerPhone + NL,
+        (ticket.customerEmail ? ticket.customerEmail + NL : ""),
         sep,
-        "DEVICE
-",
-        "E", ticket.deviceBrand + " " + ticket.deviceModel + "
-", "E ",
-        (ticket.deviceImei ? "IMEI: " + ticket.deviceImei + "
-" : ""),
+        "DEVICE" + NL,
+        ESC + "E\x01", ticket.deviceBrand + " " + ticket.deviceModel + NL, ESC + "E\x00",
+        (ticket.deviceImei ? "IMEI: " + ticket.deviceImei + NL : ""),
         sep,
-        "ISSUE
-",
-        ticket.faultDescription.substring(0,120) + "
-",
+        "ISSUE" + NL,
+        ticket.faultDescription.substring(0, 120) + NL,
         sep,
-        "COST & TIMELINE
-",
-        "Est. Cost: " + (ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD") + "
-",
-        (ticket.finalCost ? "FINAL: " + fmtMoney(ticket.finalCost) + "
-" : ""),
-        "Est. Ready: " + (ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD") + "
-",
+        "COST & TIMELINE" + NL,
+        "Est. Cost: " + (ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD") + NL,
+        (ticket.finalCost ? "FINAL: " + fmtMoney(ticket.finalCost) + NL : ""),
+        "Est. Ready: " + (ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD") + NL,
         sep,
-        "Terms: " + (ticket.termsAgreed ? "Agreed & Signed" : "Not recorded") + "
-",
-        "================================
-",
-        "a", "phoneplugja.com
-",
-        "
-
-
-",
-        "VB ",
+        "Terms: " + (ticket.termsAgreed ? "Agreed & Signed" : "Not recorded") + NL,
+        "================================" + NL,
+        ESC + "a\x01", "phoneplugja.com" + NL,
+        NL + NL + NL,
+        GS + "V\x42\x00",
       ];
       const text = lines.join("");
       const encoder = new TextEncoder();
@@ -1606,9 +1583,6 @@ function TicketDetail({
       }
     }
   };
-
-    };
-  ;
   const IR = ({
     label,
     value,
