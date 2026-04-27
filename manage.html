@@ -1424,67 +1424,87 @@ function TicketDetail({
     const printReceipt = () => {
     const s = STATUSES.find(x => x.id === ticket.status) || STATUSES[0];
     const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString("en-GB", {
-      day: "2-digit", month: "short", year: "numeric"
+      day: "2-digit",
+      month: "short",
+      year: "numeric"
     }) : "";
-    const finalHtml = ticket.finalCost ? '<div class="row"><span class="bold">FINAL:</span><span class="bold">' + fmtMoney(ticket.finalCost) + '</span></div>' : '';
+    const condHtml = ticket.conditions && ticket.conditions.length
+      ? '<div class="small" style="margin-top:2px;">Pre-existing: ' + ticket.conditions.join(", ") + '</div>'
+      : '';
+    const finalHtml = ticket.finalCost
+      ? '<div class="row"><span class="bold">FINAL COST:</span><span class="bold">' + fmtMoney(ticket.finalCost) + '</span></div>'
+      : '';
+    const emailHtml = ticket.customerEmail ? '<div>' + ticket.customerEmail + '</div>' : '';
     const imeiHtml = ticket.deviceImei ? '<div class="small">IMEI: ' + ticket.deviceImei + '</div>' : '';
-    const condHtml = ticket.conditions && ticket.conditions.length ? '<div class="small">Pre-existing: ' + ticket.conditions.slice(0,3).join(", ") + '</div>' : '';
-    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' + ticket.id + '</title>' +
-      '<style>' +
-      '@page{margin:0;size:80mm 180mm;}' +
-      '*{box-sizing:border-box;margin:0;padding:0;color:#000!important;background:transparent!important;}' +
-      'body{font-family:"Courier New",Courier,monospace;font-size:13px;color:#000;background:#fff;width:72mm;padding:2mm 3mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
-      '.center{text-align:center;}' +
-      '.bold{font-weight:bold;}' +
-      '.xlarge{font-size:16px;font-weight:bold;letter-spacing:1px;}' +
-      '.small{font-size:11px;}' +
-      '.line-solid{border-top:2px solid #000;margin:5px 0;}' +
-      '.line-dashed{border-top:1px dashed #000;margin:5px 0;}' +
-      '.row{display:flex;justify-content:space-between;margin:3px 0;}' +
-      '.section-title{font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:6px 0 2px;border-bottom:1px solid #000;}' +
-      '.box{border:2px solid #000;padding:2px 6px;display:inline-block;font-weight:bold;font-size:12px;}' +
-      '</style></head><body>' +
-      '<div class="center">' +
-      '<div class="xlarge">THE PHONE PLUG</div>' +
-      '<div class="small">Shop 5D, Hagley Park Plaza, HWT</div>' +
-      '<div class="small">Tel: ' + PHONE_1 + ' | ' + PHONE_2 + '</div>' +
-      '</div>' +
-      '<div class="line-solid"></div>' +
-      '<div class="center"><div class="xlarge">' + ticket.id + '</div>' +
-      '<div class="small">' + date + ' &nbsp; <span class="box">' + s.label.toUpperCase() + '</span></div></div>' +
-      '<div class="line-dashed"></div>' +
-      '<div class="section-title">Customer</div>' +
-      '<div class="bold">' + ticket.customerName + '</div>' +
-      '<div>' + ticket.customerPhone + '</div>' +
-      '<div class="line-dashed"></div>' +
-      '<div class="section-title">Device</div>' +
-      '<div class="bold">' + ticket.deviceBrand + ' ' + ticket.deviceModel + '</div>' +
-      imeiHtml +
-      '<div class="line-dashed"></div>' +
-      '<div class="section-title">Issue</div>' +
-      '<div style="word-wrap:break-word;">' + ticket.faultDescription.substring(0,120) + '</div>' +
-      condHtml +
-      '<div class="line-dashed"></div>' +
-      '<div class="section-title">Cost & Timeline</div>' +
-      '<div class="row"><span>Est. Cost:</span><span class="bold">' + (ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD") + '</span></div>' +
-      finalHtml +
-      '<div class="row"><span>Est. Ready:</span><span>' + (ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD") + '</span></div>' +
-      '<div class="line-dashed"></div>' +
-      '<div class="small">7-day warranty on specific repair. Collect within 3 days of notification.</div>' +
-      '<div class="row small"><span>Terms agreed:</span><span class="bold">' + (ticket.termsAgreed ? "YES - Signed" : "Not recorded") + '</span></div>' +
-      '<div class="line-solid"></div>' +
-      '<div class="center small">phoneplugja.com &nbsp;|&nbsp; ' + ticket.id + '</div>' +
-      '<div style="margin-top:3mm;"></div>' +
-      '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},400);});<\/script>' +
-      '</body></html>';
-    const w = window.open("", "_blank", "width=420,height=680");
-    if (!w) { alert("Pop-up blocked — please allow pop-ups for this site."); return; }
+    const colorHtml = ticket.deviceColor ? '<div>Colour: ' + ticket.deviceColor + '</div>' : '';
+    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' + ticket.id + '</title>'
+      + '<style>'
+      + '@page{margin:0;size:80mm auto;}'
+      + '*{box-sizing:border-box;margin:0;padding:0;color:#000!important;background:transparent!important;}'
+      + 'body{font-family:"Courier New",Courier,monospace;font-size:12px;color:#000;background:#fff;width:72mm;padding:3mm 4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+      + '.center{text-align:center;}'
+      + '.bold{font-weight:bold;}'
+      + '.large{font-size:15px;font-weight:bold;}'
+      + '.xlarge{font-size:17px;font-weight:bold;letter-spacing:1px;}'
+      + '.small{font-size:10px;}'
+      + '.line-solid{border-top:2px solid #000;margin:4px 0;}'
+      + '.line-dashed{border-top:1px dashed #000;margin:4px 0;}'
+      + '.row{display:flex;justify-content:space-between;margin:2px 0;}'
+      + '.section-title{font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:5px 0 2px;border-bottom:1px solid #000;}'
+      + '.box{border:2px solid #000;padding:2px 6px;display:inline-block;font-weight:bold;font-size:12px;}'
+      + 'img{filter:grayscale(100%) contrast(200%);}'
+      + '</style></head><body>'
+      + '<div class="center">'
+      + '<div class="xlarge">THE PHONE PLUG</div>'
+      + '<div class="small">' + ADDRESS + '</div>'
+      + '<div class="small">Tel: ' + PHONE_1 + '  |  ' + PHONE_2 + '</div>'
+      + '<div class="small">IG: ' + INSTAGRAM + '</div></div>'
+      + '<div class="line-solid"></div>'
+      + '<div class="center"><div class="xlarge">' + ticket.id + '</div>'
+      + '<div class="small">' + date + '</div>'
+      + '<div style="margin:3px 0;"><span class="box">' + s.label.toUpperCase() + '</span></div></div>'
+      + '<div class="line-dashed"></div>'
+      + '<div class="section-title">CUSTOMER</div>'
+      + '<div class="bold">' + ticket.customerName + '</div>'
+      + '<div>' + ticket.customerPhone + '</div>'
+      + emailHtml
+      + '<div class="line-dashed"></div>'
+      + '<div class="section-title">DEVICE</div>'
+      + '<div class="bold">' + ticket.deviceBrand + ' ' + ticket.deviceModel + '</div>'
+      + colorHtml + imeiHtml
+      + '<div class="line-dashed"></div>'
+      + '<div class="section-title">REPORTED ISSUE</div>'
+      + '<div style="word-wrap:break-word;">' + ticket.faultDescription + '</div>'
+      + condHtml
+      + '<div class="line-dashed"></div>'
+      + '<div class="section-title">COST &amp; TIMELINE</div>'
+      + '<div class="row"><span>Estimated Cost:</span><span class="bold">' + (ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD") + '</span></div>'
+      + finalHtml
+      + '<div class="row"><span>Est. Ready:</span><span>' + (ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD") + '</span></div>'
+      + '<div class="line-dashed"></div>'
+      + '<div class="section-title">TERMS</div>'
+      + '<div class="small">Not liable for data loss or pre-existing damage.</div>'
+      + '<div class="small">Collect within 3 days of pickup notification.</div>'
+      + '<div class="small">Storage fees may apply after 3 days.</div>'
+      + '<div class="small">7-day warranty on specific repair only.</div>'
+      + '<div class="line-dashed"></div>'
+      + '<div class="row small"><span>Terms agreed:</span><span class="bold">' + (ticket.termsAgreed ? "YES - Signed digitally" : "Not recorded") + '</span></div>'
+      + '<div class="line-solid"></div>'
+      + '<div class="center small">Track: phoneplugja.com/repairs</div>'
+      + '<div class="center small">' + ticket.id + '</div>'
+      + '<div style="margin-top:5mm;"></div>'
+      + '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},400);});<\/script>'
+      + '</body></html>';
+    const w = window.open("", "_blank", "width=450,height=750");
+    if (!w) {
+      alert("Pop-up blocked — please allow pop-ups for this site and try again.");
+      return;
+    }
     w.document.write(html);
     w.document.close();
   };
 
-
-  const IR = ({
+    const IR = ({
     label,
     value,
     blue
