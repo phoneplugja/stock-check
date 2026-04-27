@@ -34,6 +34,9 @@
       removeItem: function(k){ delete _lockStore[k]; }
     };
   </script>
+  <!-- EmailJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script>emailjs.init('BdjrEVD77D_bpBwT5');</script>
 </head>
 <body>
   <div id="root"></div>
@@ -41,13 +44,55 @@
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 
 // ── Brand constants ────────────────────────────────────────────────────────────
-const OWNER_PIN = "1876";
+const OWNER_PIN = "2727";
 const WA_NUMBER = "18764905515";
 const PHONE_1 = "876-490-5515";
 const PHONE_2 = "876-672-2442";
 const INSTAGRAM = "@phoneplug_ja";
 const ADDRESS = "Shop 5D, Hagley Park Plaza, Half Way Tree, Kingston";
 const SUPPORT_EMAIL = "support@phoneplugja.com";
+
+// ── EmailJS Config ────────────────────────────────────────────────────────────
+const EMAILJS_SERVICE_ID  = "service_3znf9oq";       // from EmailJS dashboard
+const EMAILJS_TPL_CONFIRM = "template_0ytxpee";   // received / diagnosing
+const EMAILJS_TPL_UPDATE  = "template_knd80ms";        // awaiting_parts / in_repair
+const EMAILJS_TPL_READY   = "template_ag9mw4k";           // ready for pickup
+
+const sendTicketEmail = async (ticket, type = "auto") => {
+  if (!ticket.customerEmail) {
+    alert("No email address on file for this customer.");
+    return false;
+  }
+  const s = STATUSES.find(x => x.id === ticket.status) || STATUSES[0];
+  const params = {
+    to_email:      ticket.customerEmail,
+    customer_name: ticket.customerName,
+    ticket_id:     ticket.id,
+    device:        `${ticket.deviceBrand} ${ticket.deviceModel}`,
+    issue:         ticket.faultDescription,
+    status:        s.label,
+    est_cost:      ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD",
+    final_cost:    ticket.finalCost ? fmtMoney(ticket.finalCost) : ticket.estimatedCost ? fmtMoney(ticket.estimatedCost) : "TBD",
+    est_ready:     ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD",
+  };
+  // Pick the right template based on ticket status
+  let tpl;
+  if (type === "ready" || ticket.status === "ready") {
+    tpl = EMAILJS_TPL_READY;
+  } else if (["awaiting_parts", "in_repair"].includes(ticket.status)) {
+    tpl = EMAILJS_TPL_UPDATE;
+  } else {
+    tpl = EMAILJS_TPL_CONFIRM;
+  }
+  try {
+    await emailjs.send(EMAILJS_SERVICE_ID, tpl, params);
+    return true;
+  } catch (e) {
+    console.error("EmailJS error:", e);
+    alert("Email failed to send. Check console for details.");
+    return false;
+  }
+};
 
 // ── Expense categories ────────────────────────────────────────────────────────
 const EXPENSE_CATEGORIES = ["Advertising / IG Ads", "Accounting", "Bank Fees", "Bearer", "Credit Card Bill", "Digicel", "Flow", "Fixtures", "Garbage Disposal", "Informal Labour", "JPS", "Labour", "Loan / Loan Recovery", "Maintenance", "NWC", "Owner's Withdrawal", "Refund / Refund Fees", "Rent", "Repairs", "Security", "Shipping", "Shipping - Nova", "Supplies (cleaning etc)", "Toiletries", "Transportation", "Other"];
@@ -1339,6 +1384,7 @@ function TicketDetail({
   const [estCost, setEstCost] = useState(ticket.estimatedCost || "");
   const [finalCost, setFinalCost] = useState(ticket.finalCost || "");
   const [pinModal, setPinModal] = useState(null);
+  const [emailSending, setEmailSending] = useState(false);
   const statusIdx = STATUSES.findIndex(s => s.id === ticket.status);
   const currentS = STATUSES[statusIdx] || STATUSES[0];
   const tryStatus = ns => {
@@ -1361,54 +1407,21 @@ function TicketDetail({
     await saveTickets(next);
     setEditPricing(false);
   };
-  const emailConfirmation = () => {
-    const to = ticket.customerEmail || "";
-    const subject = "Repair Confirmation - " + ticket.id;
-    const bodyText = ["Dear " + ticket.customerName + ",", "", "Thank you for choosing The Phone Plug!", "", "Ticket:  " + ticket.id, "Device:  " + ticket.deviceBrand + " " + ticket.deviceModel, "Issue:   " + ticket.faultDescription, "Status:  " + (STATUSES.find(s => s.id === ticket.status)?.label || ""), ticket.estimatedCost ? "Est. Cost: " + fmtMoney(ticket.estimatedCost) : "", ticket.estimatedCompletion ? "Est. Ready: " + fmtDate(ticket.estimatedCompletion) : "", "", "Track your repair at: phoneplugja.com/repairs", "Please collect within 3 days of being notified.", "", ADDRESS, "Tel: " + PHONE_1 + " | " + PHONE_2, "Instagram: " + INSTAGRAM, "", "The Phone Plug Team"].filter(Boolean).join("\n");
-
-    // Open a popup with the email ready to copy — works on all browsers
-    const w = window.open("", "_blank", "width=520,height=620");
-    if (!w) {
-      alert("Pop-up blocked. Please allow pop-ups for this site.");
-      return;
-    }
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Email Confirmation</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:20px;background:#f8f9fb;color:#111;}
-      h2{font-size:16px;margin-bottom:16px;color:#1A56DB;}
-      .field{margin-bottom:14px;}
-      label{display:block;font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:5px;}
-      input,textarea{width:100%;padding:8px 10px;border:1.5px solid #E5E7EB;border-radius:6px;font-family:inherit;font-size:13px;background:#fff;box-sizing:border-box;}
-      textarea{height:260px;resize:vertical;white-space:pre;}
-      .btn{background:#1A56DB;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-right:8px;}
-      .btn-copy{background:#059669;}
-      .note{font-size:11px;color:#6B7280;margin-top:12px;}
-    </style></head><body>
-    <h2>📧 Email Confirmation — ${ticket.id}</h2>
-    <div class="field"><label>To</label><input id="toField" value="${to || "(no email on file — enter manually)"}" onclick="this.select()"/></div>
-    <div class="field"><label>Subject</label><input id="subField" value="${subject}" onclick="this.select()"/></div>
-    <div class="field"><label>Body</label><textarea id="bodyField" onclick="this.select()">${bodyText}</textarea></div>
-    <button class="btn" onclick="copyAll()">📋 Copy Body</button>
-    <button class="btn" onclick="openMail()">✉️ Open in Mail App</button>
-    <div class="note">Tip: Copy the body above, open your Gmail at admin@phoneplugja.com, paste and send.</div>
-    <script>
-      function copyAll(){
-        document.getElementById("bodyField").select();
-        document.execCommand("copy");
-        alert("Email body copied to clipboard!");
-      }
-      function openMail(){
-        var to = document.getElementById("toField").value;
-        var sub = encodeURIComponent(document.getElementById("subField").value);
-        var bod = encodeURIComponent(document.getElementById("bodyField").value.substring(0,1000));
-        window.location.href = "mailto:"+to+"?subject="+sub+"&body="+bod;
-      }
-    <\/script>
-    </body></html>`);
-    w.document.close();
+  const emailConfirmation = async () => {
+    setEmailSending(true);
+    const sent = await sendTicketEmail(ticket, "confirm");
+    setEmailSending(false);
+    if (sent) alert(`✅ Confirmation email sent to ${ticket.customerEmail}`);
   };
-  const printReceipt = () => {
+
+  const emailReadyNotification = async () => {
+    setEmailSending(true);
+    const sent = await sendTicketEmail(ticket, "ready");
+    setEmailSending(false);
+    if (sent) alert(`✅ Ready for pickup notification sent to ${ticket.customerEmail}`);
+  };
+
+    const printReceipt = () => {
     const s = STATUSES.find(x => x.id === ticket.status) || STATUSES[0];
     const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString("en-GB", {
       day: "2-digit",
@@ -1511,8 +1524,15 @@ function TicketDetail({
     }
   }, /*#__PURE__*/React.createElement(Btn, {
     variant: "ghost",
-    onClick: emailConfirmation
-  }, "\uD83D\uDCE7 Email Confirmation"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: emailConfirmation,
+    disabled: emailSending
+  }, emailSending ? "\u23F3 Sending..." : "\uD83D\uDCE7 Send Email Update"),
+  ticket.status === "ready" && /*#__PURE__*/React.createElement(Btn, {
+    variant: "green",
+    onClick: emailReadyNotification,
+    disabled: emailSending
+  }, emailSending ? "\u23F3 Sending..." : "\uD83D\uDCF2 Notify Ready for Pickup"),
+  /*#__PURE__*/React.createElement(Btn, {
     variant: "ghost",
     onClick: printReceipt
   }, "\uD83D\uDDA8\uFE0F Print Receipt"), /*#__PURE__*/React.createElement(Btn, {
