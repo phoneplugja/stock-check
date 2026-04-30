@@ -1495,17 +1495,22 @@ function TicketDetail({
       + '<div class="center small">' + ticket.id + '</div>'
       + '<div style="margin-top:5mm;"></div>'
       + '</body></html>';
-    const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;border:0;visibility:hidden;";
+    const blob = new Blob([html], {type: 'text/html'});
+    const blobUrl = URL.createObjectURL(blob);
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;border:0;visibility:hidden;';
     document.body.appendChild(iframe);
-    iframe.contentDocument.open();
-    iframe.contentDocument.write(html);
-    iframe.contentDocument.close();
-    iframe.contentWindow.focus();
-    setTimeout(function() {
-      iframe.contentWindow.print();
-      setTimeout(function() { document.body.removeChild(iframe); }, 1000);
-    }, 600);
+    iframe.onload = function() {
+      iframe.contentWindow.scrollTo(0, 0);
+      setTimeout(function() {
+        iframe.contentWindow.print();
+        setTimeout(function() {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(blobUrl);
+        }, 1000);
+      }, 500);
+    };
+    iframe.src = blobUrl;
   };
 
     const IR = ({
