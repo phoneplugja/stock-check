@@ -1439,10 +1439,9 @@ function TicketDetail({
     const colorHtml = ticket.deviceColor ? '<div>Colour: ' + ticket.deviceColor + '</div>' : '';
     const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' + ticket.id + '</title>'
       + '<style>'
-      + '@page{margin:0!important;size:80mm auto;}'
-      + 'html{margin:0!important;padding:0!important;}'
-      + '*{box-sizing:border-box;margin:0;padding:0;color:#000!important;}'
-      + 'body{font-family:"Courier New",Courier,monospace;font-size:12px;color:#000;background:#fff;width:72mm;margin:0!important;padding:2mm 4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
+      + '@page{margin:0;size:80mm auto;}'
+      + '*{box-sizing:border-box;margin:0;padding:0;color:#000!important;background:transparent!important;}'
+      + 'body{font-family:"Courier New",Courier,monospace;font-size:12px;color:#000;background:#fff;width:72mm;padding:3mm 4mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'
       + '.center{text-align:center;}'
       + '.bold{font-weight:bold;}'
       + '.large{font-size:15px;font-weight:bold;}'
@@ -1496,13 +1495,17 @@ function TicketDetail({
       + '<div style="margin-top:5mm;"></div>'
       + '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},400);});<\/script>'
       + '</body></html>';
-    const w = window.open("", "_blank", "width=450,height=750");
-    if (!w) {
-      alert("Pop-up blocked — please allow pop-ups for this site and try again.");
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;border:0;visibility:hidden;";
+    document.body.appendChild(iframe);
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+    iframe.contentWindow.focus();
+    setTimeout(function() {
+      iframe.contentWindow.print();
+      setTimeout(function() { document.body.removeChild(iframe); }, 1000);
+    }, 600);
   };
 
     const IR = ({
