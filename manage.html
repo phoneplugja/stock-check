@@ -131,6 +131,11 @@ const STATUSES = [{
   label: "Collected",
   color: "#6B7280",
   bg: "#F3F4F6"
+}, {
+  id: "cancelled",
+  label: "Cancelled",
+  color: "#DC2626",
+  bg: "#FEF2F2"
 }];
 const STATUS_ORDER = STATUSES.map(s => s.id);
 const PENDING_IDS = ["received", "diagnosing"];
@@ -1196,8 +1201,9 @@ function RepairDashboard({
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const counts = {
-    all: tickets.length,
-    ...STATUSES.reduce((a, s) => ({
+    all: tickets.filter(t => t.status !== "cancelled").length,
+    cancelled: tickets.filter(t => t.status === "cancelled").length,
+    ...STATUSES.filter(s => s.id !== "cancelled").reduce((a, s) => ({
       ...a,
       [s.id]: tickets.filter(t => t.status === s.id).length
     }), {})
@@ -1205,7 +1211,11 @@ function RepairDashboard({
   const pending = tickets.filter(t => PENDING_IDS.includes(t.status)).length;
   const inProgress = tickets.filter(t => PROGRESS_IDS.includes(t.status)).length;
   const ready = tickets.filter(t => t.status === "ready").length;
-  const visible = tickets.filter(t => (filter === "all" || t.status === filter) && (!search || [t.id, t.customerName, t.customerPhone, t.deviceBrand, t.deviceModel].some(v => v?.toLowerCase().includes(search.toLowerCase()))));
+  const visible = tickets.filter(t => {
+    if (filter === "cancelled") return t.status === "cancelled";
+    if (filter === "all") return t.status !== "cancelled";
+    return t.status === filter;
+  }).filter(t => !search || [t.id, t.customerName, t.customerPhone, t.deviceBrand, t.deviceModel].some(v => v?.toLowerCase().includes(search.toLowerCase())));
   const stats = [{
     l: "Total",
     v: tickets.length,
@@ -1280,10 +1290,10 @@ function RepairDashboard({
     }
   }, /*#__PURE__*/React.createElement("option", {
     value: "all"
-  }, "All (", counts.all, ")"), STATUSES.map(s => /*#__PURE__*/React.createElement("option", {
+  }, "All (", counts.all, ")"), STATUSES.filter(s => s.id !== "cancelled").map(s => /*#__PURE__*/React.createElement("option", {
     key: s.id,
     value: s.id
-  }, s.label, " (", counts[s.id] || 0, ")"))), /*#__PURE__*/React.createElement(Btn, {
+  }, s.label, " (", counts[s.id] || 0, ")")), /*#__PURE__*/React.createElement("option", { value:"cancelled" }, "Cancelled (", counts.cancelled, ")")), /*#__PURE__*/React.createElement(Btn, {
     onClick: onNew
   }, "\u2795 New Ticket")), visible.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1385,8 +1395,24 @@ function TicketDetail({
   const [finalCost, setFinalCost] = useState(ticket.finalCost || "");
   const [pinModal, setPinModal] = useState(null);
   const [emailSending, setEmailSending] = useState(false);
+  const [cancelModal, setCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelPin, setCancelPin] = useState("");
+  const [cancelErr, setCancelErr] = useState("");
   const statusIdx = STATUSES.findIndex(s => s.id === ticket.status);
   const currentS = STATUSES[statusIdx] || STATUSES[0];
+  const isCancelled = ticket.status === "cancelled";
+  const doCancel = async () => {
+    if (cancelPin !== OWNER_PIN) { setCancelErr("Incorrect PIN."); return; }
+    if (!cancelReason.trim()) { setCancelErr("Please enter a reason."); return; }
+    const next = allTickets.map(t => t.id === ticket.id ? {
+      ...t, status: "cancelled", cancelReason: cancelReason.trim(),
+      cancelledAt: new Date().toISOString(),
+      history: [...(t.history || []), { status: "cancelled", ts: new Date().toISOString(), note: cancelReason.trim() }]
+    } : t);
+    await saveTickets(next);
+    setCancelModal(false); setCancelReason(""); setCancelPin(""); setCancelErr("");
+  };
   const tryStatus = ns => {
     if (isRegression(ticket.status, ns)) {
       setPinModal({
@@ -1439,10 +1465,10 @@ function TicketDetail({
     const colorHtml = ticket.deviceColor ? '<div>Colour: ' + ticket.deviceColor + '</div>' : '';
     const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' + ticket.id + '</title>'
       + '<style>'
-      + '@page{size:80mm auto;margin:0;}'
+      + '@page{margin:0;}'
       + '*{box-sizing:border-box;margin:0;padding:0;color:#000!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}'
       + 'html{margin:0;padding:0;}'
-      + 'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#000;background:#fff;width:72mm;padding:3mm 4mm;margin:0;}'
+      + 'body{font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#000;background:#fff;width:100%;padding:3mm 4mm;margin:0;}'
       + '.center{text-align:center;}'
       + '.bold{font-weight:700;}'
       + '.large{font-size:15px;font-weight:700;}'
@@ -1531,7 +1557,26 @@ function TicketDetail({
       color: blue ? T.blue : T.text
     }
   }, value || "—"));
-  return /*#__PURE__*/React.createElement("div", null, pinModal && /*#__PURE__*/React.createElement(PinModal, {
+  return /*#__PURE__*/React.createElement("div", null, cancelModal && /*#__PURE__*/React.createElement("div", {
+    style: { position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }
+  }, /*#__PURE__*/React.createElement("div", { style:{background:"#fff",borderRadius:16,padding:28,maxWidth:400,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"} },
+    /*#__PURE__*/React.createElement("div", { style:{fontSize:28,textAlign:"center",marginBottom:8} }, "⛔"),
+    /*#__PURE__*/React.createElement("div", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,textAlign:"center",color:"#DC2626",marginBottom:4} }, "Cancel Ticket"),
+    /*#__PURE__*/React.createElement("div", { style:{fontSize:13,color:T.muted,textAlign:"center",marginBottom:18} }, "This requires owner PIN. The ticket will be marked Cancelled and kept for records."),
+    /*#__PURE__*/React.createElement("div", { style:{marginBottom:12} },
+      /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.muted,display:"block",marginBottom:4} }, "Reason for Cancellation"),
+      /*#__PURE__*/React.createElement("textarea", { value:cancelReason, onChange:e=>{setCancelReason(e.target.value);setCancelErr("");}, rows:2, placeholder:"e.g. Customer changed mind, duplicate entry...", style:{...iS,width:"100%",resize:"none"} })
+    ),
+    /*#__PURE__*/React.createElement("div", { style:{marginBottom:16} },
+      /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.muted,display:"block",marginBottom:4} }, "Owner PIN"),
+      /*#__PURE__*/React.createElement("input", { type:"password", value:cancelPin, onChange:e=>{setCancelPin(e.target.value);setCancelErr("");}, placeholder:"Enter PIN", maxLength:6, style:{...iS,width:"100%",letterSpacing:4} })
+    ),
+    cancelErr && /*#__PURE__*/React.createElement("div", { style:{color:"#DC2626",fontSize:12,marginBottom:12,fontWeight:600} }, cancelErr),
+    /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:10} },
+      /*#__PURE__*/React.createElement(Btn, { variant:"danger", full:true, onClick:doCancel }, "⛔ Confirm Cancellation"),
+      /*#__PURE__*/React.createElement(Btn, { variant:"ghost", full:true, onClick:()=>{setCancelModal(false);setCancelReason("");setCancelPin("");setCancelErr("");} }, "Back")
+    )
+  )), pinModal && /*#__PURE__*/React.createElement(PinModal, {
     title: "\u26A0\uFE0F Manager Approval Required",
     subtitle: `Moving back to "${STATUSES.find(s => s.id === pinModal.newStatus)?.label}" requires manager PIN.`,
     onConfirm: () => {
@@ -1597,7 +1642,11 @@ function TicketDetail({
   /*#__PURE__*/React.createElement(Btn, {
     variant: "ghost",
     onClick: printReceipt
-  }, "\uD83D\uDDA8\uFE0F Print Receipt"), /*#__PURE__*/React.createElement(Btn, {
+  }, "\uD83D\uDDA8\uFE0F Print Receipt"), !isCancelled && /*#__PURE__*/React.createElement(Btn, {
+    variant: "danger",
+    onClick: () => setCancelModal(true),
+    style: { fontSize:12, padding:"8px 14px" }
+  }, "⛔ Cancel Ticket"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => setStatusMenu(!statusMenu)
   }, "\u270F\uFE0F Update Status"))), /*#__PURE__*/React.createElement(Card, {
     style: {
@@ -2036,6 +2085,10 @@ function EodForm({
   const [f, setF] = useState(empty);
   const [saved, setSaved] = useState(false);
   const [balErr, setBalErr] = useState("");
+  const [eodExpenses, setEodExpenses] = useState([]);
+  const addEodExpense = () => setEodExpenses(prev => [...prev, { category:"", amount:"", details:"" }]);
+  const updateEodExpense = (i, k, v) => setEodExpenses(prev => prev.map((x, idx) => idx === i ? {...x, [k]:v} : x));
+  const removeEodExpense = i => setEodExpenses(prev => prev.filter((_, idx) => idx !== i));
   const set = (k, v) => {
     setF(p => ({
       ...p,
@@ -2048,19 +2101,44 @@ function EodForm({
   const totalCard = n("debit_card") + n("credit_card") + n("other_card") + n("card_prev_days");
   const totalTransfer = n("ncb_transfer_in") + n("other_bank_in");
   const totalRevenue = n("cash_sales") + n("other_cash_in") + totalCard + totalTransfer;
+  const eodExpTotal = eodExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const submit = async () => {
     if (!f.date) {
       alert("Select a date.");
       return;
     }
-    // ── Cash balance check ────────────────────────────────────────────────────
+    // Validate inline expenses have required fields
+    for (let i = 0; i < eodExpenses.length; i++) {
+      if (!eodExpenses[i].category || !eodExpenses[i].amount) {
+        alert(`Expense entry ${i+1}: Category and Amount are required.`);
+        return;
+      }
+    }
+    // ── Cash balance check (expenses tab + inline EOD expenses) ───────────────
     const allExp = await loadArr("tpp-expenses");
-    const cashExpForDay = allExp.filter(e => !e.voided && e.date === f.date && e.payment_method === "Cash").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+    const existingCashExp = allExp.filter(e => !e.voided && e.date === f.date && e.payment_method === "Cash").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+    const totalCashExpenses = existingCashExp + eodExpTotal;
     const cashOut = n("cash_out");
-    if (Math.abs(cashOut - cashExpForDay) > 0.01) {
-      const diff = cashOut - cashExpForDay;
-      setBalErr(diff > 0 ? `⚠️ Cash Out (JMD ${cashOut.toLocaleString()}) is JMD ${diff.toLocaleString()} more than cash expenses logged for ${f.date} (JMD ${cashExpForDay.toLocaleString()}). Please log the missing expense entry first.` : `⚠️ Cash Out (JMD ${cashOut.toLocaleString()}) is JMD ${Math.abs(diff).toLocaleString()} less than cash expenses logged for ${f.date} (JMD ${cashExpForDay.toLocaleString()}). Please correct the Cash Out figure or check your expense entries.`);
+    if (Math.abs(cashOut - totalCashExpenses) > 0.01) {
+      const diff = cashOut - totalCashExpenses;
+      setBalErr(diff > 0
+        ? `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(diff)} more than total cash expenses for ${f.date} (${fmtMoney(existingCashExp)} on Expenses tab + ${fmtMoney(eodExpTotal)} entered here = ${fmtMoney(totalCashExpenses)}). Add the missing expense below or adjust Cash Out.`
+        : `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(Math.abs(diff))} less than total cash expenses for ${f.date} (${fmtMoney(existingCashExp)} on Expenses tab + ${fmtMoney(eodExpTotal)} entered here = ${fmtMoney(totalCashExpenses)}). Correct Cash Out or remove an expense entry.`);
       return;
+    }
+    // Save inline expenses to the expenses collection
+    if (eodExpenses.length > 0) {
+      const newExpEntries = eodExpenses.map(e => ({
+        date: f.date,
+        category: e.category,
+        payment_method: "Cash",
+        amount: e.amount,
+        details: e.details || "",
+        logged_by: f.submitted_by,
+        source: "eod_inline",
+        createdAt: new Date().toISOString()
+      }));
+      await save("tpp-expenses", [...newExpEntries, ...allExp]);
     }
     // ─────────────────────────────────────────────────────────────────────────
     const ex = await loadArr("tpp-eod");
@@ -2076,6 +2154,7 @@ function EodForm({
     setTimeout(() => {
       setSaved(false);
       setF(empty);
+      setEodExpenses([]);
       setBalErr("");
       if (onDone) onDone();
     }, 2000);
@@ -2305,7 +2384,46 @@ function EodForm({
       marginBottom: 14,
       lineHeight: 1.6
     }
-  }, balErr), /*#__PURE__*/React.createElement(Btn, {
+  }, balErr),
+  /*#__PURE__*/React.createElement(Card, { style:{ marginBottom:14, border:`1.5px solid ${T.border}` } },
+    /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: eodExpenses.length > 0 ? 14 : 0 } },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement(ST, null, "💸 Cash Out Expenses"),
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Log cash expenses paid from the till today. Must match Cash Out total.")
+      ),
+      /*#__PURE__*/React.createElement(Btn, { onClick: addEodExpense, style:{ fontSize:12, padding:"6px 12px" } }, "+ Add Expense")
+    ),
+    eodExpenses.length > 0 && eodExpenses.map((exp, i) => /*#__PURE__*/React.createElement("div", { key:i, style:{ background:"#F9FAFB", border:`1px solid ${T.border}`, borderRadius:10, padding:"12px 14px", marginBottom:10 } },
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:T.muted } }, `Expense ${i+1} — Cash`),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>removeEodExpense(i), style:{ background:"none", border:"none", cursor:"pointer", color:T.red, fontSize:16, fontWeight:700, padding:"0 4px" } }, "✕")
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 } },
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("label", { style:{ fontSize:11, fontWeight:700, color:T.muted, display:"block", marginBottom:4 } }, "Category *"),
+          /*#__PURE__*/React.createElement(Sel, { value:exp.category, onChange:e=>updateEodExpense(i,"category",e.target.value) },
+            /*#__PURE__*/React.createElement("option", { value:"" }, "— Select —"),
+            EXPENSE_CATEGORIES.map(c => /*#__PURE__*/React.createElement("option", { key:c }, c))
+          )
+        ),
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("label", { style:{ fontSize:11, fontWeight:700, color:T.muted, display:"block", marginBottom:4 } }, "Amount (JMD) *"),
+          /*#__PURE__*/React.createElement(Input, { type:"number", placeholder:"0", value:exp.amount, onChange:e=>updateEodExpense(i,"amount",e.target.value) })
+        )
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("label", { style:{ fontSize:11, fontWeight:700, color:T.muted, display:"block", marginBottom:4 } }, "Details"),
+        /*#__PURE__*/React.createElement(Input, { placeholder:"e.g. Bearer, cleaning supplies...", value:exp.details, onChange:e=>updateEodExpense(i,"details",e.target.value) })
+      )
+    )),
+    eodExpenses.length > 0 && /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", paddingTop:8, borderTop:`1px solid ${T.border}`, marginTop:4 } },
+      /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, fontWeight:700, color: Math.abs(eodExpTotal - n("cash_out")) < 0.01 ? T.green : T.amber } },
+        "Total: ", fmtMoney(eodExpTotal),
+        n("cash_out") > 0 && ` / Cash Out: ${fmtMoney(n("cash_out"))}`
+      )
+    )
+  ),
+  /*#__PURE__*/React.createElement(Btn, {
     full: true,
     onClick: submit
   }, "\u2705 Submit EOD Report"));
@@ -2769,6 +2887,201 @@ function StaffManager() {
   }, /*#__PURE__*/React.createElement(Btn, {
     onClick: saveTechPin
   }, "Update")))));
+}
+
+// ── Invoice Importer (AI-powered) ─────────────────────────────────────────────
+function InvoiceImporter({ user, onDone }) {
+  const API_KEY_STORAGE = "tpp_anthropic_key";
+  const [stage, setStage] = useState("upload");
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [phones, setPhones] = useState([]);
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem(API_KEY_STORAGE) || ""; } catch(e) { return ""; }
+  });
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const saveKey = () => {
+    const k = keyInput.trim();
+    if (!k.startsWith("sk-ant-")) { alert("That doesn't look like a valid Anthropic API key. It should start with sk-ant-"); return; }
+    try { localStorage.setItem(API_KEY_STORAGE, k); } catch(e) {}
+    setApiKey(k); setShowKeyInput(false); setKeyInput("");
+  };
+  const clearKey = () => {
+    try { localStorage.removeItem(API_KEY_STORAGE); } catch(e) {}
+    setApiKey(""); setKeyInput("");
+  };
+
+  const fileToBase64 = f => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(",")[1]);
+    r.onerror = () => rej(new Error("Read failed"));
+    r.readAsDataURL(f);
+  });
+
+  const extractFromInvoice = async () => {
+    if (!apiKey) { setErrMsg("Please enter your Anthropic API key first."); setShowKeyInput(true); return; }
+    if (!file) { setErrMsg("Please select an invoice file first."); return; }
+    setLoading(true); setErrMsg("");
+    try {
+      const base64 = await fileToBase64(file);
+      const isImage = file.type.startsWith("image/");
+      const isPdf = file.type === "application/pdf";
+      const contentArr = [];
+      if (isImage) {
+        contentArr.push({ type:"image", source:{ type:"base64", media_type: file.type, data: base64 } });
+      } else if (isPdf) {
+        contentArr.push({ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } });
+      } else {
+        setErrMsg("Please upload a PDF or image file (JPG, PNG, etc.)"); setLoading(false); return;
+      }
+      contentArr.push({ type:"text", text:`You are a phone inventory assistant for a phone repair and sales store in Jamaica. 
+Extract ALL phones/devices from this invoice and return ONLY a JSON array. 
+Each element should have these fields (use empty string if unknown):
+order_number, date (YYYY-MM-DD), make (brand like Samsung/Apple/etc), model (exact model name), 
+color, storage (e.g. "128 GB"), condition (default "9/10"), lock_status (default "Unlocked"), 
+site (where purchased e.g. eBay), supplier (seller name if visible), 
+item_cost (USD amount as number), tax (USD as number), shipping_cost (USD as number, divide total shipping evenly if multiple items), 
+total_invoice (JMD leave as 0), payment_method (default "PayPal"), 
+expected_sell (JMD leave as 0), notes.
+If multiple phones are on one invoice, return one object per phone. 
+Return ONLY the JSON array, no explanation, no markdown.` });
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "x-api-key": apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          messages:[{ role:"user", content: contentArr }]
+        })
+      });
+      if (resp.status === 401) { clearKey(); throw new Error("Invalid API key. Please re-enter your key."); }
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error.message || "API error");
+      const raw = (data.content||[]).map(b => b.text||"").join("").trim().replace(/```json|```/g,"").trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch(e) { throw new Error("AI could not parse the invoice. Try a clearer image or PDF."); }
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("No phones detected in invoice. Try a clearer image.");
+      const enriched = parsed.map((p, i) => ({ ...p, imei:"", _idx:i, availability:"Available", courier:"FedEx", delivery_date:"" }));
+      setPhones(enriched);
+      setStage("reviewing");
+    } catch(e) {
+      setErrMsg(e.message || "Something went wrong. Please try again.");
+    }
+    setLoading(false);
+  };
+
+  const updatePhone = (i, k, v) => setPhones(prev => prev.map((p, idx) => idx === i ? {...p, [k]:v} : p));
+  const removePhone = i => setPhones(prev => prev.filter((_, idx) => idx !== i));
+
+  const submitAll = async () => {
+    for (let i = 0; i < phones.length; i++) {
+      if (!phones[i].model) { alert(`Phone ${i+1}: Model is required.`); return; }
+      if (!phones[i].imei || String(phones[i].imei).replace(/\s/g,"").length < 14) {
+        alert(`Phone ${i+1} (${phones[i].model}): Valid IMEI required (14-15 digits).`); return;
+      }
+    }
+    setStage("saving");
+    const ex = await loadArr("tpp-phones");
+    const newEntries = phones.map(p => ({ ...p, imei: String(p.imei).replace(/\s/g,""), createdAt: new Date().toISOString() }));
+    await save("tpp-phones", [...newEntries, ...ex]);
+    alert(`✅ ${phones.length} phone(s) added to inventory!`);
+    onDone();
+  };
+
+  if (stage === "upload") return /*#__PURE__*/React.createElement("div", { style:{maxWidth:560} },
+    /*#__PURE__*/React.createElement("h2", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,marginBottom:4} }, "📄 Import from Invoice"),
+    /*#__PURE__*/React.createElement("p", { style:{color:T.muted,fontSize:13,marginBottom:20} }, "Upload an eBay or supplier invoice (PDF or image). AI will extract phone details automatically."),
+    /*#__PURE__*/React.createElement(Card, { style:{marginBottom:14} },
+      /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom: showKeyInput ? 12 : 0} },
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement(ST, null, "🔑 Anthropic API Key"),
+          /*#__PURE__*/React.createElement("div", { style:{fontSize:12,color: apiKey ? T.green : T.amber, marginTop:2, fontWeight:600} },
+            apiKey ? "✅ Key saved — stored locally in this browser only" : "⚠️ No key set — required to use AI extraction"
+          )
+        ),
+        /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:8} },
+          apiKey && /*#__PURE__*/React.createElement(Btn, { variant:"danger", onClick:clearKey, style:{fontSize:12,padding:"6px 12px"} }, "Clear"),
+          /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick:()=>setShowKeyInput(v=>!v), style:{fontSize:12,padding:"6px 12px"} }, apiKey ? "Replace" : "Enter Key")
+        )
+      ),
+      showKeyInput && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style:{fontSize:12,color:T.muted,marginBottom:8} }, "Your key is saved in this browser only and never sent anywhere except Anthropic's API."),
+        /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:8} },
+          /*#__PURE__*/React.createElement(Input, { type:"password", placeholder:"sk-ant-api03-...", value:keyInput, onChange:e=>setKeyInput(e.target.value), style:{flex:1,fontFamily:"monospace"} }),
+          /*#__PURE__*/React.createElement(Btn, { onClick:saveKey }, "Save")
+        )
+      )
+    ),
+    /*#__PURE__*/React.createElement(Card, null,
+      /*#__PURE__*/React.createElement("div", {
+        style:{ border:`2px dashed ${T.border}`, borderRadius:12, padding:"40px 20px", textAlign:"center", cursor:"pointer", background:"#F9FAFB" },
+        onClick:()=>document.getElementById("inv-upload").click()
+      },
+        /*#__PURE__*/React.createElement("div", { style:{fontSize:40,marginBottom:10} }, "📁"),
+        /*#__PURE__*/React.createElement("div", { style:{fontWeight:700,marginBottom:4} }, file ? file.name : "Click to select invoice"),
+        /*#__PURE__*/React.createElement("div", { style:{fontSize:12,color:T.muted} }, "PDF, JPG, PNG supported"),
+        /*#__PURE__*/React.createElement("input", { id:"inv-upload", type:"file", accept:"application/pdf,image/*", style:{display:"none"}, onChange:e=>{ setFile(e.target.files[0]); setErrMsg(""); } })
+      ),
+      errMsg && /*#__PURE__*/React.createElement("div", { style:{color:T.red,fontSize:13,marginTop:12,fontWeight:600} }, errMsg),
+      /*#__PURE__*/React.createElement("div", { style:{marginTop:16} },
+        /*#__PURE__*/React.createElement(Btn, { full:true, onClick:extractFromInvoice, disabled:loading||!file },
+          loading ? "⏳ Reading invoice..." : "🤖 Extract with AI"
+        )
+      )
+    )
+  );
+
+  if (stage === "reviewing") return /*#__PURE__*/React.createElement("div", { style:{maxWidth:760} },
+    /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16} },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("h2", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0} }, `Review Extracted Phones (${phones.length})`),
+        /*#__PURE__*/React.createElement("p", { style:{color:T.muted,fontSize:13,marginTop:4} }, "Check all fields, enter IMEI numbers, then submit.")
+      ),
+      /*#__PURE__*/React.createElement(Btn, { onClick:submitAll, variant:"green" }, `✅ Submit All (${phones.length})`)
+    ),
+    phones.map((p, i) => /*#__PURE__*/React.createElement(Card, { key:i, style:{marginBottom:16, border:`1.5px solid ${T.border}`} },
+      /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14} },
+        /*#__PURE__*/React.createElement("div", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:T.blue} }, `Phone ${i+1}: ${p.make||""} ${p.model||""}`),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>removePhone(i), style:{background:"none",border:"none",cursor:"pointer",color:T.red,fontWeight:700,fontSize:15} }, "✕ Remove")
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10} },
+        ...[
+          ["Make","make"],["Model","model"],["Color","color"],["Storage","storage"],
+          ["Condition","condition"],["Lock Status","lock_status"],["Site","site"],["Supplier","supplier"],
+          ["Order #","order_number"],["Order Date","date"],["Courier","courier"],["Payment Method","payment_method"]
+        ].map(([label,key]) => /*#__PURE__*/React.createElement("div", { key },
+          /*#__PURE__*/React.createElement("label", { style:{fontSize:11,fontWeight:700,color:T.muted,display:"block",marginBottom:3} }, label),
+          /*#__PURE__*/React.createElement(Input, { value:p[key]||"", onChange:e=>updatePhone(i,key,e.target.value) })
+        ))
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10} },
+        ...[["Item Cost (USD)","item_cost"],["Tax (USD)","tax"],["Shipping (USD)","shipping_cost"],
+            ["Total Invoice (JMD)","total_invoice"],["Expected Sell (JMD)","expected_sell"]].map(([label,key]) => /*#__PURE__*/React.createElement("div", { key },
+          /*#__PURE__*/React.createElement("label", { style:{fontSize:11,fontWeight:700,color:T.muted,display:"block",marginBottom:3} }, label),
+          /*#__PURE__*/React.createElement(Input, { type:"number", value:p[key]||"", onChange:e=>updatePhone(i,key,e.target.value) })
+        ))
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{background:"#EFF4FF",border:`1.5px solid ${T.blue}`,borderRadius:10,padding:"12px 14px"} },
+        /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.blue,display:"block",marginBottom:6} }, "📱 IMEI Number *"),
+        /*#__PURE__*/React.createElement(Input, { placeholder:"Enter 15-digit IMEI", value:p.imei||"", onChange:e=>updatePhone(i,"imei",e.target.value), style:{background:"#fff"} })
+      ),
+      /*#__PURE__*/React.createElement("div", { style:{marginTop:10} },
+        /*#__PURE__*/React.createElement("label", { style:{fontSize:11,fontWeight:700,color:T.muted,display:"block",marginBottom:3} }, "Notes"),
+        /*#__PURE__*/React.createElement(Input, { value:p.notes||"", onChange:e=>updatePhone(i,"notes",e.target.value) })
+      )
+    )),
+    /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8} },
+      /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick:()=>setStage("upload") }, "← Re-upload"),
+      /*#__PURE__*/React.createElement(Btn, { variant:"green", onClick:submitAll }, `✅ Submit All (${phones.length})`)
+    )
+  );
+
+  return /*#__PURE__*/React.createElement("div", { style:{textAlign:"center",padding:"60px 20px"} },
+    /*#__PURE__*/React.createElement("div", { style:{fontSize:48,marginBottom:12} }, "💾"),
+    /*#__PURE__*/React.createElement("div", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,color:T.green} }, "Saving to inventory...")
+  );
 }
 
 // ── Phone Inventory ───────────────────────────────────────────────────────────
@@ -4775,6 +5088,30 @@ function OwnerShell({
       phones: n
     }));
   };
+  const archiveOldSales = async () => {
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    const toArchive = data.phones.filter(p => {
+      if (p.availability !== "Sold") return false;
+      const sold = new Date(p.date_sold || p.updatedAt || p.createdAt || 0);
+      return sold < threeMonthsAgo;
+    });
+    if (toArchive.length === 0) { alert("No sold phones older than 3 months to archive."); return; }
+    if (!confirm(`Archive and remove ${toArchive.length} phone(s) sold more than 3 months ago?\n\nThey will be exported to Excel first. This cannot be undone.`)) return;
+    // Export to Excel
+    const wb = XLSX.utils.book_new();
+    const cols = ["Order No.","Order Date","Make","Model","Color","Storage","Condition","Lock Status","IMEI","Courier","Tracking","Site","Supplier","Item Cost (USD)","Tax (USD)","Shipping (USD)","Total Invoice (JMD)","Exp. Sell (JMD)","Exp. Profit (JMD)","Payment Method","Availability","Actual Sell (JMD)","Actual Profit (JMD)","Sold By","Date Sold","Notes"];
+    const rows = toArchive.map(p => [p.order_number||"",p.date||"",p.make||"",p.model||"",p.color||"",p.storage||"",p.condition||"",p.lock_status||"",p.imei||"",p.courier||"",p.tracking||"",p.site||"",p.supplier||"",parseFloat(p.item_cost)||0,parseFloat(p.tax)||0,parseFloat(p.shipping_cost)||0,parseFloat(p.total_invoice)||0,parseFloat(p.expected_sell)||0,parseFloat(p.expected_profit)||0,p.payment_method||"",p.availability||"",parseFloat(p.actual_sell)||0,parseFloat(p.actual_profit)||0,p.sold_by||"",p.date_sold||"",p.notes||""]);
+    const ws = XLSX.utils.aoa_to_sheet([cols, ...rows]);
+    XLSX.utils.book_append_sheet(wb, ws, "Archived Sales");
+    const month = new Date().toISOString().slice(0,7);
+    XLSX.writeFile(wb, `TPP_Archived_Sales_${month}.xlsx`);
+    // Remove from Firebase
+    const remaining = data.phones.filter(p => !toArchive.includes(p));
+    await save("tpp-phones", remaining);
+    setData(d => ({ ...d, phones: remaining }));
+    alert(`✅ ${toArchive.length} phone(s) exported and removed from the system.`);
+  };
   const ownerTabs = [{
     id: "dashboard",
     label: "📊 Dashboard"
@@ -4984,13 +5321,20 @@ function OwnerShell({
       color: T.muted,
       fontWeight: 400
     }
-  }, "\xB7 ", data.phones.length, " total")), /*#__PURE__*/React.createElement(Btn, {
-    onClick: () => setPv(pv === "add" ? "list" : "add")
-  }, pv === "add" ? "← Back to List" : "➕ Add Phone")), pv === "add" ? /*#__PURE__*/React.createElement(PhoneForm, {
+  }, "\xB7 ", data.phones.length, " total")), /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:8} },
+    /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick: archiveOldSales, style:{fontSize:12} }, "📦 Archive Old Sales"),
+    /*#__PURE__*/React.createElement(Btn, {
+      onClick: () => setPv(pv === "add" ? "list" : pv === "import" ? "list" : "add")
+    }, pv !== "list" ? "← Back to List" : "➕ Add Phone"),
+    pv === "list" && /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick: () => setPv("import"), style:{fontSize:12} }, "📄 Import Invoice")
+  )), pv === "add" ? /*#__PURE__*/React.createElement(PhoneForm, {
     onDone: () => {
       fetchAll();
       setPv("list");
     }
+  }) : pv === "import" ? /*#__PURE__*/React.createElement(InvoiceImporter, {
+    user: user,
+    onDone: () => { fetchAll(); setPv("list"); }
   }) : /*#__PURE__*/React.createElement(PhoneInventory, {
     phones: data.phones,
     onUpdate: updatePhones
