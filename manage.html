@@ -2936,16 +2936,42 @@ function InvoiceImporter({ user, onDone }) {
       } else {
         setErrMsg("Please upload a PDF or image file (JPG, PNG, etc.)"); setLoading(false); return;
       }
-      contentArr.push({ type:"text", text:`You are a phone inventory assistant for a phone repair and sales store in Jamaica. 
-Extract ALL phones/devices from this invoice and return ONLY a JSON array. 
-Each element should have these fields (use empty string if unknown):
-order_number, date (YYYY-MM-DD), make (brand like Samsung/Apple/etc), model (exact model name), 
-color, storage (e.g. "128 GB"), condition (default "9/10"), lock_status (default "Unlocked"), 
-site (where purchased e.g. eBay), supplier (seller name if visible), 
-item_cost (USD amount as number), tax (USD as number), shipping_cost (USD as number, divide total shipping evenly if multiple items), 
-total_invoice (JMD leave as 0), payment_method (default "PayPal"), 
-expected_sell (JMD leave as 0), notes.
-If multiple phones are on one invoice, return one object per phone. 
+      contentArr.push({ type:"text", text:`You are a phone inventory assistant for a phone repair and sales store in Jamaica.
+The customer has provided:
+- USD to JMD exchange rate: ${parseFloat(exchangeRate).toFixed(2)}
+- Sales tax rate for reference: ${parseFloat(taxRate).toFixed(2)}% (Florida)
+
+Extract ALL phones/devices from this invoice and return ONLY a JSON array.
+
+TAX INSTRUCTIONS (important):
+1. Find the TOTAL TAX amount shown on the invoice. Read it exactly as printed — do not calculate it.
+2. If there are multiple phones, split that total tax proportionally by each phone's item price. 
+   Formula: phone_tax = total_invoice_tax × (this_phone_item_cost / sum_of_all_item_costs), rounded to 2 decimal places.
+   Adjust the last phone's tax by any rounding difference so all taxes sum exactly to the invoice total tax.
+3. Only use the ${parseFloat(taxRate).toFixed(2)}% rate as a fallback if no tax figure is visible on the invoice.
+
+SHIPPING INSTRUCTIONS:
+- If one shipping total covers multiple phones, divide it evenly across all phones, rounded to 2 decimal places.
+
+Each element in the array should have these fields:
+- order_number: invoice/order number
+- date: order date in YYYY-MM-DD format
+- make: brand (Samsung, Apple, etc.)
+- model: exact model name
+- color: device color
+- storage: e.g. "128 GB"
+- condition: default "9/10"
+- lock_status: default "Unlocked"
+- site: where purchased e.g. "eBay"
+- supplier: seller name if visible
+- item_cost: item price in USD as a number (before tax and shipping)
+- tax: this phone's share of the total invoice tax, calculated as above
+- shipping_cost: this phone's share of shipping in USD
+- total_invoice: (item_cost + tax + shipping_cost) × ${parseFloat(exchangeRate).toFixed(2)}, rounded to 2 decimal places
+- payment_method: default "PayPal"
+- expected_sell: leave as 0
+- notes: any relevant notes
+
 Return ONLY the JSON array, no explanation, no markdown.` });
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
@@ -2972,6 +2998,10 @@ Return ONLY the JSON array, no explanation, no markdown.` });
     setLoading(false);
   };
 
+  const FL_TAX_RATE = 6.0;
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [taxRate, setTaxRate] = useState(FL_TAX_RATE.toString());
+
   const updatePhone = (i, k, v) => setPhones(prev => prev.map((p, idx) => idx === i ? {...p, [k]:v} : p));
   const removePhone = i => setPhones(prev => prev.filter((_, idx) => idx !== i));
 
@@ -2989,6 +3019,9 @@ Return ONLY the JSON array, no explanation, no markdown.` });
     alert(`✅ ${phones.length} phone(s) added to inventory!`);
     onDone();
   };
+
+  const rateOk = parseFloat(exchangeRate) > 0;
+  const taxOk = parseFloat(taxRate) >= 0;
 
   if (stage === "upload") return /*#__PURE__*/React.createElement("div", { style:{maxWidth:560} },
     /*#__PURE__*/React.createElement("h2", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,marginBottom:4} }, "📄 Import from Invoice"),
@@ -3014,6 +3047,22 @@ Return ONLY the JSON array, no explanation, no markdown.` });
         )
       )
     ),
+    /*#__PURE__*/React.createElement(Card, { style:{marginBottom:14} },
+      /*#__PURE__*/React.createElement(ST, null, "💱 Currency & Tax Settings"),
+      /*#__PURE__*/React.createElement("div", { style:{fontSize:12,color:T.muted,marginBottom:14} }, "AI will use these to calculate tax per phone and total cost in JMD automatically."),
+      /*#__PURE__*/React.createElement("div", { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12} },
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.muted,display:"block",marginBottom:4} }, "USD → JMD Exchange Rate *"),
+          /*#__PURE__*/React.createElement(Input, { type:"number", placeholder:"e.g. 157.50", value:exchangeRate, onChange:e=>setExchangeRate(e.target.value) }),
+          exchangeRate && rateOk && /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:T.green,marginTop:4,fontWeight:600} }, `$1 USD = JMD ${parseFloat(exchangeRate).toFixed(2)}`)
+        ),
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.muted,display:"block",marginBottom:4} }, "Sales Tax Rate (%) *"),
+          /*#__PURE__*/React.createElement(Input, { type:"number", placeholder:"e.g. 6", value:taxRate, onChange:e=>setTaxRate(e.target.value) }),
+          /*#__PURE__*/React.createElement("div", { style:{fontSize:11,color:T.muted,marginTop:4} }, "Pre-filled: Florida 6% — edit if needed")
+        )
+      )
+    ),
     /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", {
         style:{ border:`2px dashed ${T.border}`, borderRadius:12, padding:"40px 20px", textAlign:"center", cursor:"pointer", background:"#F9FAFB" },
@@ -3025,8 +3074,9 @@ Return ONLY the JSON array, no explanation, no markdown.` });
         /*#__PURE__*/React.createElement("input", { id:"inv-upload", type:"file", accept:"application/pdf,image/*", style:{display:"none"}, onChange:e=>{ setFile(e.target.files[0]); setErrMsg(""); } })
       ),
       errMsg && /*#__PURE__*/React.createElement("div", { style:{color:T.red,fontSize:13,marginTop:12,fontWeight:600} }, errMsg),
+      !rateOk && file && /*#__PURE__*/React.createElement("div", { style:{color:T.amber,fontSize:12,marginTop:8,fontWeight:600} }, "⚠️ Enter exchange rate above before extracting."),
       /*#__PURE__*/React.createElement("div", { style:{marginTop:16} },
-        /*#__PURE__*/React.createElement(Btn, { full:true, onClick:extractFromInvoice, disabled:loading||!file },
+        /*#__PURE__*/React.createElement(Btn, { full:true, onClick:extractFromInvoice, disabled:loading||!file||!rateOk||!taxOk },
           loading ? "⏳ Reading invoice..." : "🤖 Extract with AI"
         )
       )
