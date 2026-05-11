@@ -2990,6 +2990,56 @@ Return ONLY the JSON array, no explanation, no markdown.` });
       try { parsed = JSON.parse(raw); } catch(e) { throw new Error("AI could not parse the invoice. Try a clearer image or PDF."); }
       if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("No phones detected in invoice. Try a clearer image.");
       const enriched = parsed.map((p, i) => ({ ...p, imei:"", _idx:i, availability:"Available", courier:"FedEx", delivery_date:"" }));
+
+      // If an IMEI list image was uploaded, extract all IMEIs and match by description
+      if (imeiListFile) {
+        try {
+          const imeiBase64 = await fileToBase64(imeiListFile);
+          const imeiResp = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "Content-Type":"application/json", "x-api-key": apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+            body: JSON.stringify({
+              model: "claude-sonnet-4-5",
+              max_tokens: 500,
+              messages: [{ role:"user", content: [
+                { type:"image", source:{ type:"base64", media_type: imeiListFile.type, data: imeiBase64 } },
+                { type:"text", text:`Extract all IMEI entries from this image. Each entry has a phone description and an IMEI number.
+Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black","imei":"123456789012345"}]
+- Strip all spaces and dashes from IMEI numbers
+- Keep the description exactly as written
+- No explanation, no markdown` }
+              ]}]
+            })
+          });
+          const imeiData = await imeiResp.json();
+          const imeiRaw = (imeiData.content||[]).map(b => b.text||"").join("").trim().replace(/```json|```/g,"").trim();
+          const imeiList = JSON.parse(imeiRaw);
+          if (Array.isArray(imeiList)) {
+            // Match each IMEI entry to a phone by comparing description to model+storage+color
+            imeiList.forEach(({ description, imei }) => {
+              if (!description || !imei || String(imei).replace(/\s|-/g,"").length < 14) return;
+              const cleanImei = String(imei).replace(/\s|-/g,"");
+              const descLower = description.toLowerCase().replace(/\s+/g," ");
+              let bestMatch = -1;
+              let bestScore = 0;
+              enriched.forEach((p, idx) => {
+                if (p.imei) return; // already matched
+                const phoneStr = `${p.model||""} ${p.storage||""} ${p.color||""}`.toLowerCase().replace(/\s+/g," ");
+                // Score by counting matching words
+                const descWords = descLower.split(/\W+/).filter(w => w.length > 1);
+                const score = descWords.filter(w => phoneStr.includes(w)).length;
+                if (score > bestScore) { bestScore = score; bestMatch = idx; }
+              });
+              if (bestMatch >= 0 && bestScore > 0) {
+                enriched[bestMatch].imei = cleanImei;
+              }
+            });
+          }
+        } catch(e) {
+          console.warn("IMEI list extraction failed:", e.message);
+        }
+      }
+
       setPhones(enriched);
       setStage("reviewing");
     } catch(e) {
@@ -3063,6 +3113,33 @@ Return ONLY the JSON array, no explanation, no markdown.` });
         )
       )
     ),
+    /*#__PURE__*/React.createElement(Card, { style:{marginBottom:14} },
+      /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center"} },
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement(ST, null, "📱 IMEI List Screenshot (Optional)"),
+          /*#__PURE__*/React.createElement("div", { style:{fontSize:12,color:T.muted,marginTop:2} },
+            imeiListFile
+              ? /*#__PURE__*/React.createElement("span", { style:{color:T.green,fontWeight:600} }, `✅ ${imeiListFile.name}`)
+              : "Upload a screenshot of your staff's IMEI message to auto-fill all phones at once"
+          )
+        ),
+        /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:8,alignItems:"center"} },
+          imeiListFile && /*#__PURE__*/React.createElement("button", {
+            onClick:()=>setImeiListFile(null),
+            style:{background:"none",border:"none",cursor:"pointer",color:T.red,fontWeight:700,fontSize:18,lineHeight:1}
+          }, "✕"),
+          /*#__PURE__*/React.createElement("label", {
+            style:{fontSize:12,fontWeight:700,color:T.blue,cursor:"pointer",background:"#EFF4FF",border:`1px solid ${T.blue}`,borderRadius:8,padding:"6px 12px",whiteSpace:"nowrap"}
+          },
+            imeiListFile ? "Replace" : "📷 Upload",
+            /*#__PURE__*/React.createElement("input", {
+              type:"file", accept:"image/*", style:{display:"none"},
+              onChange:e=>{ if(e.target.files[0]) setImeiListFile(e.target.files[0]); e.target.value=""; }
+            })
+          )
+        )
+      )
+    ),
     /*#__PURE__*/React.createElement(Card, null,
       /*#__PURE__*/React.createElement("div", {
         style:{ border:`2px dashed ${T.border}`, borderRadius:12, padding:"40px 20px", textAlign:"center", cursor:"pointer", background:"#F9FAFB" },
@@ -3083,11 +3160,47 @@ Return ONLY the JSON array, no explanation, no markdown.` });
     )
   );
 
+  const [imeiListFile, setImeiListFile] = useState(null);
+  const [imeiLoading, setImeiLoading] = useState({});
+  const [imeiErr, setImeiErr] = useState({});
+
+  const extractImei = async (i, file) => {
+    if (!file) return;
+    setImeiLoading(prev => ({...prev, [i]: true}));
+    setImeiErr(prev => ({...prev, [i]: ""}));
+    try {
+      const base64 = await fileToBase64(file);
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "x-api-key": apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5",
+          max_tokens: 100,
+          messages: [{ role:"user", content: [
+            { type:"image", source:{ type:"base64", media_type: file.type, data: base64 } },
+            { type:"text", text:"Find the IMEI number in this image. Return ONLY the 15-digit IMEI number with no spaces, dashes, or explanation. If you see multiple IMEI numbers, return just the first one. If no IMEI is visible, return the word NONE." }
+          ]}]
+        })
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error.message);
+      const result = (data.content||[]).map(b => b.text||"").join("").trim().replace(/\s|-/g,"");
+      if (result === "NONE" || result.length < 14) {
+        setImeiErr(prev => ({...prev, [i]: "No IMEI found in image. Try a clearer screenshot."}));
+      } else {
+        updatePhone(i, "imei", result);
+      }
+    } catch(e) {
+      setImeiErr(prev => ({...prev, [i]: e.message || "Failed to read IMEI. Try again."}));
+    }
+    setImeiLoading(prev => ({...prev, [i]: false}));
+  };
+
   if (stage === "reviewing") return /*#__PURE__*/React.createElement("div", { style:{maxWidth:760} },
     /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16} },
       /*#__PURE__*/React.createElement("div", null,
         /*#__PURE__*/React.createElement("h2", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0} }, `Review Extracted Phones (${phones.length})`),
-        /*#__PURE__*/React.createElement("p", { style:{color:T.muted,fontSize:13,marginTop:4} }, "Check all fields, enter IMEI numbers, then submit.")
+        /*#__PURE__*/React.createElement("p", { style:{color:T.muted,fontSize:13,marginTop:4} }, "Check all fields, upload IMEI screenshots or enter manually, then submit.")
       ),
       /*#__PURE__*/React.createElement(Btn, { onClick:submitAll, variant:"green" }, `✅ Submit All (${phones.length})`)
     ),
@@ -3114,8 +3227,25 @@ Return ONLY the JSON array, no explanation, no markdown.` });
         ))
       ),
       /*#__PURE__*/React.createElement("div", { style:{background:"#EFF4FF",border:`1.5px solid ${T.blue}`,borderRadius:10,padding:"12px 14px"} },
-        /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.blue,display:"block",marginBottom:6} }, "📱 IMEI Number *"),
-        /*#__PURE__*/React.createElement(Input, { placeholder:"Enter 15-digit IMEI", value:p.imei||"", onChange:e=>updatePhone(i,"imei",e.target.value), style:{background:"#fff"} })
+        /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8} },
+          /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.blue} }, "📱 IMEI Number *"),
+          /*#__PURE__*/React.createElement("div", { style:{display:"flex",alignItems:"center",gap:8} },
+            imeiLoading[i] && /*#__PURE__*/React.createElement("span", { style:{fontSize:12,color:T.muted} }, "⏳ Reading..."),
+            p.imei && !imeiLoading[i] && /*#__PURE__*/React.createElement("span", { style:{fontSize:12,color:T.green,fontWeight:700} }, "✅ IMEI captured"),
+            /*#__PURE__*/React.createElement("label", {
+              style:{fontSize:12,fontWeight:700,color:T.blue,cursor:"pointer",background:"#fff",border:`1px solid ${T.blue}`,borderRadius:8,padding:"4px 10px",whiteSpace:"nowrap"},
+              title:"Upload a screenshot showing the IMEI"
+            },
+              "📷 Upload Screenshot",
+              /*#__PURE__*/React.createElement("input", {
+                type:"file", accept:"image/*", style:{display:"none"},
+                onChange: e => { if(e.target.files[0]) extractImei(i, e.target.files[0]); e.target.value=""; }
+              })
+            )
+          )
+        ),
+        /*#__PURE__*/React.createElement(Input, { placeholder:"Or type 15-digit IMEI manually", value:p.imei||"", onChange:e=>updatePhone(i,"imei",e.target.value), style:{background:"#fff"} }),
+        imeiErr[i] && /*#__PURE__*/React.createElement("div", { style:{color:T.red,fontSize:12,marginTop:6,fontWeight:600} }, imeiErr[i])
       ),
       /*#__PURE__*/React.createElement("div", { style:{marginTop:10} },
         /*#__PURE__*/React.createElement("label", { style:{fontSize:11,fontWeight:700,color:T.muted,display:"block",marginBottom:3} }, "Notes"),
