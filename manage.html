@@ -3051,6 +3051,9 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
   const FL_TAX_RATE = 6.0;
   const [exchangeRate, setExchangeRate] = useState("");
   const [taxRate, setTaxRate] = useState(FL_TAX_RATE.toString());
+  const [imeiListFile, setImeiListFile] = useState(null);
+  const [imeiLoading, setImeiLoading] = useState({});
+  const [imeiErr, setImeiErr] = useState({});
 
   const updatePhone = (i, k, v) => setPhones(prev => prev.map((p, idx) => idx === i ? {...p, [k]:v} : p));
   const removePhone = i => setPhones(prev => prev.filter((_, idx) => idx !== i));
@@ -3159,10 +3162,6 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
       )
     )
   );
-
-  const [imeiListFile, setImeiListFile] = useState(null);
-  const [imeiLoading, setImeiLoading] = useState({});
-  const [imeiErr, setImeiErr] = useState({});
 
   const extractImei = async (i, file) => {
     if (!file) return;
