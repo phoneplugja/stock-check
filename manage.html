@@ -6173,6 +6173,8 @@ function DebtLedger() {
   const [checkins, setCheckins] = useState([]);
   const [editing, setEditing] = useState(null);
   const [editVal, setEditVal] = useState("");
+  const [expanded, setExpanded] = useState(null);
+  const [payAmt, setPayAmt] = useState({});
   const fetchAll = async () => {
     let d = await loadArr("tpp-debts");
     if (!d.length) { d = DEFAULT_DEBTS.map(x=>({...x})); await save("tpp-debts", d); }
