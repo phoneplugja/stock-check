@@ -5315,6 +5315,15 @@ function OwnerShell({
   }, {
     id: "deposit",
     label: "🏦 Deposit"
+  }, {
+    id: "expense-history",
+    label: "🔍 Expenses"
+  }, {
+    id: "eod-history",
+    label: "📅 EOD Log"
+  }, {
+    id: "debt",
+    label: "💳 Debt"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5523,7 +5532,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -5709,6 +5718,7 @@ function ReimbursementForm({
 function ReimbursementManager() {
   const [reqs, setReqs] = useState([]);
   const [filter, setFilter] = useState("pending");
+  const [search, setSearch] = useState("");
   useEffect(() => {
     loadArr("tpp-reimbursements").then(setReqs);
   }, []);
@@ -5726,7 +5736,12 @@ function ReimbursementManager() {
     paid: T.green,
     rejected: T.red
   };
-  const visible = reqs.filter(r => filter === "all" || r.status === filter || filter === "pending" && !r.status);
+  const visible = reqs.filter(r => {
+    const matchFilter = filter === "all" || r.status === filter || filter === "pending" && !r.status;
+    const q = search.toLowerCase();
+    const matchSearch = !q || (r.submitted_by||"").toLowerCase().includes(q) || (r.details||"").toLowerCase().includes(q) || (r.category||"").toLowerCase().includes(q) || (r.date||"").includes(q);
+    return matchFilter && matchSearch;
+  });
   const pending = reqs.filter(r => !r.status || r.status === "pending").length;
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5771,7 +5786,12 @@ function ReimbursementManager() {
     value: "rejected"
   }, "Rejected"), /*#__PURE__*/React.createElement("option", {
     value: "all"
-  }, "All"))), visible.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "All"))), /*#__PURE__*/React.createElement(Input, {
+    placeholder: "\uD83D\uDD0D Search by name, details, category, date...",
+    value: search,
+    onChange: function(e) { setSearch(e.target.value); },
+    style: { marginBottom: 16, marginTop: 12 }
+  }), visible.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "60px 20px",
@@ -5904,6 +5924,262 @@ function ReimbursementManager() {
       value: ""
     }, "Mark as Paid via..."), /*#__PURE__*/React.createElement("option", null, "NCB Bank Transfer"), /*#__PURE__*/React.createElement("option", null, "Cash"), /*#__PURE__*/React.createElement("option", null, "PayPal"), /*#__PURE__*/React.createElement("option", null, "Other"))));
   })));
+}
+
+// ── Expense History (search + full view) ─────────────────────────────────────
+function ExpenseHistory() {
+  const E = React.createElement;
+  const [expenses, setExpenses] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  useEffect(() => { loadArr("tpp-expenses").then(setExpenses); }, []);
+  const filtered = expenses.filter(e => {
+    const q = search.toLowerCase();
+    return !q || (e.category||"").toLowerCase().includes(q) || (e.details||"").toLowerCase().includes(q) || (e.date||"").includes(q) || (e.logged_by||"").toLowerCase().includes(q) || (e.payment_method||"").toLowerCase().includes(q);
+  });
+  if (selected) return E("div", { style: { maxWidth: 480, margin: "0 auto" } },
+    E("button", { onClick: () => setSelected(null), style: { background: "none", border: "none", color: T.blue, fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 16, padding: 0, display: "flex", alignItems: "center", gap: 6 } }, "\u2190 Back to Expenses"),
+    E(Card, null,
+      E("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 } },
+        E("div", null,
+          E("div", { style: { fontFamily: "'Syne',sans-serif", fontSize: 18, fontWeight: 800, color: T.text } }, selected.category),
+          E("div", { style: { fontSize: 12, color: T.muted, marginTop: 4 } }, selected.date, " \u00b7 Logged by ", selected.logged_by || "—")
+        ),
+        E("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22, color: T.blue } }, fmtMoney(selected.amount))
+      ),
+      E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 12 } }, selected.details || "No details provided."),
+      E("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        E("span", { style: { background: T.blueLt, color: T.blue, borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600 } }, selected.payment_method),
+        selected.voided && E("span", { style: { background: T.redLt, color: T.red, borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600 } }, "VOIDED"),
+        selected.source === "eod_inline" && E("span", { style: { background: T.amberLt, color: T.amber, borderRadius: 20, padding: "4px 12px", fontSize: 12, fontWeight: 600 } }, "From EOD")
+      )
+    )
+  );
+  return E("div", { style: { maxWidth: 560, margin: "0 auto" } },
+    E("div", { style: { marginBottom: 20 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.text, margin: 0 } }, "Expense History"),
+      E("div", { style: { fontSize: 13, color: T.muted, marginTop: 4 } }, expenses.length, " total entries")
+    ),
+    E(Input, { placeholder: "\uD83D\uDD0D Search by category, details, date, method...", value: search, onChange: e => setSearch(e.target.value), style: { marginBottom: 16 } }),
+    filtered.length === 0 ? E("div", { style: { textAlign: "center", padding: "40px 20px", color: T.muted } }, "No expenses found.") :
+    E("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+      filtered.map((ex, i) => E("div", { key: i, onClick: () => setSelected(ex), style: { background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", opacity: ex.voided ? 0.5 : 1 } },
+        E("div", null,
+          E("div", { style: { fontWeight: 600, fontSize: 14 } }, ex.category),
+          E("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, ex.date, " \u00b7 ", ex.payment_method, ex.details ? ` \u00b7 ${ex.details.slice(0,40)}${ex.details.length>40?"…":""}` : "")
+        ),
+        E("div", { style: { textAlign: "right" } },
+          E("div", { style: { fontWeight: 700, color: T.blue } }, fmtMoney(ex.amount)),
+          E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, "\u203a View")
+        )
+      ))
+    )
+  );
+}
+
+// ── EOD History (search + full view) ─────────────────────────────────────────
+function EodHistory() {
+  const E = React.createElement;
+  const [eods, setEods] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  useEffect(() => { loadArr("tpp-eod").then(setEods); }, []);
+  const filtered = eods.filter(e => {
+    const q = search.toLowerCase();
+    return !q || (e.date||"").includes(q) || (e.submitted_by||"").toLowerCase().includes(q) || (e.notes||"").toLowerCase().includes(q);
+  });
+  if (selected) return E("div", { style: { maxWidth: 540, margin: "0 auto" } },
+    E("button", { onClick: () => setSelected(null), style: { background: "none", border: "none", color: T.blue, fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 16, padding: 0 } }, "\u2190 Back to EOD"),
+    E(Card, null,
+      E("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 } },
+        E("div", null,
+          E("div", { style: { fontFamily: "'Syne',sans-serif", fontSize: 18, fontWeight: 800 } }, "EOD \u2014 ", selected.date),
+          E("div", { style: { fontSize: 12, color: T.muted, marginTop: 4 } }, "Submitted by ", selected.submitted_by || "—")
+        ),
+        E("div", { style: { textAlign: "right" } },
+          E("div", { style: { fontSize: 11, color: T.muted } }, "Total Revenue"),
+          E("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22, color: T.green } }, fmtMoney(selected.totalRevenue))
+        )
+      ),
+      E(ST, null, "Cash"),
+      E(R2, null,
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Float Start"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.float_start))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Cash Sales"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.cash_sales))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Other Cash In"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.other_cash_in))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Cash Out"), E("div", { style: { fontWeight: 700, color: T.red } }, fmtMoney(selected.cash_out)))
+      ),
+      E("div", { style: { marginTop: 16 } }, E(ST, null, "Cards")),
+      E(R2, null,
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Debit"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.debit_card))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Credit"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.credit_card))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Other Card"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.other_card))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Prev Days"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.card_prev_days)))
+      ),
+      E("div", { style: { marginTop: 16 } }, E(ST, null, "Transfers")),
+      E(R2, null,
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "NCB Transfer"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.ncb_transfer_in))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Other Bank"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.other_bank_in)))
+      ),
+      selected.notes && E("div", { style: { marginTop: 16 } },
+        E(ST, null, "Notes"),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", fontSize: 13 } }, selected.notes)
+      ),
+      selected.cash_out_details && E("div", { style: { marginTop: 12 } },
+        E(ST, null, "Cash Out Details"),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", fontSize: 13 } }, selected.cash_out_details)
+      )
+    )
+  );
+  return E("div", { style: { maxWidth: 560, margin: "0 auto" } },
+    E("div", { style: { marginBottom: 20 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.text, margin: 0 } }, "EOD History"),
+      E("div", { style: { fontSize: 13, color: T.muted, marginTop: 4 } }, eods.length, " entries")
+    ),
+    E(Input, { placeholder: "\uD83D\uDD0D Search by date, staff, notes...", value: search, onChange: e => setSearch(e.target.value), style: { marginBottom: 16 } }),
+    filtered.length === 0 ? E("div", { style: { textAlign: "center", padding: "40px 20px", color: T.muted } }, "No EOD entries found.") :
+    E("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+      filtered.map((eod, i) => E("div", { key: i, onClick: () => setSelected(eod), style: { background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, padding: "14px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" } },
+        E("div", null,
+          E("div", { style: { fontWeight: 600, fontSize: 14 } }, eod.date),
+          E("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, eod.submitted_by || "—", eod.notes ? ` \u00b7 ${eod.notes.slice(0,40)}${eod.notes.length>40?"…":""}` : "")
+        ),
+        E("div", { style: { textAlign: "right" } },
+          E("div", { style: { fontWeight: 700, color: T.green } }, fmtMoney(eod.totalRevenue)),
+          E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, "\u203a View")
+        )
+      ))
+    )
+  );
+}
+
+// ── Debt Ledger ───────────────────────────────────────────────────────────────
+const DEFAULT_DEBTS = [{
+  id: "bestbuy", name: "Best Buy / Citi", type: "Credit card", balance: 2218.67, due: 13, apr: 29.99
+}, {
+  id: "chase", name: "Chase Freedom (0% APR)", type: "Credit card", balance: 2776.09, due: 21, apr: 0
+}, {
+  id: "ncbusd", name: "NCB Visa Platinum (USD)", type: "Credit card", balance: 7100.55, due: 30, apr: 17
+}, {
+  id: "ncbjmd", name: "NCB Business Edge (JMD)", type: "Credit card", balance: 1214, due: 20, apr: 38.75
+}, {
+  id: "tdbank", name: "TD Fit Loan", type: "Loan", balance: 4079.68, due: 21, apr: null
+}, {
+  id: "upstart", name: "Upstart", type: "Loan", balance: 9076.66, due: 17, apr: null
+}, {
+  id: "lumion", name: "Lumion (Tuition)", type: "Loan", balance: 961.80, due: 8, apr: 0
+}];
+const fmtUSD = n => "$" + Math.abs(parseFloat(n)||0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const daysUntilDue = dueDay => {
+  const d = new Date(); const cur = d.getDate();
+  if (dueDay >= cur) return dueDay - cur;
+  const dim = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  return dim - cur + dueDay;
+};
+const computeStreak = checkins => {
+  let streak = 0; const todayKey = todayStr(); let cursor = new Date();
+  if (!checkins.includes(todayKey)) cursor.setDate(cursor.getDate()-1);
+  while (true) {
+    const key = cursor.toISOString().slice(0,10);
+    if (checkins.includes(key)) { streak++; cursor.setDate(cursor.getDate()-1); } else break;
+  }
+  return streak;
+};
+function DebtLedger() {
+  const E = React.createElement;
+  const [debts, setDebts] = useState(null);
+  const [payments, setPayments] = useState([]);
+  const [checkins, setCheckins] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+  const [payAmt, setPayAmt] = useState({});
+  const fetchAll = async () => {
+    let d = await loadArr("tpp-debts");
+    if (!d.length) { d = DEFAULT_DEBTS.map(x=>({...x})); await save("tpp-debts", d); }
+    const p = await loadArr("tpp-debt-payments");
+    const c = await loadArr("tpp-debt-checkins");
+    setDebts(d); setPayments(p); setCheckins(c);
+  };
+  useEffect(() => { fetchAll(); }, []);
+  if (debts === null) return E("div", { style: { textAlign: "center", padding: "60px 20px", color: T.muted } }, "Loading...");
+  const sorted = [...debts].sort((a,b) => daysUntilDue(a.due)-daysUntilDue(b.due));
+  const totalRemaining = debts.reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
+  const now = new Date();
+  const paidThisMonth = payments.filter(p=>{ const dt=new Date(p.date); return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear(); }).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+  const checkedInToday = checkins.includes(todayStr());
+  const streak = computeStreak(checkins);
+  const checkIn = async () => {
+    if (checkedInToday) return;
+    const updated = [todayStr(), ...checkins];
+    await save("tpp-debt-checkins", updated); setCheckins(updated);
+  };
+  const logPayment = async debt => {
+    const amt = parseFloat(payAmt[debt.id]);
+    if (!amt||amt<=0) { alert("Enter an amount greater than 0."); return; }
+    const updatedDebts = debts.map(d=>d.id===debt.id?{...d,balance:Math.max(0,(parseFloat(d.balance)||0)-amt)}:d);
+    const newPayment = { debtId: debt.id, name: debt.name, amount: amt, date: new Date().toISOString() };
+    const updatedPayments = [newPayment, ...payments];
+    await save("tpp-debts", updatedDebts); await save("tpp-debt-payments", updatedPayments);
+    setDebts(updatedDebts); setPayments(updatedPayments);
+    setPayAmt(p=>({...p,[debt.id]:""})); setExpanded(null);
+  };
+  return E("div", { style: { maxWidth: 560, margin: "0 auto" } },
+    E("div", { style: { marginBottom: 20 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.text, margin: 0 } }, "Debt Ledger"),
+      E("div", { style: { fontSize: 12, color: T.muted, marginTop: 4 } }, "Log payments, track due dates, build the streak.")
+    ),
+    E("div", { style: { background: checkedInToday ? T.greenLt : T.card, border: `1px solid ${checkedInToday?"#A7F3D0":T.border}`, borderRadius: 12, padding: 16, marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" } },
+      E("div", null,
+        E("div", { style: { fontWeight: 700, fontSize: 14 } }, checkedInToday ? "Checked in for today" : "Did you stick to plan today?"),
+        E("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, "No impulse spending \u2014 money went where it should")
+      ),
+      E(Btn, { variant: checkedInToday?"green":"primary", onClick: checkIn, disabled: checkedInToday }, checkedInToday ? "\u2705 Logged" : "Yes, log it")
+    ),
+    E("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 18, fontSize: 13, color: T.muted } }, "\uD83D\uDD25 ", E("b", { style: { color: T.text } }, streak), " day streak of sticking to the plan"),
+    E(R2, null,
+      E(StatCard, { label: "Total remaining", value: fmtUSD(totalRemaining), color: T.blue }),
+      E(StatCard, { label: "Paid this month", value: fmtUSD(paidThisMonth), color: T.green })
+    ),
+    E("div", { style: { height: 20 } }),
+    E(ST, null, "Obligations"),
+    E("div", { style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 } },
+      sorted.map(debt => {
+        const isPaid = debt.balance<=0;
+        const days = daysUntilDue(debt.due);
+        let statusColor, statusLabel;
+        if (isPaid) { statusColor=T.green; statusLabel="Paid off \u2705"; }
+        else if (days===0) { statusColor=T.red; statusLabel="Due today!"; }
+        else if (days<=3) { statusColor=T.amber; statusLabel=`Due in ${days}d`; }
+        else { statusColor=T.muted; statusLabel=`Due in ${days}d`; }
+        const isExpanded = expanded===debt.id;
+        return E("div", { key: debt.id, style: { background: T.card, border: `1px solid ${isExpanded?T.blue:T.border}`, borderRadius: 12, padding: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", opacity: isPaid?0.55:1 } },
+          E("div", { onClick: ()=>!isPaid&&setExpanded(isExpanded?null:debt.id), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: isPaid?"default":"pointer" } },
+            E("div", null,
+              E("div", { style: { fontWeight: 700, fontSize: 14 } }, debt.name),
+              E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, debt.type, debt.apr!=null ? ` \u00b7 ${debt.apr}% APR` : "")
+            ),
+            E("div", { style: { textAlign: "right" } },
+              E("div", { style: { fontWeight: 700, fontSize: 14 } }, fmtUSD(debt.balance)),
+              E("div", { style: { fontSize: 11, color: statusColor, marginTop: 2, fontWeight: 600 } }, statusLabel)
+            )
+          ),
+          isExpanded&&!isPaid&&E("div", { style: { marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 } },
+            E("div", { style: { flex: 1 } }, E(Input, { type: "number", placeholder: "Amount paid (USD)", value: payAmt[debt.id]||"", onChange: e=>setPayAmt(p=>({...p,[debt.id]:e.target.value})) })),
+            E(Btn, { onClick: ()=>logPayment(debt) }, "\uD83D\uDCB0 Confirm Payment")
+          )
+        );
+      })
+    ),
+    E(ST, null, "Payment History"),
+    E(Card, null,
+      payments.length===0 ? E("div", { style: { textAlign: "center", color: T.muted, fontSize: 13, padding: "20px 0" } }, "No payments logged yet.") :
+      payments.map((p,i)=>E("div", { key: i, style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "10px 0", borderBottom: i<payments.length-1?`1px dashed ${T.border}`:"none" } },
+        E("div", null,
+          E("div", { style: { fontSize: 13, fontWeight: 600 } }, p.name),
+          E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, new Date(p.date).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}))
+        ),
+        E("div", { style: { fontWeight: 700, color: T.green, fontFamily: "monospace" } }, "-"+fmtUSD(p.amount))
+      ))
+    )
+  );
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
