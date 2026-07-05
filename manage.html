@@ -1997,24 +1997,68 @@ function TicketDetail({
 // ── Repair Manager wrapper ────────────────────────────────────────────────────
 function RepairManager() {
   const [tickets, setTickets] = useState([]);
+  const [bookings, setBookings] = useState([]);
   const [view, setView] = useState("list");
   const [selected, setSelected] = useState(null);
+  const [activeTab, setActiveTab] = useState("tickets"); // "tickets" | "bookings"
+
   useEffect(() => {
     (async () => {
       const s = await loadArr("tpp-tickets-v1", false);
       setTickets(s);
+      // Load online bookings from Firestore
+      const allKeys = await loadArr("tpp-repairs-bookings-index");
+      const bkList = [];
+      for (const key of (allKeys || [])) {
+        const bk = await load(key);
+        if (bk) bkList.push(bk);
+      }
+      setBookings(bkList.filter(b => b.status === "scheduled"));
     })();
   }, []);
+
   const saveTickets = useCallback(async next => {
     await save("tpp-tickets-v1", next, false);
     setTickets(next);
   }, []);
+
   const onCreated = async t => {
     const next = [t, ...tickets];
     await saveTickets(next);
     setSelected(t);
     setView("detail");
   };
+
+  const convertBooking = async (booking) => {
+    // Pre-populate a new ticket from booking data
+    const prefilledTicket = {
+      id: genId(tickets.map(t => t.id)),
+      customerName: booking.customerName || "",
+      customerPhone: booking.customerPhone || "",
+      customerEmail: booking.customerEmail || "",
+      deviceType: booking.deviceType || "Smartphone",
+      deviceBrand: booking.deviceBrand || "",
+      deviceModel: booking.deviceModel || "",
+      deviceColor: booking.deviceColor || "",
+      deviceImei: booking.deviceImei || "",
+      issueDescription: booking.issueDescription || "",
+      notes: (booking.notes || "") + (booking.bookingRef ? ` [Booking: ${booking.bookingRef}]` : ""),
+      status: "received",
+      source: "online_booking",
+      bookingRef: booking.bookingRef || "",
+      createdAt: new Date().toISOString(),
+      history: [{ status: "received", ts: new Date().toISOString(), note: "Converted from online booking" }]
+    };
+    const next = [prefilledTicket, ...tickets];
+    await saveTickets(next);
+    // Mark booking as converted
+    const updatedBookings = bookings.filter(b => b.bookingRef !== booking.bookingRef);
+    setBookings(updatedBookings);
+    setSelected(prefilledTicket);
+    setView("detail");
+    alert(`Ticket created from booking ${booking.bookingRef || ''}. Review and complete any missing fields.`);
+  };
+
   const onUpdateStatus = async (id, ns, note) => {
     const next = tickets.map(t => t.id === id ? {
       ...t,
@@ -2029,36 +2073,74 @@ function RepairManager() {
     await saveTickets(next);
     setSelected(next.find(t => t.id === id));
   };
-  return /*#__PURE__*/React.createElement("div", null, view === "list" && /*#__PURE__*/React.createElement(RepairDashboard, {
-    tickets: tickets,
-    onSelect: t => {
-      setSelected(t);
-      setView("detail");
-    },
-    onNew: () => setView("new")
-  }), view === "new" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setView("list"),
-    style: {
-      background: "#F3F4F6",
-      border: "1.5px solid #E5E7EB",
-      borderRadius: 8,
-      padding: "8px 14px",
-      cursor: "pointer",
-      fontFamily: "inherit",
-      fontWeight: 600,
-      fontSize: 13,
-      marginBottom: 18
-    }
-  }, "\u2190 Back to List"), /*#__PURE__*/React.createElement(NewTicketForm, {
-    onCreated: onCreated,
-    existingIds: tickets.map(t => t.id)
-  })), view === "detail" && selected && /*#__PURE__*/React.createElement(TicketDetail, {
-    ticket: selected,
-    allTickets: tickets,
-    saveTickets: saveTickets,
-    onBack: () => setView("list"),
-    onUpdateStatus: onUpdateStatus
-  }));
+
+  // Tab bar for Tickets / Bookings
+  const tabBar = React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 20 } },
+    React.createElement(Btn, { variant: activeTab==="tickets"?"primary":"ghost", onClick: ()=>setActiveTab("tickets"), style: { fontSize: 13 } }, `🔧 Repair Tickets (${tickets.length})`),
+    React.createElement(Btn, { variant: activeTab==="bookings"?"primary":"ghost", onClick: ()=>setActiveTab("bookings"), style: { fontSize: 13, position: "relative" } },
+      `📅 Online Bookings`,
+      bookings.length > 0 && React.createElement("span", { style: { background: T.red, color: "#fff", borderRadius: "99px", fontSize: 10, fontWeight: 800, padding: "1px 6px", marginLeft: 6 } }, bookings.length)
+    )
+  );
+
+  // Bookings panel
+  const bookingsPanel = React.createElement("div", { style: { maxWidth: 680 } },
+    tabBar,
+    bookings.length === 0
+      ? React.createElement("div", { style: { textAlign: "center", padding: "60px 20px", color: T.muted } },
+          React.createElement("div", { style: { fontSize: 40, marginBottom: 12 } }, "📅"),
+          React.createElement("div", null, "No pending online bookings."),
+          React.createElement("div", { style: { fontSize: 13, marginTop: 6, color: T.muted } }, "New bookings from phoneplugja.com will appear here.")
+        )
+      : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
+          bookings.map((bk, i) => React.createElement(Card, { key: i },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
+              React.createElement("div", null,
+                React.createElement("div", { style: { fontWeight: 700, fontSize: 15 } }, bk.customerName),
+                React.createElement("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, bk.customerPhone, bk.customerEmail ? ` · ${bk.customerEmail}` : "")
+              ),
+              React.createElement("span", { style: { background: T.blueLt, color: T.blue, border: `1px solid ${T.border}`, borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700 } }, "Online Booking")
+            ),
+            React.createElement("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 12 } },
+              React.createElement("div", { style: { fontWeight: 600 } }, `${bk.deviceBrand} ${bk.deviceModel}`, bk.deviceType ? ` (${bk.deviceType})` : ""),
+              React.createElement("div", { style: { color: T.muted, marginTop: 4 } }, bk.issueDescription)
+            ),
+            bk.preferredDate && React.createElement("div", { style: { fontSize: 12, color: T.muted, marginBottom: 10 } },
+              `📅 Preferred: ${bk.preferredDate}${bk.preferredTime ? ' · ' + bk.preferredTime : ''}`
+            ),
+            React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+              React.createElement(Btn, { variant: "primary", style: { fontSize: 12, padding: "8px 14px" }, onClick: () => convertBooking(bk) }, "→ Create Repair Ticket"),
+              React.createElement("div", { style: { fontSize: 11, color: T.muted } }, bk.bookingRef ? `Ref: ${bk.bookingRef}` : "")
+            )
+          ))
+        )
+  );
+
+  return React.createElement("div", null,
+    view === "list" && activeTab === "bookings" && bookingsPanel,
+    view === "list" && activeTab === "tickets" && React.createElement(React.Fragment, null,
+      tabBar,
+      React.createElement(RepairDashboard, {
+        tickets: tickets,
+        onSelect: t => { setSelected(t); setView("detail"); },
+        onNew: () => setView("new")
+      })
+    ),
+    view === "new" && React.createElement("div", null,
+      React.createElement("button", {
+        onClick: () => setView("list"),
+        style: { background: "#F3F4F6", border: "1.5px solid #E5E7EB", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 13, marginBottom: 18 }
+      }, "← Back to List"),
+      React.createElement(NewTicketForm, { onCreated: onCreated, existingIds: tickets.map(t => t.id) })
+    ),
+    view === "detail" && selected && React.createElement(TicketDetail, {
+      ticket: selected,
+      allTickets: tickets,
+      saveTickets: saveTickets,
+      onBack: () => setView("list"),
+      onUpdateStatus: onUpdateStatus
+    })
+  );
 }
 
 // ── Business forms (EOD / Expense / Deposit) ─────────────────────────────────
@@ -6089,8 +6171,8 @@ function DebtLedger() {
   const [debts, setDebts] = useState(null);
   const [payments, setPayments] = useState([]);
   const [checkins, setCheckins] = useState([]);
-  const [expanded, setExpanded] = useState(null);
-  const [payAmt, setPayAmt] = useState({});
+  const [editing, setEditing] = useState(null);
+  const [editVal, setEditVal] = useState("");
   const fetchAll = async () => {
     let d = await loadArr("tpp-debts");
     if (!d.length) { d = DEFAULT_DEBTS.map(x=>({...x})); await save("tpp-debts", d); }
@@ -6121,6 +6203,13 @@ function DebtLedger() {
     setDebts(updatedDebts); setPayments(updatedPayments);
     setPayAmt(p=>({...p,[debt.id]:""})); setExpanded(null);
   };
+  const saveEdit = async debt => {
+    const newBal = parseFloat(editVal);
+    if (isNaN(newBal) || newBal < 0) { alert("Enter a valid balance (e.g. 1234.56)."); return; }
+    const updatedDebts = debts.map(d => d.id === debt.id ? { ...d, balance: newBal } : d);
+    await save("tpp-debts", updatedDebts);
+    setDebts(updatedDebts); setEditing(null); setEditVal("");
+  };
   return E("div", { style: { maxWidth: 560, margin: "0 auto" } },
     E("div", { style: { marginBottom: 20 } },
       E("h2", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.text, margin: 0 } }, "Debt Ledger"),
@@ -6150,18 +6239,30 @@ function DebtLedger() {
         else if (days<=3) { statusColor=T.amber; statusLabel=`Due in ${days}d`; }
         else { statusColor=T.muted; statusLabel=`Due in ${days}d`; }
         const isExpanded = expanded===debt.id;
-        return E("div", { key: debt.id, style: { background: T.card, border: `1px solid ${isExpanded?T.blue:T.border}`, borderRadius: 12, padding: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", opacity: isPaid?0.55:1 } },
-          E("div", { onClick: ()=>!isPaid&&setExpanded(isExpanded?null:debt.id), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: isPaid?"default":"pointer" } },
+        const isEditing = editing===debt.id;
+        return E("div", { key: debt.id, style: { background: T.card, border: `1px solid ${isExpanded||isEditing?T.blue:T.border}`, borderRadius: 12, padding: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", opacity: isPaid?0.55:1 } },
+          E("div", { onClick: ()=>{ if(!isPaid&&!isEditing){ setExpanded(isExpanded?null:debt.id); } }, style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: isPaid?"default":"pointer" } },
             E("div", null,
               E("div", { style: { fontWeight: 700, fontSize: 14 } }, debt.name),
               E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, debt.type, debt.apr!=null ? ` \u00b7 ${debt.apr}% APR` : "")
             ),
-            E("div", { style: { textAlign: "right" } },
-              E("div", { style: { fontWeight: 700, fontSize: 14 } }, fmtUSD(debt.balance)),
-              E("div", { style: { fontSize: 11, color: statusColor, marginTop: 2, fontWeight: 600 } }, statusLabel)
+            E("div", { style: { textAlign: "right", display: "flex", alignItems: "center", gap: 8 } },
+              E("div", null,
+                E("div", { style: { fontWeight: 700, fontSize: 14 } }, fmtUSD(debt.balance)),
+                E("div", { style: { fontSize: 11, color: statusColor, marginTop: 2, fontWeight: 600 } }, statusLabel)
+              ),
+              E("button", { onClick: e=>{ e.stopPropagation(); setEditing(isEditing?null:debt.id); setEditVal(String(debt.balance)); setExpanded(null); }, style: { background: T.blueLt, color: T.blue, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0 } }, isEditing ? "Cancel" : "Edit")
             )
           ),
-          isExpanded&&!isPaid&&E("div", { style: { marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 } },
+          isEditing&&E("div", { style: { marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` } },
+            E("div", { style: { fontSize: 12, color: T.muted, marginBottom: 8 } }, "Enter the exact current balance from your latest statement (USD):"),
+            E("div", { style: { display: "flex", gap: 8 } },
+              E("div", { style: { flex: 1 } }, E(Input, { type: "number", placeholder: "e.g. 1234.56", value: editVal, onChange: e=>setEditVal(e.target.value) })),
+              E(Btn, { onClick: ()=>saveEdit(debt) }, "Save Balance"),
+              E(Btn, { variant: "ghost", onClick: ()=>{ setEditing(null); setEditVal(""); } }, "Cancel")
+            )
+          ),
+          isExpanded&&!isPaid&&!isEditing&&E("div", { style: { marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}`, display: "flex", gap: 8 } },
             E("div", { style: { flex: 1 } }, E(Input, { type: "number", placeholder: "Amount paid (USD)", value: payAmt[debt.id]||"", onChange: e=>setPayAmt(p=>({...p,[debt.id]:e.target.value})) })),
             E(Btn, { onClick: ()=>logPayment(debt) }, "\uD83D\uDCB0 Confirm Payment")
           )
