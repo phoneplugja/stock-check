@@ -237,8 +237,21 @@ function App() {
           </div>
 
           {/* Address */}
-          <div style={{ paddingBottom:14, fontSize:12, color:"rgba(255,255,255,0.35)" }}>
+          <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.35)" }}>
             📍 {ADDRESS}
+          </div>
+
+          {/* Nav tabs */}
+          <div style={{ display:"flex", gap:4, padding:"10px 0" }}>
+            {[
+              { label:"📦 Stock Checker", href:"/" },
+              { label:"🔍 Track Repair",  href:"/repairs.html", active:true },
+              { label:"🔧 Book a Repair", href:"/book-repair.html" },
+            ].map(t => (
+              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "rgba(255,255,255,0.55)", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
+                {t.label}
+              </a>
+            ))}
           </div>
         </div>
       </div>
