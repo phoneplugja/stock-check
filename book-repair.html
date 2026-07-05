@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Phone Plug — Book a Repair</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
+      authDomain: "phone-plug-3a7fe.firebaseapp.com",
+      projectId: "phone-plug-3a7fe",
+      storageBucket: "phone-plug-3a7fe.firebasestorage.app",
+      messagingSenderId: "847520590345",
+      appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
+    });
+    const _db = firebase.firestore();
+  </script>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // ── Constants ────────────────────────────────────────────────────────────
+    const WA_NUMBER = "18764905515";
+    const PHONE_1   = "876-490-5515";
+    const PHONE_2   = "876-672-2442";
+    const INSTAGRAM = "@phoneplug_ja";
+    const ADDRESS   = "Shop 5D, Hagley Park Plaza, Half Way Tree, Kingston";
+    const LOGO_SRC  = "/logo.png";
+
+    const T = {
+      bg:"#F8F9FB", card:"#FFFFFF", border:"#E5E7EB",
+      blue:"#1A56DB", blueLt:"#EFF4FF",
+      black:"#0A0A0A", text:"#111827", muted:"#6B7280",
+      green:"#059669", greenLt:"#ECFDF5",
+      red:"#DC2626", redLt:"#FEF2F2",
+      amber:"#D97706", amberLt:"#FFFBEB",
+    };
+
+    const iS = {
+      width:"100%", background:"#FFFFFF", border:"1.5px solid #E5E7EB",
+      borderRadius:8, padding:"10px 13px", color:T.text, fontSize:14,
+      fontFamily:"inherit", outline:"none", boxSizing:"border-box"
+    };
+
+    const iSErr = { ...iS, borderColor:T.red };
+
+    const DEVICE_TYPES   = ["Smartphone","Tablet","Laptop","Smartwatch","Accessory","Other"];
+    const COMMON_ISSUES  = ["Screen damage","Battery issue","Charging port","Camera fault","Speaker/mic","Water damage","Software issue","Back glass","Button fault","Other"];
+    const ALPHA          = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const genRef         = () => "BK-" + Array.from({length:6},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join("");
+
+    const save = async (key, val) => {
+      try { await _db.collection("tpp").doc(key).set({ v: val, ts: Date.now() }); }
+      catch(e) { console.error("save:", e); throw e; }
+    };
+
+    const loadArr = async (key) => {
+      try {
+        const s = await _db.collection("tpp").doc(key).get();
+        return s.exists && Array.isArray(s.data().v) ? s.data().v : [];
+      } catch(e) { return []; }
+    };
+
+    // ── Shared UI ─────────────────────────────────────────────────────────────
+    const WaBtn = ({ label="💬 WhatsApp Us" }) => (
+      <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer"
+        style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#25D366", color:"#fff", padding:"11px 22px", borderRadius:8, fontSize:14, fontWeight:700, textDecoration:"none" }}>
+        {label}
+      </a>
+    );
+
+    const Field = ({ label, required, error, hint, children }) => (
+      <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+        <label style={{ fontSize:12, fontWeight:600, color:T.muted }}>
+          {label}{required && <span style={{ color:T.blue, marginLeft:2 }}>*</span>}
+          {hint && <span style={{ fontWeight:400, marginLeft:6, color:T.muted }}>{hint}</span>}
+        </label>
+        {children}
+        {error && <span style={{ fontSize:12, color:T.red, marginTop:2 }}>{error}</span>}
+      </div>
+    );
+
+    const Card = ({ children, style:s }) => (
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:"24px 24px 20px", boxShadow:"0 2px 12px rgba(0,0,0,0.08)", ...s }}>
+        {children}
+      </div>
+    );
+
+    const ST = ({ children }) => (
+      <div style={{ fontFamily:"'Syne',sans-serif", fontSize:10.5, fontWeight:800, color:T.blue, textTransform:"uppercase", letterSpacing:"1px", marginBottom:16 }}>
+        {children}
+      </div>
+    );
+
+    const StepBar = ({ current }) => {
+      const steps = ["Your Info","Device & Issue","Confirm"];
+      return (
+        <div style={{ display:"flex", alignItems:"center", marginBottom:28, gap:0 }}>
+          {steps.map((s,i) => {
+            const done    = i < current;
+            const active  = i === current;
+            const col     = done ? T.green : active ? T.blue : T.muted;
+            return (
+              <React.Fragment key={i}>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
+                  <div style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${col}`, background: done ? T.greenLt : active ? T.blueLt : T.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:800, color:col, transition:"all .3s" }}>
+                    {done ? "✓" : i+1}
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:600, color:col, whiteSpace:"nowrap" }}>{s}</span>
+                </div>
+                {i < steps.length-1 && <div style={{ flex:1, height:2, background: done ? T.green : T.border, margin:"0 8px", marginBottom:18, transition:"background .3s" }} />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      );
+    };
+
+    const Btn = ({ children, onClick, variant="primary", full, disabled, style:s }) => {
+      const v = {
+        primary: { background:T.blue, color:"#FFF", border:"none" },
+        ghost:   { background:"#F3F4F6", color:T.text, border:`1.5px solid ${T.border}` },
+        green:   { background:T.greenLt, color:T.green, border:"1px solid #A7F3D0" },
+      };
+      return (
+        <button onClick={onClick} disabled={disabled} style={{ ...v[variant], borderRadius:8, padding:"11px 20px", fontSize:14, fontWeight:700, cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit", width:full?"100%":"auto", opacity:disabled?.5:1, ...s }}>
+          {children}
+        </button>
+      );
+    };
+
+    // ── Main Booking Form ─────────────────────────────────────────────────────
+    function BookingForm() {
+      const empty = {
+        customerName:"", customerPhone:"", customerEmail:"",
+        deviceType:"Smartphone", deviceBrand:"", deviceModel:"",
+        deviceColor:"", deviceImei:"",
+        selectedIssues:[], issueDescription:"",
+        preferredDate:"", preferredTime:"", notes:""
+      };
+      const [step,    setStep]    = useState(0);
+      const [form,    setFormS]   = useState(empty);
+      const [errs,    setErrs]    = useState({});
+      const [saving,  setSaving]  = useState(false);
+      const [bookRef, setBookRef] = useState("");
+
+      const set = (k,v) => { setFormS(p=>({...p,[k]:v})); setErrs(p=>({...p,[k]:""})); };
+
+      const toggleIssue = (issue) => {
+        const cur = form.selectedIssues;
+        set("selectedIssues", cur.includes(issue) ? cur.filter(i=>i!==issue) : [...cur,issue]);
+      };
+
+      const validate = (s) => {
+        const e = {};
+        if (s===0) {
+          if (!form.customerName.trim())                                                e.customerName    = "Name is required";
+          if (!form.customerPhone.trim()||form.customerPhone.replace(/\D/g,"").length<7) e.customerPhone = "Valid phone number required";
+          if (form.customerEmail && !/\S+@\S+\.\S+/.test(form.customerEmail))           e.customerEmail  = "Invalid email";
+        }
+        if (s===1) {
+          if (!form.deviceBrand.trim()) e.deviceBrand = "Brand is required";
+          if (!form.deviceModel.trim()) e.deviceModel = "Model is required";
+          if (!form.issueDescription.trim() && form.selectedIssues.length===0) e.issueDescription = "Please describe the issue";
+        }
+        return e;
+      };
+
+      const next = (s) => {
+        const e = validate(s);
+        if (Object.keys(e).length) { setErrs(e); return; }
+        setStep(s+1);
+        window.scrollTo({top:0,behavior:"smooth"});
+      };
+
+      const submit = async () => {
+        setSaving(true);
+        try {
+          const ref = genRef();
+          const issueText = [
+            ...form.selectedIssues,
+            ...(form.issueDescription ? [form.issueDescription] : [])
+          ].join(" · ");
+
+          const ticket = {
+            id: ref,
+            bookingRef: ref,
+            customerName: form.customerName,
+            customerPhone: form.customerPhone,
+            customerEmail: form.customerEmail,
+            deviceType: form.deviceType,
+            deviceBrand: form.deviceBrand,
+            deviceModel: form.deviceModel,
+            deviceColor: form.deviceColor,
+            deviceImei: form.deviceImei,
+            issueDescription: issueText,
+            notes: form.notes,
+            preferredDate: form.preferredDate,
+            preferredTime: form.preferredTime,
+            status: "scheduled",
+            source: "online_booking",
+            createdAt: new Date().toISOString()
+          };
+
+          // Load existing bookings and prepend
+          const existing = await loadArr("tpp-bookings");
+          await save("tpp-bookings", [ticket, ...existing]);
+
+          setBookRef(ref);
+          setStep(3);
+        } catch(e) {
+          alert("Something went wrong. Please try again or contact us directly.\n\n" + e.message);
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      // ── Step 0: Customer info ──────────────────────────────────────────────
+      if (step===0) return (
+        <div>
+          <StepBar current={0} />
+          <Card style={{ marginBottom:16 }}>
+            <ST>Your Information</ST>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
+              <Field label="Full Name" required error={errs.customerName}>
+                <input style={errs.customerName?iSErr:iS} placeholder="e.g. Marcus Brown" value={form.customerName} onChange={e=>set("customerName",e.target.value)} />
+              </Field>
+              <Field label="Phone Number" required hint="7–11 digits" error={errs.customerPhone}>
+                <input style={errs.customerPhone?iSErr:iS} placeholder="e.g. 8761234567" value={form.customerPhone} onChange={e=>set("customerPhone",e.target.value.replace(/[^0-9+\s()-]/g,""))} maxLength={15} />
+              </Field>
+            </div>
+            <Field label="Email Address" hint="Optional — for status updates" error={errs.customerEmail}>
+              <input type="email" style={errs.customerEmail?iSErr:iS} placeholder="customer@email.com" value={form.customerEmail} onChange={e=>set("customerEmail",e.target.value)} />
+            </Field>
+          </Card>
+          <div style={{ background:"#EFF4FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", fontSize:13, color:"#1E40AF", marginBottom:20, lineHeight:1.6 }}>
+            💡 We'll contact you on this number to confirm your appointment time.
+          </div>
+          <Btn onClick={()=>next(0)}>Continue →</Btn>
+        </div>
+      );
+
+      // ── Step 1: Device + issue ─────────────────────────────────────────────
+      if (step===1) return (
+        <div>
+          <StepBar current={1} />
+          <Card style={{ marginBottom:14 }}>
+            <ST>Device Information</ST>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14, marginBottom:14 }}>
+              <Field label="Type">
+                <select style={iS} value={form.deviceType} onChange={e=>set("deviceType",e.target.value)}>
+                  {DEVICE_TYPES.map(d=><option key={d}>{d}</option>)}
+                </select>
+              </Field>
+              <Field label="Brand" required error={errs.deviceBrand}>
+                <input style={errs.deviceBrand?iSErr:iS} placeholder="Apple, Samsung…" value={form.deviceBrand} onChange={e=>set("deviceBrand",e.target.value)} />
+              </Field>
+              <Field label="Model" required error={errs.deviceModel}>
+                <input style={errs.deviceModel?iSErr:iS} placeholder="iPhone 15, S24…" value={form.deviceModel} onChange={e=>set("deviceModel",e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+              <Field label="Color">
+                <input style={iS} placeholder="Space Black, White…" value={form.deviceColor} onChange={e=>set("deviceColor",e.target.value)} />
+              </Field>
+              <Field label="IMEI / Serial" hint="Dial *#06#">
+                <input style={iS} placeholder="15-digit IMEI (optional)" value={form.deviceImei} onChange={e=>set("deviceImei",e.target.value)} />
+              </Field>
+            </div>
+          </Card>
+
+          <Card style={{ marginBottom:14 }}>
+            <ST>Issue</ST>
+            <p style={{ fontSize:13, color:T.muted, marginBottom:14 }}>Select all that apply, then add details below.</p>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:16 }}>
+              {COMMON_ISSUES.map(issue => {
+                const sel = form.selectedIssues.includes(issue);
+                return (
+                  <button key={issue} onClick={()=>toggleIssue(issue)} style={{ padding:"7px 14px", borderRadius:99, border:`1.5px solid ${sel?T.blue:T.border}`, background:sel?T.blueLt:"#F9FAFB", color:sel?T.blue:T.muted, fontSize:13, fontWeight:600, cursor:"pointer", transition:"all .2s", fontFamily:"inherit" }}>
+                    {issue}
+                  </button>
+                );
+              })}
+            </div>
+            <Field label={form.selectedIssues.length===0?"Additional details (required)":"Additional details"} error={errs.issueDescription}>
+              <textarea style={{ ...iS, minHeight:90, resize:"vertical", ...(errs.issueDescription?{borderColor:T.red}:{}) }} placeholder="Describe the problem — when it started, what you've noticed…" value={form.issueDescription} onChange={e=>set("issueDescription",e.target.value)} />
+            </Field>
+          </Card>
+
+          <Card style={{ marginBottom:20 }}>
+            <ST>Preferred Appointment</ST>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
+              <Field label="Preferred Date">
+                <input type="date" style={iS} value={form.preferredDate} onChange={e=>set("preferredDate",e.target.value)} />
+              </Field>
+              <Field label="Preferred Time">
+                <select style={iS} value={form.preferredTime} onChange={e=>set("preferredTime",e.target.value)}>
+                  <option value="">Any time</option>
+                  <option>Morning (9am–12pm)</option>
+                  <option>Afternoon (12pm–3pm)</option>
+                  <option>Late afternoon (3pm–6pm)</option>
+                </select>
+              </Field>
+            </div>
+            <Field label="Additional notes">
+              <textarea style={{ ...iS, minHeight:64, resize:"vertical" }} placeholder="Anything else we should know? e.g. screen is cracked but still functional…" value={form.notes} onChange={e=>set("notes",e.target.value)} />
+            </Field>
+          </Card>
+
+          <div style={{ display:"flex", gap:10 }}>
+            <Btn variant="ghost" onClick={()=>setStep(0)}>← Back</Btn>
+            <Btn onClick={()=>next(1)}>Review Booking →</Btn>
+          </div>
+        </div>
+      );
+
+      // ── Step 2: Confirm ────────────────────────────────────────────────────
+      if (step===2) {
+        const issueText = [...form.selectedIssues, ...(form.issueDescription?[form.issueDescription]:[])].join(" · ");
+        return (
+          <div>
+            <StepBar current={2} />
+            <Card style={{ marginBottom:14 }}>
+              <ST>Customer</ST>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:4 }}>{form.customerName}</div>
+              <div style={{ fontSize:13, color:T.muted }}>{form.customerPhone}{form.customerEmail ? ` · ${form.customerEmail}` : ""}</div>
+            </Card>
+            <Card style={{ marginBottom:14 }}>
+              <ST>Device</ST>
+              <div style={{ fontWeight:700, fontSize:16, marginBottom:4 }}>{form.deviceBrand} {form.deviceModel}</div>
+              <div style={{ fontSize:13, color:T.muted }}>{form.deviceType}{form.deviceColor ? ` · ${form.deviceColor}` : ""}{form.deviceImei ? ` · IMEI: ${form.deviceImei}` : ""}</div>
+            </Card>
+            <Card style={{ marginBottom:14 }}>
+              <ST>Issue</ST>
+              <div style={{ fontSize:14, lineHeight:1.7 }}>{issueText || "—"}</div>
+            </Card>
+            {(form.preferredDate || form.preferredTime || form.notes) && (
+              <Card style={{ marginBottom:14 }}>
+                <ST>Appointment Preference</ST>
+                {form.preferredDate && <div style={{ fontSize:13, color:T.muted, marginBottom:4 }}>📅 {form.preferredDate}{form.preferredTime ? ` · ${form.preferredTime}` : ""}</div>}
+                {form.notes && <div style={{ fontSize:13, color:T.muted }}>📝 {form.notes}</div>}
+              </Card>
+            )}
+            <div style={{ background:"#F9FAFB", border:`1px solid ${T.border}`, borderRadius:10, padding:"12px 16px", fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.6 }}>
+              By submitting, you confirm this information is accurate. We'll contact you to confirm your slot. Walk-ins also welcome.
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn variant="ghost" onClick={()=>setStep(1)}>← Edit</Btn>
+              <Btn onClick={submit} disabled={saving}>{saving ? "Submitting…" : "✓ Confirm Booking"}</Btn>
+            </div>
+          </div>
+        );
+      }
+
+      // ── Step 3: Success ────────────────────────────────────────────────────
+      return (
+        <Card>
+          <div style={{ textAlign:"center", padding:"16px 8px" }}>
+            <div style={{ fontSize:52, marginBottom:14 }}>🎉</div>
+            <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:24, marginBottom:8 }}>Booking Confirmed!</div>
+            <p style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:24, maxWidth:380, margin:"0 auto 24px" }}>
+              We've received your repair request. Our team will be in touch shortly to confirm your appointment.
+            </p>
+            <div style={{ background:T.blueLt, border:`1px solid #BFDBFE`, borderRadius:14, padding:"20px 24px", display:"inline-block", marginBottom:24 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:T.blue, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Your Booking Reference</div>
+              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:28, color:T.blue, letterSpacing:"0.1em" }}>{bookRef}</div>
+              <div style={{ fontSize:12, color:T.muted, marginTop:6 }}>Screenshot this for your records</div>
+            </div>
+            <p style={{ fontSize:13, color:T.muted, lineHeight:1.7, marginBottom:20 }}>
+              Walk-ins always welcome at <strong style={{ color:T.text }}>{ADDRESS}</strong>
+            </p>
+            <div style={{ display:"flex", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
+              <WaBtn label="💬 Message us on WhatsApp" />
+              <a href="/repairs.html" style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#F3F4F6", color:T.text, padding:"11px 20px", borderRadius:8, fontSize:14, fontWeight:700, textDecoration:"none", border:`1.5px solid ${T.border}` }}>
+                🔍 Track a Repair
+              </a>
+            </div>
+          </div>
+        </Card>
+      );
+    }
+
+    // ── Nav tabs ──────────────────────────────────────────────────────────────
+    function NavTabs() {
+      const tabs = [
+        { label:"📦 Stock Checker", href:"/" },
+        { label:"🔍 Track Repair",  href:"/repairs.html" },
+        { label:"🔧 Book a Repair", href:"/book-repair.html", active:true },
+      ];
+      return (
+        <div style={{ display:"flex", gap:4, padding:"10px 0" }}>
+          {tabs.map(t => (
+            <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "rgba(255,255,255,0.55)", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent", transition:"all .2s" }}>
+              {t.label}
+            </a>
+          ))}
+        </div>
+      );
+    }
+
+    // ── App ───────────────────────────────────────────────────────────────────
+    function App() {
+      return (
+        <div style={{ minHeight:"100vh", background:T.black, fontFamily:"inherit" }}>
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+            *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+            body{font-family:'DM Sans',sans-serif;background:#0A0A0A;}
+            input,button,select,textarea{font-family:'DM Sans',sans-serif;}
+            input::placeholder,textarea::placeholder{color:#9CA3AF;}
+            input:focus,textarea:focus,select:focus{outline:2px solid rgba(26,86,219,0.25);outline-offset:0;border-color:#1A56DB!important;}
+            ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
+            select option{background:#fff;color:#111827;}
+          `}</style>
+
+          {/* ── Header ── */}
+          <div style={{ background:T.black, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+            <div style={{ maxWidth:600, margin:"0 auto", padding:"0 20px" }}>
+
+              {/* Logo + name */}
+              <div style={{ display:"flex", alignItems:"center", gap:16, paddingTop:22, paddingBottom:18, borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
+                <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0 }} />
+                <div>
+                  <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase" }}>Repair · Accessories · Smartphones</div>
+                </div>
+              </div>
+
+              {/* Contact row */}
+              <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"12px 0" }}>
+                <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
+                  <a href={`tel:${PHONE_1.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.7)", textDecoration:"none" }}>📞 {PHONE_1}</a>
+                  <a href={`tel:${PHONE_2.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.7)", textDecoration:"none" }}>📞 {PHONE_2}</a>
+                </div>
+                <div style={{ display:"flex", gap:14 }}>
+                  <a href="https://instagram.com/phoneplug_ja" target="_blank" rel="noopener noreferrer" style={{ fontSize:13, color:"#60A5FA", textDecoration:"none", fontWeight:600 }}>📷 {INSTAGRAM}</a>
+                  <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer" style={{ fontSize:13, color:"#25D366", textDecoration:"none", fontWeight:600 }}>💬 WhatsApp</a>
+                </div>
+              </div>
+
+              {/* Address */}
+              <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.35)" }}>
+                📍 {ADDRESS}
+              </div>
+
+              {/* Nav tabs */}
+              <NavTabs />
+            </div>
+          </div>
+
+          {/* ── Content ── */}
+          <div style={{ background:T.bg, minHeight:"calc(100vh - 200px)" }}>
+            <div style={{ maxWidth:600, margin:"0 auto", padding:"36px 20px 60px" }}>
+
+              <div style={{ marginBottom:28 }}>
+                <h2 style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:24, margin:0, color:T.text }}>Book a Repair</h2>
+                <p style={{ color:T.muted, fontSize:14, marginTop:8, lineHeight:1.6 }}>
+                  Fill in your details and we'll confirm your appointment. Walk-ins always welcome too.
+                </p>
+              </div>
+
+              <BookingForm />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>
