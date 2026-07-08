@@ -57,7 +57,7 @@ const EMAILJS_SERVICE_ID  = "service_3znf9oq";       // from EmailJS dashboard
 const EMAILJS_TPL_CONFIRM = "template_0ytxpee";   // received / diagnosing
 const EMAILJS_TPL_UPDATE  = "template_knd80ms";        // awaiting_parts / in_repair
 const EMAILJS_TPL_READY   = "template_ag9mw4k";           // ready for pickup
-const EMAILJS_TPL_RECEIPT = "template_viixtmu";            // POS sale receipt — create in EmailJS dashboard
+const EMAILJS_TPL_RECEIPT = "template_receipt";            // POS sale receipt — create in EmailJS dashboard
 
 const sendTicketEmail = async (ticket, type = "auto") => {
   if (!ticket.customerEmail) {
@@ -7173,156 +7173,311 @@ function DebtLedger() {
 // ── Stock Receiving ───────────────────────────────────────────────────────────
 function StockReceiving({ products, onProductsUpdate }) {
   const E = React.createElement;
-  const [mode, setMode] = useState(null); // "existing" | "new"
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState(null);
+  const [drafts, setDrafts] = useState([]);
+  const [activeDraft, setActiveDraft] = useState(null);
   const [history, setHistory] = useState([]);
-  const [form, setFormS] = useState({ supplier:"", poRef:"", costPerUnit:"", qty:"", notes:"", receivedDate:todayStr() });
-  const [newItem, setNewItemS] = useState({ name:"", category:"Accessory", price:"", costPerUnit:"", barcode:"", qty:"", supplier:"", poRef:"", notes:"", receivedDate:todayStr() });
+  const [view, setView] = useState("main"); // "main" | "po" | "history"
   const [saving, setSaving] = useState(false);
-  const setF = (k,v) => setFormS(p=>({...p,[k]:v}));
-  const setNI = (k,v) => setNewItemS(p=>({...p,[k]:v}));
 
-  useEffect(() => { loadArr("tpp-stock-receives").then(setHistory); }, []);
+  // PO header state
+  const emptyPO = { supplier:"", poRef:"", invoiceTotal:"", receivedDate:todayStr(), notes:"" };
+  const [po, setPOS] = useState(emptyPO);
+  const setPO = (k,v) => setPOS(p=>({...p,[k]:v}));
 
-  const filtered = search.trim()
-    ? products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search) || (p.sku||"").includes(search)).slice(0,8)
-    : [];
+  // Line items
+  const [lines, setLines] = useState([]);
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("all");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showNewLine, setShowNewLine] = useState(false);
+  const emptyNew = { name:"", category:"Accessory", price:"", costPerUnit:"", barcode:"", qty:"1", sku:"" };
+  const [newLine, setNewLine] = useState(emptyNew);
+  const setNL = (k,v) => setNewLine(p=>({...p,[k]:v}));
 
-  const receiveExisting = async () => {
-    if (!selected) return;
-    if (!form.qty||parseInt(form.qty)<=0) { alert("Enter a valid quantity."); return; }
-    setSaving(true);
-    const hasPO = form.supplier.trim() || form.poRef.trim();
-    const entry = { id: Date.now().toString(), type:"existing", productId:selected.id, productName:selected.name, qty:parseInt(form.qty), costPerUnit:parseFloat(form.costPerUnit)||0, supplier:form.supplier, poRef:form.poRef, notes:form.notes, receivedDate:form.receivedDate, createdAt:new Date().toISOString(), purchase_pending:!hasPO };
+  useEffect(() => {
+    loadArr("tpp-stock-receives").then(setHistory);
+    loadArr("tpp-po-drafts").then(setDrafts);
+  }, []);
 
-    // Update product stock
-    const updatedProducts = products.map(p => p.id===selected.id ? {...p, stock:(p.stock||0)+parseInt(form.qty), cost:parseFloat(form.costPerUnit)||p.cost, purchase_pending:!hasPO} : p);
-    await onProductsUpdate(updatedProducts);
-    const updatedHistory = [entry, ...history];
-    await save("tpp-stock-receives", updatedHistory);
-    setHistory(updatedHistory);
+  // Categories from products
+  const categories = ["all", ...Array.from(new Set(products.map(p=>p.category).filter(Boolean))).sort()];
 
-    // Log to-do if no purchase details
-    if (!hasPO) {
-      const todos = await loadArr("tpp-todos");
-      const todo = { id: Date.now().toString(), text:`Add purchase details for stock received: ${selected.name} x${form.qty}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" };
-      await save("tpp-todos", [todo,...todos]);
-    }
+  // Search
+  useEffect(() => {
+    if (!search.trim()) { setSearchResults([]); return; }
+    const q = search.toLowerCase();
+    const results = products.filter(p => {
+      const matchCat = catFilter === "all" || p.category === catFilter;
+      const matchQ = p.name.toLowerCase().includes(q) || (p.barcode||"").includes(q) || (p.sku||"").toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+      return matchCat && matchQ;
+    }).slice(0,8);
+    setSearchResults(results);
+  }, [search, catFilter, products]);
 
-    setSelected(null); setSearch(""); setFormS({ supplier:"", poRef:"", costPerUnit:"", qty:"", notes:"", receivedDate:todayStr() }); setMode(null);
-    setSaving(false);
-    alert(`✅ ${form.qty}x ${selected.name} added to stock.${!hasPO?" ⚠️ To-do created: add purchase details.":""}`);
+  const lineTotal = lines.reduce((s,l) => s + (parseFloat(l.costPerUnit)||0)*(parseInt(l.qty)||0), 0);
+  const invoiceAmt = parseFloat(po.invoiceTotal)||0;
+  const variance = invoiceAmt > 0 ? invoiceAmt - lineTotal : 0;
+  const reconciled = invoiceAmt > 0 && Math.abs(variance) < 0.01;
+
+  const addExistingLine = (product) => {
+    const existing = lines.find(l=>l.productId===product.id);
+    if (existing) { setLines(ls=>ls.map(l=>l.productId===product.id?{...l,qty:String(parseInt(l.qty)+1)}:l)); }
+    else { setLines(ls=>[...ls, { productId:product.id, name:product.name, category:product.category, isNew:false, costPerUnit:String(product.cost||0), qty:"1", barcode:product.barcode||"", sku:product.sku||"", price:product.price||0 }]); }
+    setSearch(""); setSearchResults([]);
   };
 
-  const receiveNew = async () => {
-    if (!newItem.name.trim()||!newItem.qty||!newItem.price) { alert("Name, price and quantity required."); return; }
-    setSaving(true);
-    const hasPO = newItem.supplier.trim() || newItem.poRef.trim();
-    const id = `new-${Date.now()}`;
-    const product = { id, name:newItem.name, category:newItem.category, price:parseFloat(newItem.price)||0, cost:parseFloat(newItem.costPerUnit)||0, stock:parseInt(newItem.qty)||0, barcode:newItem.barcode, variable_price:false, sku:id, purchase_pending:!hasPO };
-    const entry = { id:Date.now().toString(), type:"new", productId:id, productName:newItem.name, qty:parseInt(newItem.qty), costPerUnit:parseFloat(newItem.costPerUnit)||0, supplier:newItem.supplier, poRef:newItem.poRef, notes:newItem.notes, receivedDate:newItem.receivedDate, createdAt:new Date().toISOString(), purchase_pending:!hasPO };
-
-    const updatedProducts = [product,...products];
-    await onProductsUpdate(updatedProducts);
-    const updatedHistory = [entry,...history];
-    await save("tpp-stock-receives", updatedHistory);
-    setHistory(updatedHistory);
-
-    if (!hasPO) {
-      const todos = await loadArr("tpp-todos");
-      const todo = { id:Date.now().toString(), text:`Add purchase details for new item: ${newItem.name} x${newItem.qty}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" };
-      await save("tpp-todos", [todo,...todos]);
-    }
-
-    setNewItemS({ name:"", category:"Accessory", price:"", costPerUnit:"", barcode:"", qty:"", supplier:"", poRef:"", notes:"", receivedDate:todayStr() });
-    setMode(null); setSaving(false);
-    alert(`✅ ${newItem.name} added to catalog and stock.${!hasPO?" ⚠️ To-do created: add purchase details.":""}`);
+  const addNewLine = () => {
+    if (!newLine.name.trim()||!newLine.qty) { alert("Name and quantity required."); return; }
+    setLines(ls=>[...ls, { ...newLine, productId:null, isNew:true }]);
+    setNewLine(emptyNew); setShowNewLine(false);
   };
 
-  return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
+  const removeLine = (i) => setLines(ls=>ls.filter((_,idx)=>idx!==i));
+  const updateLine = (i,k,v) => setLines(ls=>ls.map((l,idx)=>idx===i?{...l,[k]:v}:l));
+
+  const saveDraft = async () => {
+    const draft = { id: activeDraft?.id || Date.now().toString(), po, lines, savedAt: new Date().toISOString() };
+    const updated = drafts.filter(d=>d.id!==draft.id);
+    updated.unshift(draft);
+    await save("tpp-po-drafts", updated);
+    setDrafts(updated); setActiveDraft(draft);
+    alert("✅ Draft saved. Resume anytime from the main screen.");
+  };
+
+  const loadDraft = (draft) => {
+    setPOS(draft.po); setLines(draft.lines); setActiveDraft(draft); setView("po");
+  };
+
+  const deleteDraft = async (id) => {
+    const updated = drafts.filter(d=>d.id!==id);
+    await save("tpp-po-drafts", updated); setDrafts(updated);
+    if (activeDraft?.id===id) { setPOS(emptyPO); setLines([]); setActiveDraft(null); }
+  };
+
+  const receiveAll = async () => {
+    if (lines.length===0) { alert("Add at least one line item."); return; }
+    if (invoiceAmt > 0 && !reconciled) {
+      const proceed = confirm(`⚠️ Invoice total (${fmtMoney(invoiceAmt)}) does not match line item sum (${fmtMoney(lineTotal)}).
+
+Variance: ${fmtMoney(Math.abs(variance))} ${variance>0?"short":"over"}.
+
+Proceed anyway?`);
+      if (!proceed) return;
+    }
+    const hasPO = po.supplier.trim() || po.poRef.trim();
+    setSaving(true);
+    try {
+      let updatedProducts = [...products];
+      const receiveEntries = [];
+      const todos = await loadArr("tpp-todos");
+      const newTodos = [];
+
+      for (const line of lines) {
+        const qty = parseInt(line.qty)||0;
+        const cost = parseFloat(line.costPerUnit)||0;
+
+        if (line.isNew) {
+          // Create new product
+          const newId = `new-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+          const newProduct = { id:newId, name:line.name, category:line.category, price:parseFloat(line.price)||0, cost, stock:qty, barcode:line.barcode||"", sku:line.sku||newId, variable_price:false, purchase_pending:!hasPO };
+          updatedProducts.unshift(newProduct);
+          receiveEntries.push({ id:Date.now().toString()+Math.random(), type:"new", productId:newId, productName:line.name, qty, costPerUnit:cost, poRef:po.poRef, supplier:po.supplier, receivedDate:po.receivedDate, purchase_pending:!hasPO, createdAt:new Date().toISOString() });
+        } else {
+          // Update existing
+          updatedProducts = updatedProducts.map(p => p.id===line.productId ? {...p, stock:(p.stock||0)+qty, cost:cost||p.cost, purchase_pending:!hasPO} : p);
+          receiveEntries.push({ id:Date.now().toString()+Math.random(), type:"existing", productId:line.productId, productName:line.name, qty, costPerUnit:cost, poRef:po.poRef, supplier:po.supplier, receivedDate:po.receivedDate, purchase_pending:!hasPO, createdAt:new Date().toISOString() });
+        }
+      }
+
+      if (!hasPO) {
+        newTodos.push({ id:Date.now().toString(), text:`Add purchase details for PO received ${po.receivedDate} — ${lines.length} items, total JMD ${fmtMoney(lineTotal)}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" });
+      }
+
+      await onProductsUpdate(updatedProducts);
+      const updatedHistory = [...receiveEntries, ...history];
+      await save("tpp-stock-receives", updatedHistory);
+      setHistory(updatedHistory);
+      if (newTodos.length) await save("tpp-todos", [...newTodos, ...todos]);
+
+      // Remove draft if this was one
+      if (activeDraft) {
+        const updatedDrafts = drafts.filter(d=>d.id!==activeDraft.id);
+        await save("tpp-po-drafts", updatedDrafts); setDrafts(updatedDrafts);
+      }
+
+      setPOS(emptyPO); setLines([]); setActiveDraft(null); setView("main");
+      setSaving(false);
+      alert(`✅ Received ${lines.length} line items across ${receiveEntries.reduce((s,e)=>s+e.qty,0)} total units.${!hasPO?" ⚠️ To-do created to add purchase details.":""}`);
+    } catch(e) {
+      setSaving(false);
+      alert("Error: " + e.message);
+    }
+  };
+
+  // ── MAIN VIEW ─────────────────────────────────────────────────────────────
+  if (view === "main") return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
     E("div", { style:{ marginBottom:20 } },
       E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "📥 Receive Stock"),
-      E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Log incoming stock. Purchase details required to sell — or override with a to-do created.")
+      E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Log incoming stock against a purchase order. Draft and resume at any time.")
     ),
-
-    mode===null && E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:24 } },
-      E("button", { onClick:()=>setMode("existing"), style:{ background:T.card, border:`2px solid ${T.border}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
-        E("div", { style:{ fontSize:28, marginBottom:8 } }, "📦"),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "Existing Product"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Restock an item already in your catalog")
-      ),
-      E("button", { onClick:()=>setMode("new"), style:{ background:T.card, border:`2px solid ${T.border}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
-        E("div", { style:{ fontSize:28, marginBottom:8 } }, "✨"),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "New Item"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Add a new product and receive stock")
-      )
-    ),
-
-    mode==="existing" && E("div", null,
-      E("button", { onClick:()=>{ setMode(null); setSelected(null); setSearch(""); }, style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back"),
-      E(Card, { style:{ marginBottom:16 } },
-        E(ST, null, "Find Product"),
-        E(Input, { placeholder:"Search catalog by name, SKU, or barcode...", value:search, onChange:e=>{ setSearch(e.target.value); setSelected(null); }, style:{ marginBottom:8 } }),
-        filtered.length>0 && E("div", { style:{ border:`1px solid ${T.border}`, borderRadius:8, overflow:"hidden" } },
-          filtered.map((p,i) => E("div", { key:i, onClick:()=>{ setSelected(p); setSearch(p.name); }, style:{ padding:"10px 14px", cursor:"pointer", borderBottom:i<filtered.length-1?`1px solid ${T.border}`:"none", background:selected?.id===p.id?T.blueLt:"#fff", display:"flex", justifyContent:"space-between" } },
-            E("div", null,
-              E("div", { style:{ fontWeight:600, fontSize:13 } }, p.name),
-              E("div", { style:{ fontSize:11, color:T.muted } }, p.category, ` · Stock: ${p.stock||0}`, p.barcode?` · ${p.barcode}`:"")
-            ),
-            E("div", { style:{ color:T.blue, fontWeight:700, fontSize:13 } }, fmtMoney(p.price))
-          ))
-        )
-      ),
-      selected && E(Card, null,
-        E(ST, null, "Receiving Details"),
-        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-          E(Field, { label:"Quantity Received", required:true }, E(Input, { type:"number", placeholder:"e.g. 10", value:form.qty, onChange:e=>setF("qty",e.target.value) })),
-          E(Field, { label:"Cost per Unit (JMD)" }, E(Input, { type:"number", placeholder:"0", value:form.costPerUnit, onChange:e=>setF("costPerUnit",e.target.value) })),
-          E(Field, { label:"Supplier" }, E(Input, { placeholder:"e.g. Cell Parts JA", value:form.supplier, onChange:e=>setF("supplier",e.target.value) })),
-          E(Field, { label:"Purchase Order Ref" }, E(Input, { placeholder:"PO number or invoice #", value:form.poRef, onChange:e=>setF("poRef",e.target.value) })),
-          E(Field, { label:"Date Received" }, E(Input, { type:"date", value:form.receivedDate, onChange:e=>setF("receivedDate",e.target.value) }))
-        ),
-        E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:form.notes, onChange:e=>setF("notes",e.target.value) })),
-        !form.supplier&&!form.poRef && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:8, padding:"10px 14px", fontSize:12, color:T.amber, margin:"12px 0" } }, "⚠️ No supplier or PO entered — a To Do will be created to remind you to add purchase details. Item can be sold but will be flagged."),
-        E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:receiveExisting, disabled:saving||!selected }, saving?"Saving...":"📥 Receive Stock"))
-      )
-    ),
-
-    mode==="new" && E("div", null,
-      E("button", { onClick:()=>setMode(null), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back"),
-      E(Card, null,
-        E(ST, null, "New Product + Stock"),
-        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-          E(Field, { label:"Product Name", required:true }, E(Input, { placeholder:"e.g. iPhone 15 Pro Case", value:newItem.name, onChange:e=>setNI("name",e.target.value) })),
-          E(Field, { label:"Category" }, E(Sel, { value:newItem.category, onChange:e=>setNI("category",e.target.value) }, ["Accessory","Case","Charger","Screen Protector","Cable","Headphones","Other"].map(c=>E("option",{key:c},c)))),
-          E(Field, { label:"Selling Price (JMD)", required:true }, E(Input, { type:"number", placeholder:"0", value:newItem.price, onChange:e=>setNI("price",e.target.value) })),
-          E(Field, { label:"Cost per Unit (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newItem.costPerUnit, onChange:e=>setNI("costPerUnit",e.target.value) })),
-          E(Field, { label:"Quantity Received", required:true }, E(Input, { type:"number", placeholder:"0", value:newItem.qty, onChange:e=>setNI("qty",e.target.value) })),
-          E(Field, { label:"Barcode" }, E(Input, { placeholder:"Scan or type", value:newItem.barcode, onChange:e=>setNI("barcode",e.target.value) })),
-          E(Field, { label:"Supplier" }, E(Input, { placeholder:"e.g. Cell Parts JA", value:newItem.supplier, onChange:e=>setNI("supplier",e.target.value) })),
-          E(Field, { label:"Purchase Order Ref" }, E(Input, { placeholder:"PO number or invoice #", value:newItem.poRef, onChange:e=>setNI("poRef",e.target.value) })),
-          E(Field, { label:"Date Received" }, E(Input, { type:"date", value:newItem.receivedDate, onChange:e=>setNI("receivedDate",e.target.value) }))
-        ),
-        E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:newItem.notes, onChange:e=>setNI("notes",e.target.value) })),
-        !newItem.supplier&&!newItem.poRef && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:8, padding:"10px 14px", fontSize:12, color:T.amber, margin:"12px 0" } }, "⚠️ No supplier or PO entered — a To Do will be created to remind you to add purchase details. Item can be added but will be flagged at checkout."),
-        E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:receiveNew, disabled:saving }, saving?"Saving...":"✨ Add to Catalog + Stock"))
-      )
-    ),
-
-    history.length>0 && E("div", { style:{ marginTop:24 } },
-      E(ST, null, "Recent Receipts"),
+    drafts.length > 0 && E("div", { style:{ marginBottom:20 } },
+      E(ST, null, `Saved Drafts (${drafts.length})`),
       E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-        history.slice(0,8).map((h,i) => E(Card, { key:i, style:{ borderLeft:`3px solid ${h.purchase_pending?T.amber:T.green}` } },
+        drafts.map((d,i) => E(Card, { key:i, style:{ borderLeft:`3px solid ${T.amber}` } },
           E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
             E("div", null,
-              E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
-              E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `${h.qty} units · ${h.receivedDate}`, h.supplier?` · ${h.supplier}`:"", h.poRef?` · PO: ${h.poRef}`:"")
+              E("div", { style:{ fontWeight:600, fontSize:13 } }, d.po.supplier||"No supplier", d.po.poRef ? ` — ${d.po.poRef}` : ""),
+              E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `${d.lines.length} line items · Saved ${fmtDate(d.savedAt)}`)
             ),
-            h.purchase_pending && E("span", { style:{ background:T.amberLt, color:T.amber, borderRadius:6, padding:"3px 8px", fontSize:11, fontWeight:700 } }, "⚠️ PO pending")
+            E("div", { style:{ display:"flex", gap:8 } },
+              E(Btn, { style:{ fontSize:12, padding:"6px 12px" }, onClick:()=>loadDraft(d) }, "▶ Continue"),
+              E(Btn, { variant:"danger", style:{ fontSize:12, padding:"6px 12px" }, onClick:()=>deleteDraft(d.id) }, "✕")
+            )
           )
         ))
       )
+    ),
+    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
+      E("button", { onClick:()=>setView("po"), style:{ background:T.card, border:`2px solid ${T.blue}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
+        E("div", { style:{ fontSize:28, marginBottom:8 } }, "📦"),
+        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "New Purchase Order"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Receive one or many items against a PO")
+      ),
+      E("button", { onClick:()=>setView("history"), style:{ background:T.card, border:`2px solid ${T.border}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
+        E("div", { style:{ fontSize:28, marginBottom:8 } }, "📋"),
+        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "Receive History"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, `${history.length} entries logged`)
+      )
+    )
+  );
+
+  // ── HISTORY VIEW ──────────────────────────────────────────────────────────
+  if (view === "history") return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
+    E("button", { onClick:()=>setView("main"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back"),
+    E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, marginBottom:16 } }, "Receive History"),
+    history.length===0 ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No stock received yet.") :
+    E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+      history.slice(0,30).map((h,i) => E(Card, { key:i, style:{ borderLeft:`3px solid ${h.purchase_pending?T.amber:T.green}` } },
+        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
+            E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
+              `${h.qty} units`, h.costPerUnit?` · JMD ${fmtMoney(h.costPerUnit)}/unit`:"",
+              h.supplier?` · ${h.supplier}`:"", h.poRef?` · PO: ${h.poRef}`:"",
+              ` · ${h.receivedDate||fmtDate(h.createdAt)}`
+            )
+          ),
+          h.purchase_pending && E("span", { style:{ background:T.amberLt, color:T.amber, borderRadius:6, padding:"3px 8px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" } }, "⚠️ PO pending")
+        )
+      ))
+    )
+  );
+
+  // ── PO ENTRY VIEW ─────────────────────────────────────────────────────────
+  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("button", { onClick:()=>setView("main"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", padding:0 } }, "← Back"),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:saveDraft }, "💾 Save Draft"),
+        E(Btn, { style:{ fontSize:12, padding:"7px 12px" }, disabled:saving||lines.length===0, onClick:receiveAll }, saving?"Receiving…":"📥 Receive All")
+      )
+    ),
+
+    // PO Header
+    E(Card, { style:{ marginBottom:16 } },
+      E(ST, null, "Purchase Order Details"),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+        E(Field, { label:"Supplier" }, E(Input, { placeholder:"e.g. Cell Parts JA", value:po.supplier, onChange:e=>setPO("supplier",e.target.value) })),
+        E(Field, { label:"PO / Invoice Reference" }, E(Input, { placeholder:"Invoice # or PO number", value:po.poRef, onChange:e=>setPO("poRef",e.target.value) })),
+        E(Field, { label:"Invoice Total (JMD)", hint:"For reconciliation" }, E(Input, { type:"number", placeholder:"0.00", value:po.invoiceTotal, onChange:e=>setPO("invoiceTotal",e.target.value) })),
+        E(Field, { label:"Date Received" }, E(Input, { type:"date", value:po.receivedDate, onChange:e=>setPO("receivedDate",e.target.value) }))
+      ),
+      E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:po.notes, onChange:e=>setPO("notes",e.target.value) }))
+    ),
+
+    // Line items
+    E(Card, { style:{ marginBottom:16 } },
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 } },
+        E(ST, { style:{ margin:0 } }, `Line Items (${lines.length})`),
+        E("div", { style:{ display:"flex", gap:8 } },
+          E("button", { onClick:()=>setShowNewLine(s=>!s), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, showNewLine?"✕ Cancel":"✨ New Item")
+        )
+      ),
+
+      // Search existing
+      E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
+        E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto", minWidth:140 } },
+          categories.map(c=>E("option",{key:c,value:c}, c==="all"?"All Categories":c))
+        ),
+        E(Input, { placeholder:"Search by name, SKU, barcode...", value:search, onChange:e=>setSearch(e.target.value), style:{ flex:1 } })
+      ),
+      searchResults.length>0 && E("div", { style:{ border:`1px solid ${T.border}`, borderRadius:8, overflow:"hidden", marginBottom:12 } },
+        searchResults.map((p,i)=>E("div", { key:i, onClick:()=>addExistingLine(p), style:{ padding:"9px 14px", cursor:"pointer", borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, p.name),
+            E("div", { style:{ fontSize:11, color:T.muted } }, p.category, p.sku?` · SKU: ${p.sku}`:"", p.barcode?` · ${p.barcode}`:"", ` · Stock: ${p.stock||0}`)
+          ),
+          E("div", { style:{ color:T.blue, fontWeight:700, fontSize:12 } }, fmtMoney(p.price))
+        ))
+      ),
+
+      // New item inline form
+      showNewLine && E("div", { style:{ background:"#F9FAFB", borderRadius:10, padding:"12px 14px", marginBottom:12, border:`1px solid ${T.border}` } },
+        E(ST, null, "New Item"),
+        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 } },
+          E(Field, { label:"Name", required:true }, E(Input, { placeholder:"Product name", value:newLine.name, onChange:e=>setNL("name",e.target.value) })),
+          E(Field, { label:"Category" }, E(Sel, { value:newLine.category, onChange:e=>setNL("category",e.target.value) }, ["Accessory","Case","Charger","Screen Protector","Cable","Headphones","Gadget","Other"].map(c=>E("option",{key:c},c)))),
+          E(Field, { label:"Selling Price (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newLine.price, onChange:e=>setNL("price",e.target.value) })),
+          E(Field, { label:"Cost per Unit (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newLine.costPerUnit, onChange:e=>setNL("costPerUnit",e.target.value) })),
+          E(Field, { label:"Quantity" }, E(Input, { type:"number", placeholder:"1", value:newLine.qty, onChange:e=>setNL("qty",e.target.value) })),
+          E(Field, { label:"Barcode / SKU" }, E(Input, { placeholder:"Optional", value:newLine.barcode, onChange:e=>setNL("barcode",e.target.value) }))
+        ),
+        E(Btn, { onClick:addNewLine, style:{ fontSize:12 } }, "+ Add to Order")
+      ),
+
+      // Line items list
+      lines.length===0 ? E("div", { style:{ textAlign:"center", padding:"24px 20px", color:T.muted, fontSize:13 } }, "Search for existing items or create new ones above to add to this order.")
+      : E("div", null,
+        lines.map((line,i) => E("div", { key:i, style:{ display:"flex", alignItems:"center", gap:8, padding:"10px 0", borderTop:`1px solid ${T.border}` } },
+          E("div", { style:{ flex:1, minWidth:0 } },
+            E("div", { style:{ fontWeight:600, fontSize:13, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" } }, line.name),
+            E("div", { style:{ fontSize:11, color:T.muted } }, line.category, line.isNew?" · NEW ITEM":"", line.sku?` · ${line.sku}`:"")
+          ),
+          E("div", { style:{ display:"flex", gap:6, alignItems:"center", flexShrink:0 } },
+            E("div", { style:{ display:"flex", flexDirection:"column", gap:2 } },
+              E("span", { style:{ fontSize:10, color:T.muted } }, "Qty"),
+              E("input", { type:"number", value:line.qty, onChange:e=>updateLine(i,"qty",e.target.value), style:{ ...iS, width:60, padding:"5px 8px", fontSize:13, textAlign:"center" }, min:1 })
+            ),
+            E("div", { style:{ display:"flex", flexDirection:"column", gap:2 } },
+              E("span", { style:{ fontSize:10, color:T.muted } }, "Cost/unit"),
+              E("input", { type:"number", value:line.costPerUnit, onChange:e=>updateLine(i,"costPerUnit",e.target.value), style:{ ...iS, width:90, padding:"5px 8px", fontSize:13 }, placeholder:"0" })
+            ),
+            E("div", { style:{ textAlign:"right", minWidth:72 } },
+              E("div", { style:{ fontSize:10, color:T.muted } }, "Line total"),
+              E("div", { style:{ fontWeight:700, fontSize:13, color:T.blue } }, fmtMoney((parseFloat(line.costPerUnit)||0)*(parseInt(line.qty)||0)))
+            ),
+            E("button", { onClick:()=>removeLine(i), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"6px 8px", fontWeight:700, cursor:"pointer", fontSize:12 } }, "✕")
+          )
+        )),
+        E("div", { style:{ borderTop:`2px solid ${T.border}`, paddingTop:12, marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 } },
+          E("div", { style:{ fontSize:13, color:T.muted } }, `${lines.length} line items · ${lines.reduce((s,l)=>s+(parseInt(l.qty)||0),0)} total units`),
+          E("div", { style:{ textAlign:"right" } },
+            E("div", { style:{ fontSize:13 } }, "Lines total: ", E("strong", null, fmtMoney(lineTotal))),
+            invoiceAmt>0 && E("div", { style:{ fontSize:12, marginTop:4, color:reconciled?T.green:T.red, fontWeight:600 } },
+              reconciled ? "✅ Matches invoice total" : `⚠️ Variance: ${fmtMoney(Math.abs(variance))} ${variance>0?"short":"over"}`
+            )
+          )
+        )
+      )
+    ),
+
+    !po.supplier&&!po.poRef && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"12px 16px", fontSize:12, color:T.amber, marginBottom:16, lineHeight:1.6 } },
+      "⚠️ No supplier or PO reference entered. A To Do will be created to remind you to add purchase details after receiving."
+    ),
+
+    E("div", { style:{ display:"flex", gap:10, justifyContent:"flex-end" } },
+      E(Btn, { variant:"ghost", onClick:saveDraft }, "💾 Save Draft"),
+      E(Btn, { disabled:saving||lines.length===0, onClick:receiveAll }, saving?"Receiving…":`📥 Receive All (${lines.length} items)`)
     )
   );
 }
