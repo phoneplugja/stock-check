@@ -4004,10 +4004,16 @@ function PhoneInventory({
       onClick: () => voidPhone(origIdx, p)
     }, "\uD83D\uDEAB Void Entry"), !["Sold", "Returned to Seller", "Returned to Stock"].includes(p.availability) && /*#__PURE__*/React.createElement(Sel, {
       value: p.availability,
-      onChange: e => onUpdate(phones.map((ph, j) => j === origIdx ? {
-        ...ph,
-        availability: e.target.value
-      } : ph)),
+      onChange: e => {
+        const newStatus = e.target.value;
+        if (newStatus === "Exchanged") {
+          const reason = prompt("Reason for exchange?\n(e.g. Customer exchanged for different colour)");
+          if (reason === null) return;
+          onUpdate(phones.map((ph, j) => j === origIdx ? { ...ph, availability: newStatus, exchangeReason: reason, exchangedAt: new Date().toISOString(), history: [...(ph.history||[]), { status: newStatus, reason, ts: new Date().toISOString() }] } : ph));
+        } else {
+          onUpdate(phones.map((ph, j) => j === origIdx ? { ...ph, availability: newStatus } : ph));
+        }
+      },
       style: {
         ...iS,
         width: "auto",
@@ -5215,6 +5221,9 @@ function StaffShell({
   }, {
     id: "todo",
     label: "✅ To Do"
+  }, {
+    id: "hours",
+    label: "⏱️ My Hours"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5313,7 +5322,7 @@ function StaffShell({
     /*#__PURE__*/React.createElement(RecentEntries, { storeKey: "tpp-deposits", label: "Recent Deposits", formatLine: d => `${d.bank||d.source||"Bank"} — ${fmtMoney(d.amount)}` })
   ), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementForm, {
     user: user
-  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: false })));
+  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: false }), tab === "hours" && /*#__PURE__*/React.createElement(StaffHours, { user: user })));
 }
 
 // ── Technician Shell ──────────────────────────────────────────────────────────
@@ -5489,6 +5498,9 @@ function OwnerShell({
   }, {
     id: "receive",
     label: "📥 Receive"
+  }, {
+    id: "payroll",
+    label: "⏱️ Payroll"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5700,7 +5712,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "receive" && /*#__PURE__*/React.createElement(StockReceivingWrapper, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "receive" && /*#__PURE__*/React.createElement(StockReceivingWrapper, null), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -6447,7 +6459,7 @@ const printReceipt = (sale) => {
   <p class="sub">${ADDRESS}</p>
   <p class="sub">📞 ${PHONE_1} | 📷 ${INSTAGRAM}</p>
   <hr>
-  <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)}</p>
+  <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)} ${new Date(sale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
   ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}</p>` : ""}
   <hr>
   <table>${itemLines}</table>
@@ -6611,6 +6623,36 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const [processing, setSaving_] = useState(false);
   const [lastSale, setLastSale] = useState(null);
   const [emailSending, setEmailSending] = useState(false);
+  const [drafts, setDrafts] = useState([]);
+  const [showDrafts, setShowDrafts] = useState(false);
+
+  // Load and auto-expire drafts on mount
+  useEffect(() => {
+    loadArr("tpp-receipt-drafts").then(ds => {
+      const today = todayStr();
+      const valid = ds.filter(d => d.date === today);
+      if (valid.length !== ds.length) save("tpp-receipt-drafts", valid);
+      setDrafts(valid);
+    });
+  }, []);
+
+  const saveDraft = async () => {
+    if (cart.length === 0) { alert("Cart is empty."); return; }
+    const draft = { id: Date.now().toString(), cart, customerName, customerEmail, discount, cash, card, transfer, note, date: todayStr(), savedAt: new Date().toISOString() };
+    const existing = await loadArr("tpp-receipt-drafts");
+    const updated = [draft, ...existing.filter(d=>d.date===todayStr())];
+    await save("tpp-receipt-drafts", updated);
+    setDrafts(updated);
+    alert("✅ Draft saved. It will expire at end of day.");
+  };
+
+  const loadDraft = (draft) => {
+    setCart(draft.cart||[]); setCustomerName(draft.customerName||""); setCustomerEmail(draft.customerEmail||"");
+    setDiscount(draft.discount||""); setCash(draft.cash||""); setCard(draft.card||""); setTransfer(draft.transfer||""); setNote(draft.note||"");
+    setDrafts(prev=>prev.filter(d=>d.id!==draft.id));
+    save("tpp-receipt-drafts", drafts.filter(d=>d.id!==draft.id));
+    setShowDrafts(false);
+  };
 
   useEffect(() => {
     (async () => {
@@ -6776,12 +6818,31 @@ function POSSystem({ phones, onPhonesUpdate }) {
     E(Card, { style:{ textAlign:"center", padding:"28px 24px" } },
       E("div", { style:{ fontSize:48, marginBottom:8 } }, "✅"),
       E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, marginBottom:4 } }, "Sale Complete!"),
-      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, `Receipt: ${lastSale.id}`),
+      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, `Receipt: ${lastSale.id} · ${new Date(lastSale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`),
       E("div", { style:{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, color:T.blue, margin:"8px 0 20px" } }, fmtMoney(lastSale.total)),
       lastSale.change > 0 && E("div", { style:{ background:T.greenLt, border:"1px solid #A7F3D0", borderRadius:10, padding:"10px 16px", fontSize:14, fontWeight:700, color:T.green, marginBottom:20 } }, `💵 Change: ${fmtMoney(lastSale.change)}`),
       E("div", { style:{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginBottom:20 } },
         E(Btn, { onClick:()=>printReceipt(lastSale) }, "🖨️ Print Receipt"),
         lastSale.customerEmail && E(Btn, { variant:"ghost", disabled:emailSending, onClick:async()=>{ setEmailSending(true); const ok=await sendReceiptEmail(lastSale); setEmailSending(false); if(ok) alert("✅ Receipt emailed!"); } }, emailSending?"Sending…":"📧 Email Receipt"),
+        E(Btn, { variant:"ghost", style:{ color:T.amber }, onClick:()=>{
+          const reason = prompt("Reason for voiding this receipt?");
+          if (!reason) return;
+          const voidedSale = {...lastSale, voided:true, voidReason:reason, voidedAt:new Date().toISOString()};
+          loadArr("tpp-sales").then(existing => { const updated = existing.map(s=>s.id===lastSale.id?voidedSale:s); save("tpp-sales",updated); });
+          setSales(prev=>prev.map(s=>s.id===lastSale.id?voidedSale:s));
+          setLastSale(null); alert("Receipt voided.");
+        } }, "🚫 Void Receipt"),
+        E(Btn, { variant:"ghost", style:{ color:T.red }, onClick:()=>{
+          const refundAmt = prompt(`Refund amount (max ${fmtMoney(lastSale.total)}):`);
+          if (!refundAmt) return;
+          const amt = parseFloat(refundAmt)||0;
+          if (amt <= 0 || amt > lastSale.total) { alert("Invalid refund amount."); return; }
+          const refundReason = prompt("Reason for refund?");
+          const refundRecord = { id:"REF-"+lastSale.id, type:"refund", originalId:lastSale.id, amount:amt, reason:refundReason||"", createdAt:new Date().toISOString(), date:todayStr() };
+          loadArr("tpp-sales").then(existing => save("tpp-sales",[refundRecord,...existing]));
+          setSales(prev=>[refundRecord,...prev]);
+          alert(`✅ Refund of ${fmtMoney(amt)} logged.`);
+        } }, "↩️ Refund"),
       ),
       E(Btn, { variant:"ghost", full:true, onClick:()=>setLastSale(null) }, "+ New Sale")
     )
@@ -6793,8 +6854,21 @@ function POSSystem({ phones, onPhonesUpdate }) {
     E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
       E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💰 Point of Sale"),
       E("div", { style:{ display:"flex", gap:8 } },
+        drafts.length>0 && E(Btn, { variant:"amber", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setShowDrafts(s=>!s) }, `📝 Drafts (${drafts.length})`),
         E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("catalog") }, "📦 Products"),
         E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("history") }, "📋 Sales History")
+      )
+    ),
+    showDrafts && E("div", { style:{ background:"#FFFBEB", border:"1px solid #FDE68A", borderRadius:12, padding:14, marginBottom:16 } },
+      E(ST, null, "Saved Drafts — expire at midnight"),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+        drafts.map((d,i)=>E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", borderRadius:8, padding:"10px 14px" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, d.customerName||"No customer", ` · ${d.cart.length} items · ${fmtMoney(d.cart.reduce((s,ci)=>s+(ci.price*ci.qty),0))}`),
+            E("div", { style:{ fontSize:11, color:T.muted } }, "Saved "+new Date(d.savedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}))
+          ),
+          E(Btn, { style:{ fontSize:12, padding:"6px 10px" }, onClick:()=>loadDraft(d) }, "▶ Resume")
+        ))
       )
     ),
 
@@ -6803,6 +6877,21 @@ function POSSystem({ phones, onPhonesUpdate }) {
       E(Field, { label:"Customer Email" }, E(Input, { type:"email", placeholder:"For email receipt", value:customerEmail, onChange:e=>setCustomerEmail(e.target.value) }))
     ),
 
+    E("div", { style:{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 } },
+      E("span", { style:{ fontSize:12, color:T.muted, alignSelf:"center" } }, "Quick add:"),
+      [
+        { label:"💰 Discount", col:T.green, bg:T.greenLt },
+        { label:"🚚 Delivery", col:T.blue, bg:T.blueLt },
+        { label:"💳 Card Surcharge", col:T.blue, bg:T.blueLt },
+        { label:"🛡️ Warranty", col:"#7C3AED", bg:"#F5F3FF" },
+      ].map(item=>E("button", { key:item.label, onClick:()=>{
+        const raw = prompt(`Amount for "${item.label}" (JMD):${item.label.includes("Discount")?"\nUse negative e.g. -500 for discount":""}`);
+        if (raw===null) return;
+        const price = parseFloat(raw)||0;
+        const name = item.label.replace(/^[^\s]+ /,"");
+        setCart(c=>[...c,{ type:"fee", id:`fee-${Date.now()}`, name, price, qty:1 }]);
+      }, style:{ background:item.bg, color:item.col, border:`1px solid ${item.col}40`, borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, item.label))
+    ),
     E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
       E(Input, {
         placeholder:"🔍 Search phone, accessory, repair ticket, or service...",
@@ -6861,12 +6950,151 @@ function POSSystem({ phones, onPhonesUpdate }) {
         totalPaid > 0 && totalPaid < total && E("div", { style:{ color:T.red, fontWeight:700 } }, "⚠️ Still owed: ", fmtMoney(total - totalPaid))
       ),
       E(Field, { label:"Note", style:{ marginTop:12 } }, E(Input, { placeholder:"Optional note for receipt", value:note, onChange:e=>setNote(e.target.value) })),
-      E("div", { style:{ marginTop:14 } },
+      E("div", { style:{ marginTop:14, display:"flex", gap:8 } },
+        E(Btn, { variant:"ghost", onClick:saveDraft }, "💾 Save Draft"),
         E(Btn, { full:true, disabled:!canCheckout||processing, onClick:checkout, style:{ fontSize:15, padding:"13px" } },
           processing ? "Processing…" : `✓ Complete Sale — ${fmtMoney(total)}`
         )
       )
     )
+  );
+}
+
+// ── Staff Hours + Payroll ─────────────────────────────────────────────────────
+function StaffHours({ user }) {
+  const E = React.createElement;
+  const [logs, setLogs] = useState([]);
+  const [clockedIn, setClockedIn] = useState(null);
+  const [note, setNote] = useState("");
+  const name = user?.name || "Staff";
+
+  useEffect(() => {
+    loadArr("tpp-hours").then(all => {
+      setLogs(all);
+      const open = all.find(l => l.staff === name && !l.clockOut);
+      setClockedIn(open || null);
+    });
+  }, []);
+
+  const clockIn = async () => {
+    const entry = { id: Date.now().toString(), staff: name, clockIn: new Date().toISOString(), clockOut: null, note: "" };
+    const updated = [entry, ...logs];
+    await save("tpp-hours", updated);
+    setLogs(updated); setClockedIn(entry);
+  };
+
+  const clockOut = async () => {
+    if (!clockedIn) return;
+    const now = new Date().toISOString();
+    const mins = Math.round((new Date(now) - new Date(clockedIn.clockIn)) / 60000);
+    const updated = logs.map(l => l.id === clockedIn.id ? { ...l, clockOut: now, minutes: mins, note } : l);
+    await save("tpp-hours", updated);
+    setLogs(updated); setClockedIn(null); setNote("");
+  };
+
+  const todayLogs = logs.filter(l => l.staff === name && l.clockIn?.startsWith(todayStr()));
+  const todayMins = todayLogs.filter(l=>l.minutes).reduce((s,l)=>s+l.minutes,0);
+  const fmt = (iso) => iso ? new Date(iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "—";
+  const fmtMins = (m) => `${Math.floor(m/60)}h ${m%60}m`;
+
+  return E("div", { style:{ maxWidth:480, margin:"0 auto" } },
+    E("div", { style:{ marginBottom:20 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "⏱️ My Hours"),
+      E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, `Logged in as ${name}`)
+    ),
+    E(Card, { style:{ textAlign:"center", marginBottom:20 } },
+      clockedIn
+        ? E("div", null,
+            E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, `Clocked in at ${fmt(clockedIn.clockIn)}`),
+            E("div", { style:{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, color:T.green, marginBottom:16 } }, "🟢 On the clock"),
+            E(Field, { label:"Shift note (optional)" }, E(Input, { placeholder:"e.g. Covered repairs, Terry absent", value:note, onChange:e=>setNote(e.target.value) })),
+            E("div", { style:{ marginTop:12 } }, E(Btn, { full:true, variant:"danger", onClick:clockOut }, "🔴 Clock Out"))
+          )
+        : E("div", null,
+            E("div", { style:{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800, color:T.muted, marginBottom:16 } }, "⚪ Not clocked in"),
+            E(Btn, { full:true, variant:"green", onClick:clockIn }, "🟢 Clock In")
+          )
+    ),
+    todayMins > 0 && E("div", { style:{ background:T.blueLt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 16px", fontSize:14, marginBottom:16, display:"flex", justifyContent:"space-between" } },
+      E("span", null, "Today's total"),
+      E("strong", { style:{ color:T.blue } }, fmtMins(todayMins))
+    ),
+    todayLogs.length > 0 && E("div", null,
+      E(ST, null, "Today's shifts"),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+        todayLogs.map((l,i) => E(Card, { key:i },
+          E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+            E("div", null,
+              E("div", { style:{ fontWeight:600, fontSize:13 } }, `${fmt(l.clockIn)} → ${l.clockOut ? fmt(l.clockOut) : "ongoing"}`),
+              l.note && E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, l.note)
+            ),
+            l.minutes && E("div", { style:{ fontWeight:700, color:T.blue } }, fmtMins(l.minutes))
+          )
+        ))
+      )
+    )
+  );
+}
+
+function PayrollManager() {
+  const E = React.createElement;
+  const [logs, setLogs] = useState([]);
+  const [weekOf, setWeekOf] = useState(todayStr().slice(0,7)); // YYYY-MM
+  const [staffFilter, setStaffFilter] = useState("all");
+
+  useEffect(() => { loadArr("tpp-hours").then(setLogs); }, []);
+
+  const staff = [...new Set(logs.map(l=>l.staff).filter(Boolean))];
+
+  const filtered = logs.filter(l => {
+    const matchStaff = staffFilter === "all" || l.staff === staffFilter;
+    const matchMonth = l.clockIn?.startsWith(weekOf);
+    return matchStaff && matchMonth && l.clockOut;
+  });
+
+  const byStaff = {};
+  filtered.forEach(l => {
+    if (!byStaff[l.staff]) byStaff[l.staff] = { logs:[], totalMins:0 };
+    byStaff[l.staff].logs.push(l);
+    byStaff[l.staff].totalMins += l.minutes||0;
+  });
+
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : "—";
+  const fmtMins = (m) => `${Math.floor(m/60)}h ${m%60}m`;
+
+  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
+    E("div", { style:{ marginBottom:20 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "⏱️ Payroll & Hours"),
+      E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "View all staff clock-in/out logs by month.")
+    ),
+    E("div", { style:{ display:"flex", gap:10, marginBottom:20 } },
+      E("input", { type:"month", value:weekOf, onChange:e=>setWeekOf(e.target.value), style:{ ...iS, width:"auto" } }),
+      E(Sel, { value:staffFilter, onChange:e=>setStaffFilter(e.target.value), style:{ width:"auto" } },
+        E("option", { value:"all" }, "All Staff"),
+        ...staff.map(s=>E("option",{key:s,value:s},s))
+      )
+    ),
+    Object.keys(byStaff).length === 0
+      ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No hours logged for this period.")
+      : Object.entries(byStaff).map(([name, data]) =>
+          E("div", { key:name, style:{ marginBottom:24 } },
+            E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
+              E(ST, { style:{ margin:0 } }, name),
+              E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18, color:T.blue } }, fmtMins(data.totalMins))
+            ),
+            E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
+              data.logs.map((l,i) => E(Card, { key:i, style:{ padding:"10px 16px" } },
+                E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+                  E("div", null,
+                    E("div", { style:{ fontSize:13, fontWeight:500 } }, `${fmt(l.clockIn)} → ${fmt(l.clockOut)}`),
+                    l.note && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, l.note)
+                  ),
+                  E("div", { style:{ fontWeight:700, color:T.blue, fontSize:13 } }, fmtMins(l.minutes||0))
+                )
+              ))
+            )
+          )
+        )
   );
 }
 
