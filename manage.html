@@ -6385,11 +6385,23 @@ function DebtLedger() {
 
 // ── POS System ────────────────────────────────────────────────────────────────
 
-const WARRANTY_FOOTER = `WARRANTY & TERMS
-• Repairs: 7-day warranty on specific repair only. Does not cover new or unrelated faults.
-• Accessories: Non-refundable after 24 hours. Exchange only with original receipt.
-• Phones: 7-day warranty. No warranty on water-damaged or physically damaged devices after sale.
-• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
+const WARRANTY_FOOTER = `NO REFUNDS.
+
+PHONE WARRANTY: 4 weeks from date of purchase.
+• Faults regarding screen/charging port must be reported within 4 days of purchase.
+• The Phone Plug will repair or exchange the unit (same model or same price range) in accordance with the conditions on our Thank You cards.
+• Exchange applies to manufacturer faults only — not cosmetic issues.
+• Phones with faults caused by the customer are ineligible for return.
+• Complimentary accessories are ineligible for return.
+
+REPAIR WARRANTY: To be confirmed — see repair ticket for details.
+
+Thank you for choosing The Phone Plug!
+Shop 5D, Hagley Park Plaza, Half Way Tree, Kingston
+📞 876-490-5515`;
+
+const WARRANTY_FOOTER_REPAIR = `REPAIR WARRANTY: To be confirmed.
+• The Phone Plug is not responsible for data loss during repairs. Back up your device before submission.
 • Devices uncollected after 3 days of notification may incur storage fees.
 Thank you for choosing The Phone Plug!`;
 
@@ -6442,6 +6454,10 @@ const printReceipt = (sale) => {
     sale.change && sale.change > 0 ? `<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>` : "",
   ].join("");
   const depositNote = sale.items.some(i=>i.type==="deposit") ? `<p style="font-size:10px;text-align:center;color:#333">DEPOSIT RECEIPT — Balance due on collection.</p>` : "";
+  const hasRepair = sale.items.some(i=>i.type==="deposit");
+  const warrantyText = hasRepair ? WARRANTY_FOOTER_REPAIR : WARRANTY_FOOTER;
+  const deliveryLines = sale.items.filter(i=>i.type==="delivery").map(i=>i.deliveryAddress ? `<tr><td style="font-size:10px;color:#555;padding-left:8px">📍 ${i.deliveryAddress}</td><td></td></tr>` : "").join("");
+  const allItemLines = itemLines + deliveryLines;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
   <style>
     @media print { @page { margin:2mm; size:80mm auto; } }
@@ -6460,9 +6476,9 @@ const printReceipt = (sale) => {
   <p class="sub">📞 ${PHONE_1} | 📷 ${INSTAGRAM}</p>
   <hr>
   <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)} ${new Date(sale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
-  ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}</p>` : ""}
+  ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}${sale.customerPhone ? " · " + sale.customerPhone : ""}</p>` : ""}
   <hr>
-  <table>${itemLines}</table>
+  <table>${allItemLines}</table>
   <hr>
   ${sale.discount ? `<table><tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(sale.subtotal)}</td></tr><tr><td>Discount</td><td style="text-align:right">-${fmtMoney(sale.discount)}</td></tr></table>` : ""}
   <table class="total"><tr><td>TOTAL</td><td style="text-align:right">${fmtMoney(sale.total)}</td></tr></table>
@@ -6470,7 +6486,7 @@ const printReceipt = (sale) => {
   <table>${payLines}</table>
   <hr>
   ${depositNote}
-  <div class="warranty">${WARRANTY_FOOTER}</div>
+  <div class="warranty">${warrantyText}</div>
   <hr>
   <p style="text-align:center;font-size:10px;">Thank you — see you again soon!</p>
   <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
@@ -6614,6 +6630,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const [searchResults, setSearchResults] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [discount, setDiscount] = useState("");
   const [cash, setCash] = useState("");
@@ -6771,7 +6788,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
       const existing = await loadArr("tpp-sales");
       const saleId = genSaleId(existing.map(s=>s.id));
       const sale = {
-        id: saleId, customerName, customerEmail,
+        id: saleId, customerName, customerPhone, customerEmail,
         items: cart, subtotal, discount: discountAmt, total,
         cash: parseFloat(cash)||0, card: parseFloat(card)||0,
         transfer: parseFloat(transfer)||0, change,
@@ -6808,7 +6825,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
       }
 
       setLastSale(sale);
-      setCart([]); setCustomerName(""); setCustomerEmail(""); setDiscount(""); setCash(""); setCard(""); setTransfer(""); setNote("");
+      setCart([]); setCustomerName(""); setCustomerPhone(""); setCustomerEmail(""); setDiscount(""); setCash(""); setCard(""); setTransfer(""); setNote("");
     } finally { setSaving_(false); }
   };
 
@@ -6872,25 +6889,54 @@ function POSSystem({ phones, onPhonesUpdate }) {
       )
     ),
 
-    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 } },
+    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:16 } },
       E(Field, { label:"Customer Name" }, E(Input, { placeholder:"Optional", value:customerName, onChange:e=>setCustomerName(e.target.value) })),
+      E(Field, { label:"Customer Phone" }, E(Input, { type:"tel", placeholder:"876-xxx-xxxx", value:customerPhone, onChange:e=>setCustomerPhone(e.target.value) })),
       E(Field, { label:"Customer Email" }, E(Input, { type:"email", placeholder:"For email receipt", value:customerEmail, onChange:e=>setCustomerEmail(e.target.value) }))
     ),
 
-    E("div", { style:{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 } },
-      E("span", { style:{ fontSize:12, color:T.muted, alignSelf:"center" } }, "Quick add:"),
-      [
-        { label:"💰 Discount", col:T.green, bg:T.greenLt },
-        { label:"🚚 Delivery", col:T.blue, bg:T.blueLt },
-        { label:"💳 Card Surcharge", col:T.blue, bg:T.blueLt },
-        { label:"🛡️ Warranty", col:"#7C3AED", bg:"#F5F3FF" },
-      ].map(item=>E("button", { key:item.label, onClick:()=>{
-        const raw = prompt(`Amount for "${item.label}" (JMD):${item.label.includes("Discount")?"\nUse negative e.g. -500 for discount":""}`);
-        if (raw===null) return;
-        const price = parseFloat(raw)||0;
-        const name = item.label.replace(/^[^\s]+ /,"");
-        setCart(c=>[...c,{ type:"fee", id:`fee-${Date.now()}`, name, price, qty:1 }]);
-      }, style:{ background:item.bg, color:item.col, border:`1px solid ${item.col}40`, borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, item.label))
+    E("div", { style:{ marginBottom:10 } },
+      E("div", { style:{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:6 } }, "Discounts"),
+      E("div", { style:{ display:"flex", gap:6, flexWrap:"wrap" } },
+        ["Case","Tempered Glass","Returning Client","Customer Satisfaction","General"].map(label=>
+          E("button", { key:label, onClick:()=>{
+            const raw = prompt(`${label} Discount amount (JMD):`);
+            if (raw===null) return;
+            const amt = Math.abs(parseFloat(raw)||0);
+            if (amt<=0) return;
+            setCart(c=>[...c,{ type:"discount", id:`disc-${Date.now()}`, name:`${label} Discount`, price:-amt, qty:1 }]);
+          }, style:{ background:T.greenLt, color:T.green, border:"1px solid #A7F3D0", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, `💚 ${label}`)
+        )
+      )
+    ),
+    E("div", { style:{ marginBottom:10 } },
+      E("div", { style:{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:6 } }, "Delivery & Fees"),
+      E("div", { style:{ display:"flex", gap:6, flexWrap:"wrap" } },
+        E("button", { onClick:()=>{
+          const zone = prompt("Delivery zone:\n1. Kingston\n2. Portmore\n3. Spanish Town\n4. Old Harbour\n5. Zip Mail\n6. Knutsford Drop Off\n7. Knutsford Fee\n8. Tara Courier\n\nType the zone name:");
+          if (!zone) return;
+          const addr = prompt("Delivery address:");
+          if (addr===null) return;
+          const fee = prompt("Delivery fee (JMD):");
+          if (fee===null) return;
+          const amt = parseFloat(fee)||0;
+          setCart(c=>[...c,{ type:"delivery", id:`del-${Date.now()}`, name:`Delivery — ${zone}`, subLabel:addr, price:amt, qty:1, deliveryAddress:addr, deliveryZone:zone }]);
+        }, style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🚚 Delivery"),
+        E("button", { onClick:()=>{
+          const raw = prompt("Credit Card Surcharge amount (JMD):\n(Or enter % and calculate manually)");
+          if (raw===null) return;
+          const amt = parseFloat(raw)||0;
+          if (amt<=0) return;
+          setCart(c=>[...c,{ type:"fee", id:`fee-${Date.now()}`, name:"Credit Card Surcharge", price:amt, qty:1 }]);
+        }, style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "💳 Card Surcharge"),
+        E("button", { onClick:()=>{
+          const raw = prompt("Additional Warranty amount (JMD):\n(Negotiated with customer)");
+          if (raw===null) return;
+          const amt = parseFloat(raw)||0;
+          if (amt<=0) return;
+          setCart(c=>[...c,{ type:"fee", id:`fee-${Date.now()}`, name:"Additional Warranty", price:amt, qty:1 }]);
+        }, style:{ background:"#F5F3FF", color:"#7C3AED", border:"1px solid #DDD6FE", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🛡️ Add Warranty")
+      )
     ),
     E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
       E(Input, {
@@ -6923,11 +6969,12 @@ function POSSystem({ phones, onPhonesUpdate }) {
       E(ST, { style:{ padding:"14px 16px 0", margin:0 } }, "Cart"),
       cart.map((item, idx) => E("div", { key:idx, style:{ padding:"10px 16px", borderTop:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 } },
         E("div", { style:{ flex:1, fontSize:13, fontWeight:500 } },
-          item.type==="deposit" ? "🎫" : item.type==="phone" ? "📱" : "📦", " ", item.name,
-          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Repair deposit — enter amount below")
+          item.type==="deposit" ? "🎫" : item.type==="discount" ? "💚" : item.type==="delivery" ? "🚚" : item.type==="phone" ? "📱" : "📦", " ", item.name,
+          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Repair deposit — enter amount below"),
+          item.deliveryAddress && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "📍 ", item.deliveryAddress)
         ),
         item.type!=="deposit" && E("input", { type:"number", value:item.qty, onChange:e=>updateCartQty(idx,e.target.value), style:{ ...iS, width:48, textAlign:"center", padding:"6px" }, min:1 }),
-        E("input", { type:"number", value:item.price, onChange:e=>updateCartPrice(idx,e.target.value), style:{ ...iS, width:100, textAlign:"right", padding:"6px" }, placeholder:"Price" }),
+        E("input", { type:"number", value:item.price, onChange:e=>updateCartPrice(idx,e.target.value), style:{ ...iS, width:100, textAlign:"right", padding:"6px", color:item.type==="discount"?T.green:T.text }, placeholder:"Price" }),
         E("button", { onClick:()=>removeFromCart(idx), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontWeight:700, cursor:"pointer", fontSize:12 } }, "✕")
       )),
       E("div", { style:{ padding:"12px 16px", borderTop:`1px solid ${T.border}` } },
