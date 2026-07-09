@@ -6443,10 +6443,19 @@ const sendReceiptEmail = async (sale) => {
 };
 
 const printReceipt = (sale) => {
-  const itemLines = sale.items.map(i =>
-    `<tr><td>${i.name}</td><td style="text-align:right">${fmtMoney(i.price)}</td></tr>`
-    + (i.qty > 1 ? `<tr><td style="font-size:10px;color:#666">  x${i.qty}</td><td style="text-align:right;font-size:10px;color:#666">${fmtMoney(i.price * i.qty)}</td></tr>` : "")
-  ).join("");
+  const itemLines = sale.items.map(i => {
+    const isDeposit = i.type === "deposit";
+    const isCollection = i.isCollection;
+    const lineTotal = i.price * (i.qty||1);
+    let rows = `<tr><td>${isDeposit ? (isCollection ? "🎫 Repair (Collection)" : "🎫 Repair Deposit") : i.name}${i.ticketId ? ` [${i.ticketId}]` : ""}</td><td style="text-align:right">${fmtMoney(lineTotal)}</td></tr>`;
+    if (isCollection && i.depositsPaid > 0) {
+      rows += `<tr><td style="font-size:10px;color:#059669;padding-left:8px">  ↳ Deposit previously paid</td><td style="text-align:right;font-size:10px;color:#059669">-${fmtMoney(i.depositsPaid)}</td></tr>`;
+    }
+    if (i.qty > 1 && !isDeposit) {
+      rows += `<tr><td style="font-size:10px;color:#666">  x${i.qty} @ ${fmtMoney(i.price)}</td><td></td></tr>`;
+    }
+    return rows;
+  }).join("");
   const payLines = [
     sale.cash   ? `<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>` : "",
     sale.card   ? `<tr><td>Card</td><td style="text-align:right">${fmtMoney(sale.card)}</td></tr>` : "",
@@ -6640,6 +6649,8 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const [processing, setSaving_] = useState(false);
   const [lastSale, setLastSale] = useState(null);
   const [emailSending, setEmailSending] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyDate, setHistoryDate] = useState("");
   const [drafts, setDrafts] = useState([]);
   const [showDrafts, setShowDrafts] = useState(false);
 
@@ -6717,7 +6728,17 @@ function POSSystem({ phones, onPhonesUpdate }) {
     const ticketResults = tickets
       .filter(t => t.id.toLowerCase().includes(q) || t.customerName?.toLowerCase().includes(q) || t.customerPhone?.includes(q))
       .slice(0,3)
-      .map(t => ({ type:"ticket", id:t.id, name:`Deposit — ${t.customerName} (${t.id})`, price:0, subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`, raw:t }));
+      .map(t => {
+        const depositsPaid = sales.filter(s => s.items?.some(i=>i.ticketId===t.id)).reduce((sum,s)=>sum+(s.total||0),0);
+        const estimatedTotal = parseFloat(t.estimatedCost)||0;
+        const balanceOwed = Math.max(0, estimatedTotal - depositsPaid);
+        return {
+          type:"ticket", id:t.id,
+          name:`${t.customerName||"Customer"} — ${t.deviceBrand||""} ${t.deviceModel||""}`,
+          subLabel:`Ticket: ${t.id} · ${t.status}${depositsPaid>0?` · Deposit paid: ${fmtMoney(depositsPaid)}`:""}${balanceOwed>0?` · Balance: ${fmtMoney(balanceOwed)}`:""}`,
+          price:0, depositsPaid, balanceOwed, estimatedTotal, raw:t
+        };
+      });
     setSearchResults([...phoneResults, ...productResults, ...ticketResults]);
   }, [search, phones, products, tickets]);
 
@@ -6725,7 +6746,16 @@ function POSSystem({ phones, onPhonesUpdate }) {
     if (item.type === "ticket") {
       const existing = cart.find(c=>c.id===item.id&&c.type==="deposit");
       if (existing) { alert("This ticket is already in the cart."); return; }
-      setCart(c=>[...c, { type:"deposit", id:item.id, name:item.name, price:0, qty:1, ticketId:item.id, raw:item.raw }]);
+      const defaultAmt = item.balanceOwed > 0 ? item.balanceOwed : 0;
+      setCart(c=>[...c, {
+        type:"deposit", id:item.id,
+        name:`Repair — ${item.raw.deviceBrand||""} ${item.raw.deviceModel||""} (${item.id})`,
+        subLabel: item.depositsPaid > 0 ? `Deposit paid: ${fmtMoney(item.depositsPaid)} · Balance due: ${fmtMoney(item.balanceOwed)}` : "New deposit",
+        price: defaultAmt, qty:1, ticketId:item.id,
+        depositsPaid: item.depositsPaid, balanceOwed: item.balanceOwed,
+        isCollection: item.depositsPaid > 0,
+        raw:item.raw
+      }]);
     } else {
       // Variable price — prompt staff to enter price
       let finalPrice = item.price;
@@ -6830,6 +6860,50 @@ function POSSystem({ phones, onPhonesUpdate }) {
   };
 
   if (view === "catalog") return E(ProductCatalog, { onBack:()=>setView("pos") });
+
+  if (view === "history") return E("div", { style:{ maxWidth:640, margin:"0 auto" } },
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("button", { onClick:()=>setView("pos"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", padding:0 } }, "← Back to POS"),
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Sales History")
+    ),
+    E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
+      E(Input, { placeholder:"🔍 Search by receipt #, customer name, or phone...", value:historySearch, onChange:e=>setHistorySearch(e.target.value) })
+    ),
+    E("div", { style:{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" } },
+      E("input", { type:"date", value:historyDate, onChange:e=>setHistoryDate(e.target.value), style:{ ...iS, width:"auto" } }),
+      historyDate && E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"6px 10px" }, onClick:()=>setHistoryDate("") }, "✕ Clear date")
+    ),
+    E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+      sales.filter(s => {
+        const q = historySearch.toLowerCase();
+        const matchSearch = !q || s.id?.toLowerCase().includes(q) || s.customerName?.toLowerCase().includes(q) || s.customerPhone?.includes(q);
+        const matchDate = !historyDate || s.date === historyDate;
+        return matchSearch && matchDate;
+      }).slice(0,50).map((s,i) => E(Card, { key:i, style:{ opacity: s.voided ? 0.5 : 1, borderLeft:`3px solid ${s.type==="refund"?T.amber:s.voided?T.red:T.green}` } },
+        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:700, fontSize:13 } },
+              s.type==="refund" ? "↩️ Refund" : "🧾", " ", s.id,
+              s.voided && E("span", { style:{ background:T.redLt, color:T.red, borderRadius:4, padding:"1px 6px", fontSize:10, fontWeight:700, marginLeft:6 } }, "VOIDED")
+            ),
+            E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } },
+              fmtDate(s.createdAt), " · ", new Date(s.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+              s.customerName ? ` · ${s.customerName}` : "",
+              s.customerPhone ? ` · ${s.customerPhone}` : ""
+            ),
+            s.items && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, s.items.map(i=>i.name).join(", "))
+          ),
+          E("div", { style:{ textAlign:"right" } },
+            E("div", { style:{ fontWeight:700, color:s.type==="refund"?T.amber:T.blue, fontSize:14 } }, fmtMoney(s.total||s.amount)),
+            E("div", { style:{ display:"flex", gap:6, marginTop:6, justifyContent:"flex-end" } },
+              E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:()=>printReceipt(s) }, "🖨️ Reprint"),
+              s.customerEmail && E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:async()=>{ const ok=await sendReceiptEmail(s); if(ok) alert("✅ Resent!"); } }, "📧 Resend")
+            )
+          )
+        )
+      ))
+    )
+  );
 
   if (lastSale) return E("div", { style:{ maxWidth:560, margin:"0 auto" } },
     E(Card, { style:{ textAlign:"center", padding:"28px 24px" } },
@@ -6970,7 +7044,11 @@ function POSSystem({ phones, onPhonesUpdate }) {
       cart.map((item, idx) => E("div", { key:idx, style:{ padding:"10px 16px", borderTop:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 } },
         E("div", { style:{ flex:1, fontSize:13, fontWeight:500 } },
           item.type==="deposit" ? "🎫" : item.type==="discount" ? "💚" : item.type==="delivery" ? "🚚" : item.type==="phone" ? "📱" : "📦", " ", item.name,
-          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Repair deposit — enter amount below"),
+          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
+            item.isCollection
+              ? E("span", { style:{ color:T.green, fontWeight:600 } }, `Collection · Deposit paid: ${fmtMoney(item.depositsPaid)} · Balance: ${fmtMoney(item.balanceOwed)}`)
+              : "New deposit — enter amount below"
+          ),
           item.deliveryAddress && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "📍 ", item.deliveryAddress)
         ),
         item.type!=="deposit" && E("input", { type:"number", value:item.qty, onChange:e=>updateCartQty(idx,e.target.value), style:{ ...iS, width:48, textAlign:"center", padding:"6px" }, min:1 }),
