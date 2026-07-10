@@ -3988,7 +3988,7 @@ function PhoneInventory({
         fontSize: 11,
         fontWeight: 700
       }
-    }, p.availability)), p.repairNeeded && p.availability === "To Be Repaired" && /*#__PURE__*/React.createElement("div", {
+    }, p.availability), p.repairNeeded && p.availability === "To Be Repaired" && /*#__PURE__*/React.createElement("div", {
       style: { fontSize: 11, color: T.blue, marginTop: 4, fontStyle: "italic" }
     }, "🔧 ", p.repairNeeded)), /*#__PURE__*/React.createElement("div", {
       style: {
@@ -4173,7 +4173,7 @@ function PhoneInventory({
       }
     }, ["Available", "To Be Unlocked", "To Be Repaired", "Exchanged"].map(a => /*#__PURE__*/React.createElement("option", {
       key: a
-    }, a))));
+    }, a)))));
   })));
 }
 
@@ -6609,9 +6609,14 @@ const printReceipt = (sale) => {
     return rows;
   }).join("");
   const payLines = [
-    sale.cash   ? `<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>` : "",
-    sale.card   ? `<tr><td>Card</td><td style="text-align:right">${fmtMoney(sale.card)}</td></tr>` : "",
-    sale.transfer ? `<tr><td>Transfer</td><td style="text-align:right">${fmtMoney(sale.transfer)}</td></tr>` : "",
+    sale.cash        ? `<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>` : "",
+    sale.debitCard   ? `<tr><td>Debit Card</td><td style="text-align:right">${fmtMoney(sale.debitCard)}</td></tr>` : "",
+    sale.creditCard  ? `<tr><td>Credit Card</td><td style="text-align:right">${fmtMoney(sale.creditCard)}</td></tr>` : "",
+    sale.ncbTransfer ? `<tr><td>NCB Transfer</td><td style="text-align:right">${fmtMoney(sale.ncbTransfer)}</td></tr>` : "",
+    sale.scotiaTransfer ? `<tr><td>Scotia Transfer</td><td style="text-align:right">${fmtMoney(sale.scotiaTransfer)}</td></tr>` : "",
+    sale.otherPayment ? `<tr><td>Other</td><td style="text-align:right">${fmtMoney(sale.otherPayment)}</td></tr>` : "",
+    sale.card        ? `<tr><td>Card</td><td style="text-align:right">${fmtMoney(sale.card)}</td></tr>` : "",
+    sale.transfer    ? `<tr><td>Transfer</td><td style="text-align:right">${fmtMoney(sale.transfer)}</td></tr>` : "",
     sale.change && sale.change > 0 ? `<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>` : "",
   ].join("");
   const depositNote = sale.items.some(i=>i.type==="deposit") ? `<p style="font-size:10px;text-align:center;color:#333">DEPOSIT RECEIPT — Balance due on collection.</p>` : "";
@@ -6803,8 +6808,11 @@ function POSSystem({ phones, onPhonesUpdate }) {
   };
   const [discount, setDiscount] = useState("");
   const [cash, setCash] = useState("");
-  const [card, setCard] = useState("");
-  const [transfer, setTransfer] = useState("");
+  const [debitCard, setDebitCard] = useState("");
+  const [creditCard, setCreditCard] = useState("");
+  const [ncbTransfer, setNcbTransfer] = useState("");
+  const [scotiaTransfer, setScotiaTransfer] = useState("");
+  const [otherPayment, setOtherPayment] = useState("");
   const [note, setNote] = useState("");
   const [processing, setSaving_] = useState(false);
   const [lastSale, setLastSale] = useState(null);
@@ -6973,8 +6981,8 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const subtotal = cart.reduce((s,i)=>s+(i.price*i.qty),0);
   const discountAmt = parseFloat(discount)||0;
   const total = Math.max(0, subtotal - discountAmt);
-  const totalPaid = (parseFloat(cash)||0) + (parseFloat(card)||0) + (parseFloat(transfer)||0);
-  const change = Math.max(0, (parseFloat(cash)||0) - (total - (parseFloat(card)||0) - (parseFloat(transfer)||0)));
+  const totalPaid = (parseFloat(cash)||0) + (parseFloat(debitCard)||0) + (parseFloat(creditCard)||0) + (parseFloat(ncbTransfer)||0) + (parseFloat(scotiaTransfer)||0) + (parseFloat(otherPayment)||0);
+  const change = Math.max(0, (parseFloat(cash)||0) - (total - (parseFloat(debitCard)||0) - (parseFloat(creditCard)||0) - (parseFloat(ncbTransfer)||0) - (parseFloat(scotiaTransfer)||0) - (parseFloat(otherPayment)||0)));
   const canCheckout = cart.length > 0 && totalPaid >= total;
 
   const handleBarcodeDetected = (code) => {
@@ -7024,8 +7032,8 @@ function POSSystem({ phones, onPhonesUpdate }) {
         isExchange: exchangeMode,
         originalSaleId: returnedItem?.sale?.id || null,
         items: cart, subtotal, discount: discountAmt, total,
-        cash: parseFloat(cash)||0, card: parseFloat(card)||0,
-        transfer: parseFloat(transfer)||0, change,
+        cash: parseFloat(cash)||0, debitCard: parseFloat(debitCard)||0, creditCard: parseFloat(creditCard)||0,
+        ncbTransfer: parseFloat(ncbTransfer)||0, scotiaTransfer: parseFloat(scotiaTransfer)||0, otherPayment: parseFloat(otherPayment)||0, change,
         note, createdAt: new Date().toISOString(),
         date: todayStr()
       };
@@ -7033,14 +7041,25 @@ function POSSystem({ phones, onPhonesUpdate }) {
       await save("tpp-sales", updatedSales);
       setSales(updatedSales);
 
-      // Update phone availability
+      // Update phone availability — and create to-do if phone not in inventory
       let updatedPhones = [...phones];
+      const soldOutTodos = [];
       cart.filter(i=>i.type==="phone").forEach(item => {
-        updatedPhones = updatedPhones.map(p =>
-          p.imei === item.id ? { ...p, availability:"Sold", date_sold:todayStr(), actual_sell:String(item.price), sold_by:"POS", actual_profit:String(item.price-(parseFloat(p.total_invoice)||0)) } : p
-        );
+        const match = phones.find(p=>p.imei===item.id);
+        if (match) {
+          updatedPhones = updatedPhones.map(p =>
+            p.imei === item.id ? { ...p, availability:"Sold", date_sold:todayStr(), actual_sell:String(item.price), sold_by:"POS", actual_profit:String(item.price-(parseFloat(p.total_invoice)||0)) } : p
+          );
+        } else {
+          // Phone sold but not in inventory — create to-do
+          soldOutTodos.push({ id:Date.now().toString()+Math.random(), text:`Phone sold via POS not in inventory: "${item.name}" — add IMEI entry and purchase order. Receipt: ${saleId}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" });
+        }
       });
-      if (updatedPhones !== phones) await onPhonesUpdate(updatedPhones);
+      await onPhonesUpdate(updatedPhones);
+      if (soldOutTodos.length) {
+        const existingTodos = await loadArr("tpp-todos");
+        await save("tpp-todos", [...soldOutTodos, ...existingTodos]);
+      }
 
       // Update product stock
       const updatedProducts = [...products];
@@ -7072,7 +7091,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
       }
 
       setLastSale(sale);
-      setCart([]); setCustomerName(""); setCustomerPhone(""); setCustomerEmail(""); setDiscount(""); setCash(""); setCard(""); setTransfer(""); setNote(""); setExchangeMode(false); setReturnedItem(null);
+      setCart([]); setCustomerName(""); setCustomerPhone(""); setCustomerEmail(""); setDiscount(""); setCash(""); setDebitCard(""); setCreditCard(""); setNcbTransfer(""); setScotiaTransfer(""); setOtherPayment(""); setNote(""); setExchangeMode(false); setReturnedItem(null);
     } finally { setSaving_(false); }
   };
 
@@ -7292,7 +7311,14 @@ function POSSystem({ phones, onPhonesUpdate }) {
           const amt = parseFloat(raw)||0;
           if (amt<=0) return;
           setCart(c=>[...c,{ type:"fee", id:`fee-${Date.now()}`, name:"Additional Warranty", price:amt, qty:1 }]);
-        }, style:{ background:"#F5F3FF", color:"#7C3AED", border:"1px solid #DDD6FE", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🛡️ Add Warranty")
+        }, style:{ background:"#F5F3FF", color:"#7C3AED", border:"1px solid #DDD6FE", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🛡️ Add Warranty"),
+        E("button", { onClick:()=>{
+          const serviceName = prompt("Service name:\n(e.g. Screen Replacement, Battery Replacement, Labour)");
+          if (!serviceName) return;
+          const price = parseFloat(prompt(`Price for "${serviceName}" (JMD):`) || "0") || 0;
+          if (price <= 0) return;
+          setCart(c=>[...c,{ type:"service", id:`svc-${Date.now()}`, name:serviceName, price, qty:1 }]);
+        }, style:{ background:"#FFF7ED", color:"#C2410C", border:"1px solid #FED7AA", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🔧 Add Service")
       )
     ),
     E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
@@ -7345,17 +7371,21 @@ function POSSystem({ phones, onPhonesUpdate }) {
 
     cart.length > 0 && E(Card, { style:{ marginBottom:16 } },
       E(ST, null, "Payment"),
-      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:12 } },
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 } },
         E(Field, { label:"💵 Cash (JMD)" }, E(Input, { type:"number", placeholder:"0", value:cash, onChange:e=>setCash(e.target.value) })),
-        E(Field, { label:"💳 Card (JMD)" }, E(Input, { type:"number", placeholder:"0", value:card, onChange:e=>setCard(e.target.value) })),
-        E(Field, { label:"🏦 Transfer (JMD)" }, E(Input, { type:"number", placeholder:"0", value:transfer, onChange:e=>setTransfer(e.target.value) }))
+        E(Field, { label:"💳 Debit Card (JMD)" }, E(Input, { type:"number", placeholder:"0", value:debitCard, onChange:e=>setDebitCard(e.target.value) })),
+        E(Field, { label:"💳 Credit Card (JMD)" }, E(Input, { type:"number", placeholder:"0", value:creditCard, onChange:e=>setCreditCard(e.target.value) })),
+        E(Field, { label:"🏦 NCB Transfer (JMD)" }, E(Input, { type:"number", placeholder:"0", value:ncbTransfer, onChange:e=>setNcbTransfer(e.target.value) })),
+        E(Field, { label:"🏦 Scotia Transfer (JMD)" }, E(Input, { type:"number", placeholder:"0", value:scotiaTransfer, onChange:e=>setScotiaTransfer(e.target.value) })),
+        E(Field, { label:"📱 Other (JMD)" }, E(Input, { type:"number", placeholder:"0", value:otherPayment, onChange:e=>setOtherPayment(e.target.value) }))
       ),
       E("div", { style:{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, fontSize:14 } },
         discountAmt > 0 && E("div", { style:{ color:T.muted } }, "Subtotal: ", E("strong", null, fmtMoney(subtotal))),
         discountAmt > 0 && E("div", { style:{ color:T.green } }, "Discount: -", E("strong", null, fmtMoney(discountAmt))),
         E("div", { style:{ fontWeight:700, fontSize:18 } }, "Total: ", E("span", { style:{ color:T.blue } }, fmtMoney(total))),
         totalPaid >= total && change > 0 && E("div", { style:{ color:T.green, fontWeight:700 } }, "💵 Change: ", fmtMoney(change)),
-        totalPaid > 0 && totalPaid < total && E("div", { style:{ color:T.red, fontWeight:700 } }, "⚠️ Still owed: ", fmtMoney(total - totalPaid))
+        totalPaid > 0 && totalPaid < total && E("div", { style:{ color:T.red, fontWeight:700 } }, "⚠️ Still owed: ", fmtMoney(total - totalPaid)),
+        totalPaid > 0 && E("div", { style:{ fontSize:11, color:T.muted, marginTop:4 } }, [cash&&`Cash: ${fmtMoney(parseFloat(cash))}`, debitCard&&`Debit: ${fmtMoney(parseFloat(debitCard))}`, creditCard&&`Credit: ${fmtMoney(parseFloat(creditCard))}`, ncbTransfer&&`NCB: ${fmtMoney(parseFloat(ncbTransfer))}`, scotiaTransfer&&`Scotia: ${fmtMoney(parseFloat(scotiaTransfer))}`, otherPayment&&`Other: ${fmtMoney(parseFloat(otherPayment))}`].filter(Boolean).join(" · "))
       ),
       E(Field, { label:"Note", style:{ marginTop:12 } }, E(Input, { placeholder:"Optional note for receipt", value:note, onChange:e=>setNote(e.target.value) })),
       E("div", { style:{ marginTop:14, display:"flex", gap:8 } },
