@@ -3123,7 +3123,7 @@ function InvoiceImporter({ user, onDone, allPhones = [] }) {
   });
 
   const extractFromInvoice = async () => {
-    // API key handled server-side via proxy
+    if (!apiKey) { setErrMsg("Please enter your Anthropic API key first."); setShowKeyInput(true); return; }
     if (!file) { setErrMsg("Please select an invoice file first."); return; }
     setLoading(true); setErrMsg("");
     try {
@@ -3175,7 +3175,7 @@ Each element in the array should have these fields:
 - notes: any relevant notes
 
 Return ONLY the JSON array, no explanation, no markdown.` });
-      const resp = await fetch("/api/claude", {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -3197,7 +3197,7 @@ Return ONLY the JSON array, no explanation, no markdown.` });
       if (imeiListFile) {
         try {
           const imeiBase64 = await fileToBase64(imeiListFile);
-          const imeiResp = await fetch("/api/claude", {
+          const imeiResp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "Content-Type":"application/json" },
             body: JSON.stringify({
@@ -3371,7 +3371,7 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
     setImeiErr(prev => ({...prev, [i]: ""}));
     try {
       const base64 = await fileToBase64(file);
-      const resp = await fetch("/api/claude", {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -5618,7 +5618,7 @@ function OwnerShell({
     label: "🔧 Repairs"
   }, {
     id: "phones",
-    label: "📱 Phones"
+    label: "📦 Products"
   }, {
     id: "staff",
     label: "👥 Staff"
@@ -5646,9 +5646,6 @@ function OwnerShell({
   }, {
     id: "todo",
     label: "✅ To Do"
-  }, {
-    id: "receive",
-    label: "📥 Receive"
   }, {
     id: "payroll",
     label: "⏱️ Payroll"
@@ -5820,51 +5817,19 @@ function OwnerShell({
   }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementManager, null), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "staff" && /*#__PURE__*/React.createElement(StaffManager, null), tab === "phones" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: 18
-    }
-  }, /*#__PURE__*/React.createElement("h2", {
-    style: {
-      fontFamily: "'Syne',sans-serif",
-      fontWeight: 800,
-      fontSize: 20,
-      margin: 0
-    }
-  }, "Phone Inventory ", /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 14,
-      color: T.muted,
-      fontWeight: 400
-    }
-  }, "\xB7 ", data.phones.length, " total")), /*#__PURE__*/React.createElement("div", { style:{display:"flex",gap:8} },
-    /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick: archiveOldSales, style:{fontSize:12} }, "📦 Archive Old Sales"),
-    /*#__PURE__*/React.createElement(Btn, {
-      onClick: () => setPv(pv === "add" ? "list" : pv === "import" ? "list" : "add")
-    }, pv !== "list" ? "← Back to List" : "➕ Add Phone"),
-    pv === "list" && /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick: () => setPv("import"), style:{fontSize:12} }, "📄 Import Invoice")
-  )), pv === "add" ? /*#__PURE__*/React.createElement(PhoneForm, {
-    onDone: () => {
-      fetchAll();
-      setPv("list");
-    }
-  }) : pv === "import" ? /*#__PURE__*/React.createElement(InvoiceImporter, {
+  }), tab === "staff" && /*#__PURE__*/React.createElement(StaffManager, null), tab === "phones" && /*#__PURE__*/React.createElement(ProductsTab, {
+    data: data,
     user: user,
-    allPhones: data.phones || [],
-    onDone: () => { fetchAll(); setPv("list"); }
-  }) : /*#__PURE__*/React.createElement(PhoneInventory, {
-    phones: data.phones,
-    onUpdate: updatePhones
-  })), tab === "expense" && /*#__PURE__*/React.createElement(ExpenseForm, {
+    fetchAll: fetchAll,
+    updatePhones: updatePhones,
+    archiveOldSales: archiveOldSales
+  }), tab === "expense" && /*#__PURE__*/React.createElement(ExpenseForm, {
     user: user,
     onDone: fetchAll
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "receive" && /*#__PURE__*/React.createElement(StockReceivingWrapper, null), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -7589,6 +7554,200 @@ function PayrollManager() {
   );
 }
 
+// ── Products Tab (unified: Phones + Catalog + Receive) ───────────────────────
+const LOYVERSE_PHONE_CATS = ["Like New Samsung","Like New IPhones","New in box","HOTWAV","Tablets","Gadgets"];
+const LOYVERSE_ACCESSORY_CATS = ["Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other","Accessories- Samsung","Accessories- Apple","Tablet Cases"];
+const LOYVERSE_ALL_CATS = [...LOYVERSE_PHONE_CATS, ...LOYVERSE_ACCESSORY_CATS];
+const INVOICE_TYPES = [
+  { id:"phones",     label:"📱 Phones",      hint:"IMEI-tracked devices — each unit gets its own entry" },
+  { id:"accessories",label:"📦 Accessories", hint:"Cases, chargers, cables, screen protectors etc." },
+  { id:"parts",      label:"🔧 Phone Parts", hint:"Screens, batteries, charging ports, repair components" },
+  { id:"gadgets",    label:"📡 Tech Gadgets",hint:"Smartwatches, earbuds, powerbanks, tablets" },
+  { id:"mixture",    label:"🔀 Mixture",     hint:"Mixed invoice — AI will identify each item type" },
+];
+
+function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
+  const E = React.createElement;
+  const [subTab, setSubTab] = useState("phones"); // "phones" | "catalog" | "receive"
+  const [pv, setPv] = useState("list"); // phones sub-view: list | add | import
+  const [products, setProducts] = useState([]);
+  const [invoiceType, setInvoiceType] = useState(null); // null = not selected yet
+  const [scanReady, setScanReady] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const meta = await load("tpp-products-meta");
+        if (meta && meta.chunks) {
+          const all = [];
+          for (let i = 0; i < meta.chunks; i++) {
+            const chunk = await load(`tpp-products-chunk-${i}`);
+            if (Array.isArray(chunk)) all.push(...chunk);
+          }
+          setProducts(all);
+        } else {
+          setProducts(await loadArr("tpp-products"));
+        }
+      } catch { setProducts(await loadArr("tpp-products")); }
+    })();
+  }, []);
+
+  const saveProducts = async (updated) => {
+    if (updated.length > 100) {
+      const CHUNK = 100; const chunks = [];
+      for (let i = 0; i < updated.length; i += CHUNK) chunks.push(updated.slice(i, i+CHUNK));
+      await save("tpp-products-meta", { total:updated.length, chunks:chunks.length, updated:new Date().toISOString() });
+      for (let i = 0; i < chunks.length; i++) await save(`tpp-products-chunk-${i}`, chunks[i]);
+    } else {
+      await save("tpp-products", updated);
+    }
+    setProducts(updated);
+  };
+
+  const subTabs = [
+    { id:"phones",  label:"📱 Phones" },
+    { id:"catalog", label:"📦 Catalog" },
+    { id:"receive", label:"📥 Receive Stock" },
+  ];
+
+  const tabBar = E("div", { style:{ display:"flex", gap:8, marginBottom:24, borderBottom:`1px solid ${T.border}`, paddingBottom:12 } },
+    subTabs.map(st => E("button", { key:st.id, onClick:()=>{ setSubTab(st.id); if(st.id!=="receive") { setInvoiceType(null); setScanReady(false); } }, style:{ background:subTab===st.id?T.blue:"#F3F4F6", color:subTab===st.id?"#fff":T.muted, border:"none", borderRadius:8, padding:"8px 16px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, st.label))
+  );
+
+  // ── PHONES SUB-TAB ────────────────────────────────────────────────────────
+  if (subTab === "phones") return E("div", null,
+    tabBar,
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Phone Inventory ", E("span", { style:{ fontSize:14, color:T.muted, fontWeight:400 } }, "· ", data.phones.length, " total")),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn, { variant:"ghost", onClick:archiveOldSales, style:{ fontSize:12 } }, "📦 Archive"),
+        E(Btn, { onClick:()=>setPv(pv==="list"?"add":"list") }, pv!=="list"?"← Back":"➕ Add Phone"),
+        pv==="list" && E(Btn, { variant:"ghost", onClick:()=>setPv("import"), style:{ fontSize:12 } }, "📄 Import Invoice")
+      )
+    ),
+    pv==="add" ? E(PhoneForm, { onDone:()=>{ fetchAll(); setPv("list"); } })
+    : pv==="import" ? E(InvoiceImporter, { user, allPhones:data.phones||[], onDone:()=>{ fetchAll(); setPv("list"); } })
+    : E(PhoneInventory, { phones:data.phones, onUpdate:updatePhones })
+  );
+
+  // ── CATALOG SUB-TAB ───────────────────────────────────────────────────────
+  if (subTab === "catalog") {
+    const [catFilter, setCatFilter] = useState("all");
+    const [catSearch, setCatSearch] = useState("");
+    const [showAddForm, setShowAddForm] = useState(false);
+    const [newItem, setNewItemS] = useState({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
+    const setNI = (k,v) => setNewItemS(p=>({...p,[k]:v}));
+    const cats = ["all", ...LOYVERSE_ALL_CATS, "Parts & Components", "Other"];
+    const filtered = products.filter(p => {
+      const matchCat = catFilter==="all" || p.category===catFilter;
+      const matchQ = !catSearch || p.name.toLowerCase().includes(catSearch.toLowerCase()) || (p.barcode||"").includes(catSearch) || (p.sku||"").includes(catSearch);
+      return matchCat && matchQ;
+    });
+    const grouped = {};
+    filtered.forEach(p => {
+      const cat = p.category || "Other";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(p);
+    });
+
+    return E("div", null, tabBar,
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Catalog ", E("span", { style:{ fontSize:14, color:T.muted, fontWeight:400 } }, `· ${products.length} items`)),
+        E(Btn, { onClick:()=>setShowAddForm(s=>!s) }, showAddForm?"✕ Cancel":"+ Add Item")
+      ),
+      showAddForm && E(Card, { style:{ marginBottom:16 } },
+        E(ST, null, "New Catalog Item"),
+        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+          E(Field, { label:"Name", required:true }, E(Input, { value:newItem.name, onChange:e=>setNI("name",e.target.value), placeholder:"e.g. Samsung S24 Case" })),
+          E(Field, { label:"Category" }, E(Sel, { value:newItem.category, onChange:e=>setNI("category",e.target.value) },
+            [...LOYVERSE_ALL_CATS, "Parts & Components", "Other"].map(c=>E("option",{key:c,value:c},c))
+          )),
+          E(Field, { label:"Price (JMD)" }, E(Input, { type:"number", value:newItem.price, onChange:e=>setNI("price",e.target.value), placeholder:"0" })),
+          E(Field, { label:"Cost (JMD)" }, E(Input, { type:"number", value:newItem.cost, onChange:e=>setNI("cost",e.target.value), placeholder:"0" })),
+          E(Field, { label:"Stock Qty" }, E(Input, { type:"number", value:newItem.stock, onChange:e=>setNI("stock",e.target.value), placeholder:"0" })),
+          E(Field, { label:"Barcode / SKU" }, E(Input, { value:newItem.barcode, onChange:e=>setNI("barcode",e.target.value), placeholder:"optional" }))
+        ),
+        E(Btn, { onClick:async()=>{
+          if (!newItem.name.trim()) { alert("Name required."); return; }
+          const item = { id:`manual-${Date.now()}`, ...newItem, price:parseFloat(newItem.price)||0, cost:parseFloat(newItem.cost)||0, stock:parseInt(newItem.stock)||0, variable_price:!newItem.price };
+          await saveProducts([item,...products]);
+          setNewItemS({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
+          setShowAddForm(false);
+        } }, "Save Item")
+      ),
+      E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
+        E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto" } },
+          cats.map(c=>E("option",{key:c,value:c},c==="all"?"All Categories":c))
+        ),
+        E(Input, { placeholder:"🔍 Search name, barcode, SKU...", value:catSearch, onChange:e=>setCatSearch(e.target.value) })
+      ),
+      Object.keys(grouped).length===0
+        ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No items found.")
+        : Object.entries(grouped).map(([cat, items]) => E("div", { key:cat, style:{ marginBottom:24 } },
+            E(ST, null, cat, ` (${items.length})`),
+            E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
+              items.map((item,i) => E(Card, { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 16px" } },
+                E("div", null,
+                  E("div", { style:{ fontWeight:600, fontSize:13 } }, item.name),
+                  E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `Stock: ${item.stock||0}`, item.barcode?` · ${item.barcode}`:"", item.variable_price?" · Variable price":"")
+                ),
+                E("div", { style:{ display:"flex", alignItems:"center", gap:10 } },
+                  E("div", { style:{ fontWeight:700, color:T.blue } }, item.variable_price?"Variable":fmtMoney(item.price||0)),
+                  E("button", { onClick:async()=>{
+                    const newPrice = prompt("New price (JMD):", String(item.price||0));
+                    if (newPrice===null) return;
+                    const newStock = prompt("Stock count:", String(item.stock||0));
+                    if (newStock===null) return;
+                    await saveProducts(products.map(p=>p.id===item.id?{...p,price:parseFloat(newPrice)||0,stock:parseInt(newStock)||0}:p));
+                  }, style:{ background:T.blueLt, color:T.blue, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Edit"),
+                  E("button", { onClick:async()=>{ if(!confirm(`Remove "${item.name}"?`)) return; await saveProducts(products.filter(p=>p.id!==item.id)); }, style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "✕")
+                )
+              ))
+            )
+          ))
+    );
+  }
+
+  // ── RECEIVE STOCK SUB-TAB ────────────────────────────────────────────────
+  // Step 1: Select invoice type before scanning
+  if (subTab === "receive" && !invoiceType) return E("div", null,
+    tabBar,
+    E("div", { style:{ marginBottom:20 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "📥 Receive Stock"),
+      E("div", { style:{ fontSize:13, color:T.muted, marginTop:4 } }, "First, what type of stock are you receiving?")
+    ),
+    E("div", { style:{ display:"flex", flexDirection:"column", gap:10 } },
+      INVOICE_TYPES.map(t => E("button", { key:t.id, onClick:()=>setInvoiceType(t.id), style:{ background:T.card, border:`2px solid ${T.border}`, borderRadius:12, padding:"16px 20px", textAlign:"left", cursor:"pointer", fontFamily:"inherit", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+        E("div", null,
+          E("div", { style:{ fontWeight:700, fontSize:15 } }, t.label),
+          E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, t.hint)
+        ),
+        E("div", { style:{ fontSize:20 } }, "→")
+      ))
+    )
+  );
+
+  // Step 2: StockReceiving with the selected type passed through
+  if (subTab === "receive" && invoiceType) return E("div", null,
+    tabBar,
+    E("div", { style:{ display:"flex", alignItems:"center", gap:10, marginBottom:20 } },
+      E("button", { onClick:()=>setInvoiceType(null), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", padding:0 } }, "← Change type"),
+      E("div", { style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 12px", fontSize:12, fontWeight:700 } },
+        INVOICE_TYPES.find(t=>t.id===invoiceType)?.label
+      )
+    ),
+    E(StockReceiving, {
+      products,
+      onProductsUpdate: saveProducts,
+      invoiceType,
+      allPhones: data.phones || [],
+      onPhonesDone: ()=>{ fetchAll(); setSubTab("phones"); }
+    })
+  );
+
+  return null;
+}
+
 // ── Stock Receiving Wrapper (loads products independently) ────────────────────
 function StockReceivingWrapper() {
   const [products, setProducts] = useState([]);
@@ -7890,7 +8049,7 @@ function DebtLedger() {
 }
 
 // ── Stock Receiving ───────────────────────────────────────────────────────────
-function StockReceiving({ products, onProductsUpdate }) {
+function StockReceiving({ products, onProductsUpdate, invoiceType, allPhones = [], onPhonesDone }) {
   const E = React.createElement;
   const [drafts, setDrafts] = useState([]);
   const [activeDraft, setActiveDraft] = useState(null);
@@ -7904,9 +8063,20 @@ function StockReceiving({ products, onProductsUpdate }) {
   const fileInputRef = React.useRef(null);
 
   const scanInvoice = async (file) => {
+    // Phone invoices go through InvoiceImporter (already has full flow)
+    if (invoiceType === "phones") {
+      alert("For phone invoices, use the 📱 Phones tab → Import Invoice. This gives you full IMEI entry and per-device verification.");
+      return;
+    }
     setScanning(true); setScanError("");
+    const typeHints = {
+      accessories: "accessories like phone cases, chargers, cables, screen protectors, headphones",
+      parts: "phone repair parts like screens, batteries, charging ports, cameras, back glass",
+      gadgets: "tech gadgets like smartwatches, earbuds, powerbanks, tablets",
+      mixture: "a mix of phone accessories, parts, and gadgets"
+    };
+    const typeHint = typeHints[invoiceType] || "phone shop accessories and parts";
     try {
-      // Convert file to base64
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader();
         reader.onload = () => res(reader.result.split(",")[1]);
@@ -7928,26 +8098,24 @@ function StockReceiving({ products, onProductsUpdate }) {
               isPDF
                 ? { type: "document", source: { type: "base64", media_type: mediaType, data: base64 } }
                 : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-              { type: "text", text: `You are parsing a supplier invoice for a phone shop. Extract all line items and invoice details.
+              { type: "text", text: `You are parsing a supplier invoice for a phone shop. This invoice contains ${typeHint}. Extract all line items and invoice details.
 
-Return ONLY valid JSON in this exact format, no markdown, no explanation:
+Return ONLY valid JSON, no markdown:
 {
   "supplier": "supplier name or empty string",
-  "poRef": "invoice number or PO reference or empty string",
-  "invoiceTotal": "total amount as number string or empty string",
-  "receivedDate": "date in YYYY-MM-DD format or empty string",
+  "poRef": "invoice number or empty string",
+  "invoiceTotal": "total as number string or empty string",
+  "receivedDate": "date YYYY-MM-DD or empty string",
   "lines": [
     {
-      "name": "product name",
+      "name": "exact product name from invoice",
       "qty": "quantity as number string",
-      "costPerUnit": "unit price as number string",
-      "category": "best guess category: Accessory, Case, Charger, Screen Protector, Cable, Headphones, Parts & Components, or Other",
-      "barcode": "barcode or SKU if visible or empty string"
+      "costPerUnit": "unit cost as number string",
+      "category": "one of: Accessories - Samsung Cases, Accessories - Apple Cases, Accessories- Samsung, Accessories- Apple, Parts & Components, Gadgets, Tablets, Other",
+      "barcode": "barcode or SKU if visible, else empty string"
     }
   ]
-}
-
-Be precise with product names. Include all line items.` }
+}` }
             ]
           }]
         })
@@ -7958,47 +8126,44 @@ Be precise with product names. Include all line items.` }
       const clean = text.replace(/```json|```/g,"").trim();
       const parsed = JSON.parse(clean);
 
-      // Pre-fill PO header
       if (parsed.supplier) setPO("supplier", parsed.supplier);
       if (parsed.poRef) setPO("poRef", parsed.poRef);
       if (parsed.invoiceTotal) setPO("invoiceTotal", parsed.invoiceTotal);
       if (parsed.receivedDate) setPO("receivedDate", parsed.receivedDate);
 
-      // Pre-fill line items — try to match to existing catalog
       if (parsed.lines?.length > 0) {
         const newLines = parsed.lines.map(line => {
-          const q = line.name.toLowerCase();
+          const q = (line.name||"").toLowerCase();
+          // Try to match to existing catalog
           const match = products.find(p =>
-            p.name.toLowerCase().includes(q.slice(0,10)) ||
-            q.includes(p.name.toLowerCase().slice(0,10)) ||
+            p.name.toLowerCase().includes(q.slice(0,12)) ||
+            q.includes(p.name.toLowerCase().slice(0,12)) ||
             (line.barcode && p.barcode === line.barcode)
           );
           return {
             productId: match?.id || null,
             name: match?.name || line.name,
-            aiName: line.name, // original AI-parsed name for reference
-            category: match?.category || line.category || "Accessory",
+            aiName: line.name,
+            category: match?.category || line.category || "Other",
             isNew: !match,
             costPerUnit: line.costPerUnit || "",
             qty: line.qty || "1",
             barcode: line.barcode || match?.barcode || "",
             sku: match?.sku || "",
             price: match?.price || 0,
-            needsVerification: !match // flag unmatched items
+            needsVerification: !match
           };
         });
         setLines(newLines);
         setView("po");
-        alert(`✅ Scanned ${parsed.lines.length} line items. Review below — items flagged ⚠️ need to be matched or confirmed as new.`);
+        alert(`✅ Scanned ${parsed.lines.length} line items. Review — items flagged ⚠️ need to be matched or confirmed as new.`);
       } else {
-        setScanError("No line items found in this invoice. Try a clearer image or enter manually.");
+        setScanError("No line items found. Try a clearer image or enter manually.");
       }
     } catch(e) {
-      setScanError("Scan failed: " + e.message + ". Try a clearer image or enter manually.");
+      setScanError("Scan failed: " + e.message);
       console.error(e);
-    } finally {
-      setScanning(false);
-    }
+    } finally { setScanning(false); }
   };
 
   // PO header state
