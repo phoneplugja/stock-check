@@ -1201,7 +1201,6 @@ function RepairDashboard({
 }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [posCategory, setPosCategory] = useState("all");
   const counts = {
     all: tickets.filter(t => t.status !== "cancelled").length,
     cancelled: tickets.filter(t => t.status === "cancelled").length,
@@ -6795,6 +6794,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const [tickets, setTickets] = useState([]);
   const [sales, setSales] = useState([]);
   const [search, setSearch] = useState("");
+  const [posCategory, setPosCategory] = useState("all");
   const [searchResults, setSearchResults] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [customerName, setCustomerName] = useState("");
@@ -7342,14 +7342,16 @@ function POSSystem({ phones, onPhonesUpdate }) {
       E("div", { style:{ fontSize:11, fontWeight:700, color:T.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:6 } }, "Delivery & Fees"),
       E("div", { style:{ display:"flex", gap:6, flexWrap:"wrap" } },
         E("button", { onClick:()=>{
-          const zone = prompt("Delivery zone:\n1. Kingston\n2. Portmore\n3. Spanish Town\n4. Old Harbour\n5. Zip Mail\n6. Knutsford Drop Off\n7. Knutsford Fee\n8. Tara Courier\n\nType the zone name:");
-          if (!zone) return;
-          const addr = prompt("Delivery address:");
+          const ZONES = { "1":"Kingston","2":"Portmore","3":"Spanish Town","4":"Old Harbour","5":"Zip Mail","6":"Knutsford Drop Off","7":"Knutsford Fee","8":"Tara Courier" };
+          const zoneInput = prompt("Delivery zone:\n1. Kingston\n2. Portmore\n3. Spanish Town\n4. Old Harbour\n5. Zip Mail\n6. Knutsford Drop Off\n7. Knutsford Fee\n8. Tara Courier\n\nEnter number (1-8):");
+          if (!zoneInput) return;
+          const zoneName = ZONES[zoneInput.trim()] || zoneInput.trim();
+          const addr = prompt(`Delivery address for ${zoneName}:`);
           if (addr===null) return;
           const fee = prompt("Delivery fee (JMD):");
           if (fee===null) return;
           const amt = parseFloat(fee)||0;
-          setCart(c=>[...c,{ type:"delivery", id:`del-${Date.now()}`, name:`Delivery — ${zone}`, subLabel:addr, price:amt, qty:1, deliveryAddress:addr, deliveryZone:zone }]);
+          setCart(c=>[...c,{ type:"delivery", id:`del-${Date.now()}`, name:`Delivery — ${zoneName}`, subLabel:addr, price:amt, qty:1, deliveryAddress:addr, deliveryZone:zoneName }]);
         }, style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "🚚 Delivery"),
         E("button", { onClick:()=>{
           const raw = prompt("Credit Card Surcharge amount (JMD):\n(Or enter % and calculate manually)");
