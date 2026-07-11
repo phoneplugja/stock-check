@@ -6861,7 +6861,14 @@ function POSSystem({ phones, onPhonesUpdate }) {
       setAllCustomers(merged);
       // Load services catalog
       const svcs = await loadArr("tpp-services");
-      setServices(svcs);
+      if (svcs.length === 0) {
+        // Seed common repair services
+        const defaults = ["Screen Replacement","Battery Replacement","Charging Port Repair","Back Glass Repair","Camera Repair","Speaker/Mic Repair","Software Repair / Unlock","Water Damage Treatment","Labour"].map((name,i)=>({ id:`default-${i}`, name, createdAt:new Date().toISOString() }));
+        await save("tpp-services", defaults);
+        setServices(defaults);
+      } else {
+        setServices(svcs);
+      }
 
       // Load products from chunked storage
       try {
@@ -7096,7 +7103,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
           E("div", { style:{ fontSize:12, marginTop:8 } }, "Examples: Screen Replacement, Battery Replacement, Charging Port Repair, Software Repair, Back Glass, Camera Repair, Labour")
         )
       : E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-          services.map((svc, i) => E(Card, { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+          services.map((svc, i) => E("div", { key:i, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" } },
             E("div", { style:{ fontWeight:600, fontSize:14 } }, svc.name),
             E("div", { style:{ display:"flex", gap:8 } },
               E(Btn, { style:{ fontSize:12, padding:"7px 14px" }, onClick:()=>{
@@ -7164,7 +7171,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
         const matchSearch = !q || s.id?.toLowerCase().includes(q) || s.customerName?.toLowerCase().includes(q) || s.customerPhone?.includes(q);
         const matchDate = !historyDate || s.date === historyDate;
         return matchSearch && matchDate;
-      }).slice(0,50).map((s,i) => E(Card, { key:i, onClick:()=>setSelectedSale(s), style:{ opacity: s.voided ? 0.5 : 1, borderLeft:`3px solid ${s.type==="refund"?T.amber:s.voided?T.red:T.green}`, cursor:"pointer" } },
+      }).slice(0,50).map((s,i) => E("div", { key:i, onClick:()=>setSelectedSale(s), style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:16, boxShadow:"0 1px 3px rgba(0,0,0,0.06)", opacity: s.voided ? 0.5 : 1, borderLeft:`3px solid ${s.type==="refund"?T.amber:s.voided?T.red:T.green}`, cursor:"pointer", marginBottom:8 } },
         E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
           E("div", null,
             E("div", { style:{ fontWeight:700, fontSize:13 } },
@@ -7181,8 +7188,9 @@ function POSSystem({ phones, onPhonesUpdate }) {
           E("div", { style:{ textAlign:"right" } },
             E("div", { style:{ fontWeight:700, color:s.type==="refund"?T.amber:T.blue, fontSize:14 } }, fmtMoney(s.total||s.amount)),
             E("div", { style:{ display:"flex", gap:6, marginTop:6, justifyContent:"flex-end" } },
-              E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:()=>printReceipt(s) }, "🖨️ Reprint"),
-              E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:async()=>{ let email=s.customerEmail||s.customerPhone; const entered=prompt(`Send receipt to:`,s.customerEmail||s.customerPhone||""); if(!entered) return; const saleWithEmail={...s,customerEmail:entered}; const ok=await sendReceiptEmail(saleWithEmail); if(ok) alert(`✅ Receipt sent to ${entered}`); } }, "📧 Resend")
+              E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:e=>{ e.stopPropagation(); printReceipt(s); } }, "🖨️ Reprint"),
+              E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px" }, onClick:async e=>{ e.stopPropagation(); const entered=prompt(`Send receipt to:`,s.customerEmail||""); if(!entered) return; const ok=await sendReceiptEmail({...s,customerEmail:entered}); if(ok) alert(`✅ Sent to ${entered}`); } }, "📧 Resend"),
+              !s.voided && E(Btn, { variant:"ghost", style:{ fontSize:11, padding:"4px 8px", color:T.red }, onClick:async e=>{ e.stopPropagation(); const reason=prompt("Void reason?"); if(!reason) return; const voided={...s,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}; const all=await loadArr("tpp-sales"); await save("tpp-sales",all.map(x=>x.id===s.id?voided:x)); setSales(prev=>prev.map(x=>x.id===s.id?voided:x)); } }, "🚫 Void")
             )
           )
         )
@@ -7554,6 +7562,84 @@ function PayrollManager() {
   );
 }
 
+// ── Catalog Sub-Tab Component ─────────────────────────────────────────────────
+function CatalogSubTab({ products, saveProducts }) {
+  const E = React.createElement;
+  const [catFilter, setCatFilter] = useState("all");
+  const [catSearch, setCatSearch] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newItem, setNewItemS] = useState({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
+  const setNI = (k,v) => setNewItemS(p=>({...p,[k]:v}));
+  const cats = ["all", ...LOYVERSE_ALL_CATS, "Parts & Components", "Other"];
+  const filtered = products.filter(p => {
+    const matchCat = catFilter==="all" || p.category===catFilter;
+    const matchQ = !catSearch || p.name.toLowerCase().includes(catSearch.toLowerCase()) || (p.barcode||"").includes(catSearch) || (p.sku||"").includes(catSearch);
+    return matchCat && matchQ;
+  });
+  const grouped = {};
+  filtered.forEach(p => { const cat = p.category||"Other"; if (!grouped[cat]) grouped[cat]=[]; grouped[cat].push(p); });
+
+  return E("div", null,
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Catalog ", E("span", { style:{ fontSize:14, color:T.muted, fontWeight:400 } }, `· ${products.length} items`)),
+      E(Btn, { onClick:()=>setShowAddForm(s=>!s) }, showAddForm?"✕ Cancel":"+ Add Item")
+    ),
+    showAddForm && E(Card, { style:{ marginBottom:16 } },
+      E(ST, null, "New Catalog Item"),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+        E(Field, { label:"Name", required:true }, E(Input, { value:newItem.name, onChange:e=>setNI("name",e.target.value), placeholder:"e.g. Samsung S24 Case" })),
+        E(Field, { label:"Category" }, E(Sel, { value:newItem.category, onChange:e=>setNI("category",e.target.value) },
+          [...LOYVERSE_ALL_CATS, "Parts & Components", "Other"].map(c=>E("option",{key:c,value:c},c))
+        )),
+        E(Field, { label:"Price (JMD)" }, E(Input, { type:"number", value:newItem.price, onChange:e=>setNI("price",e.target.value), placeholder:"0" })),
+        E(Field, { label:"Cost (JMD)" }, E(Input, { type:"number", value:newItem.cost, onChange:e=>setNI("cost",e.target.value), placeholder:"0" })),
+        E(Field, { label:"Stock Qty" }, E(Input, { type:"number", value:newItem.stock, onChange:e=>setNI("stock",e.target.value), placeholder:"0" })),
+        E(Field, { label:"Barcode / SKU" }, E(Input, { value:newItem.barcode, onChange:e=>setNI("barcode",e.target.value), placeholder:"optional" }))
+      ),
+      E(Btn, { onClick:async()=>{
+        if (!newItem.name.trim()) { alert("Name required."); return; }
+        const item = { id:`manual-${Date.now()}`, ...newItem, price:parseFloat(newItem.price)||0, cost:parseFloat(newItem.cost)||0, stock:parseInt(newItem.stock)||0, variable_price:!newItem.price };
+        await saveProducts([item,...products]);
+        setNewItemS({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
+        setShowAddForm(false);
+      } }, "Save Item")
+    ),
+    E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
+      E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto" } },
+        cats.map(c=>E("option",{key:c,value:c},c==="all"?"All Categories":c))
+      ),
+      E(Input, { placeholder:"🔍 Search name, barcode, SKU...", value:catSearch, onChange:e=>setCatSearch(e.target.value) })
+    ),
+    Object.keys(grouped).length===0
+      ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } },
+          E("div", { style:{ fontSize:32, marginBottom:8 } }, "📦"),
+          E("div", null, "No items found. Run the product import or add items above.")
+        )
+      : Object.entries(grouped).map(([cat, items]) => E("div", { key:cat, style:{ marginBottom:24 } },
+          E(ST, null, cat, ` (${items.length})`),
+          E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
+            items.map((item,i) => E("div", { key:i, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+              E("div", null,
+                E("div", { style:{ fontWeight:600, fontSize:13 } }, item.name),
+                E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `Stock: ${item.stock||0}`, item.barcode?` · ${item.barcode}`:"", item.variable_price?" · Variable price":"")
+              ),
+              E("div", { style:{ display:"flex", alignItems:"center", gap:8 } },
+                E("div", { style:{ fontWeight:700, color:T.blue } }, item.variable_price?"Variable":fmtMoney(item.price||0)),
+                E("button", { onClick:async()=>{
+                  const newPrice = prompt("New price (JMD):", String(item.price||0));
+                  if (newPrice===null) return;
+                  const newStock = prompt("Stock count:", String(item.stock||0));
+                  if (newStock===null) return;
+                  await saveProducts(products.map(p=>p.id===item.id?{...p,price:parseFloat(newPrice)||0,stock:parseInt(newStock)||0}:p));
+                }, style:{ background:T.blueLt, color:T.blue, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Edit"),
+                E("button", { onClick:async()=>{ if(!confirm(`Remove "${item.name}"?`)) return; await saveProducts(products.filter(p=>p.id!==item.id)); }, style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "✕")
+              )
+            ))
+          )
+        ))
+  );
+}
+
 // ── Products Tab (unified: Phones + Catalog + Receive) ───────────────────────
 const LOYVERSE_PHONE_CATS = ["Like New Samsung","Like New IPhones","New in box","HOTWAV","Tablets","Gadgets"];
 const LOYVERSE_ACCESSORY_CATS = ["Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other","Accessories- Samsung","Accessories- Apple","Tablet Cases"];
@@ -7631,84 +7717,9 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
   );
 
   // ── CATALOG SUB-TAB ───────────────────────────────────────────────────────
-  if (subTab === "catalog") {
-    const [catFilter, setCatFilter] = useState("all");
-    const [catSearch, setCatSearch] = useState("");
-    const [showAddForm, setShowAddForm] = useState(false);
-    const [newItem, setNewItemS] = useState({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
-    const setNI = (k,v) => setNewItemS(p=>({...p,[k]:v}));
-    const cats = ["all", ...LOYVERSE_ALL_CATS, "Parts & Components", "Other"];
-    const filtered = products.filter(p => {
-      const matchCat = catFilter==="all" || p.category===catFilter;
-      const matchQ = !catSearch || p.name.toLowerCase().includes(catSearch.toLowerCase()) || (p.barcode||"").includes(catSearch) || (p.sku||"").includes(catSearch);
-      return matchCat && matchQ;
-    });
-    const grouped = {};
-    filtered.forEach(p => {
-      const cat = p.category || "Other";
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(p);
-    });
+  if (subTab === "catalog") return E(CatalogSubTab, { products, saveProducts });
 
-    return E("div", null, tabBar,
-      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
-        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Catalog ", E("span", { style:{ fontSize:14, color:T.muted, fontWeight:400 } }, `· ${products.length} items`)),
-        E(Btn, { onClick:()=>setShowAddForm(s=>!s) }, showAddForm?"✕ Cancel":"+ Add Item")
-      ),
-      showAddForm && E(Card, { style:{ marginBottom:16 } },
-        E(ST, null, "New Catalog Item"),
-        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-          E(Field, { label:"Name", required:true }, E(Input, { value:newItem.name, onChange:e=>setNI("name",e.target.value), placeholder:"e.g. Samsung S24 Case" })),
-          E(Field, { label:"Category" }, E(Sel, { value:newItem.category, onChange:e=>setNI("category",e.target.value) },
-            [...LOYVERSE_ALL_CATS, "Parts & Components", "Other"].map(c=>E("option",{key:c,value:c},c))
-          )),
-          E(Field, { label:"Price (JMD)" }, E(Input, { type:"number", value:newItem.price, onChange:e=>setNI("price",e.target.value), placeholder:"0" })),
-          E(Field, { label:"Cost (JMD)" }, E(Input, { type:"number", value:newItem.cost, onChange:e=>setNI("cost",e.target.value), placeholder:"0" })),
-          E(Field, { label:"Stock Qty" }, E(Input, { type:"number", value:newItem.stock, onChange:e=>setNI("stock",e.target.value), placeholder:"0" })),
-          E(Field, { label:"Barcode / SKU" }, E(Input, { value:newItem.barcode, onChange:e=>setNI("barcode",e.target.value), placeholder:"optional" }))
-        ),
-        E(Btn, { onClick:async()=>{
-          if (!newItem.name.trim()) { alert("Name required."); return; }
-          const item = { id:`manual-${Date.now()}`, ...newItem, price:parseFloat(newItem.price)||0, cost:parseFloat(newItem.cost)||0, stock:parseInt(newItem.stock)||0, variable_price:!newItem.price };
-          await saveProducts([item,...products]);
-          setNewItemS({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
-          setShowAddForm(false);
-        } }, "Save Item")
-      ),
-      E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
-        E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto" } },
-          cats.map(c=>E("option",{key:c,value:c},c==="all"?"All Categories":c))
-        ),
-        E(Input, { placeholder:"🔍 Search name, barcode, SKU...", value:catSearch, onChange:e=>setCatSearch(e.target.value) })
-      ),
-      Object.keys(grouped).length===0
-        ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No items found.")
-        : Object.entries(grouped).map(([cat, items]) => E("div", { key:cat, style:{ marginBottom:24 } },
-            E(ST, null, cat, ` (${items.length})`),
-            E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
-              items.map((item,i) => E(Card, { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 16px" } },
-                E("div", null,
-                  E("div", { style:{ fontWeight:600, fontSize:13 } }, item.name),
-                  E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `Stock: ${item.stock||0}`, item.barcode?` · ${item.barcode}`:"", item.variable_price?" · Variable price":"")
-                ),
-                E("div", { style:{ display:"flex", alignItems:"center", gap:10 } },
-                  E("div", { style:{ fontWeight:700, color:T.blue } }, item.variable_price?"Variable":fmtMoney(item.price||0)),
-                  E("button", { onClick:async()=>{
-                    const newPrice = prompt("New price (JMD):", String(item.price||0));
-                    if (newPrice===null) return;
-                    const newStock = prompt("Stock count:", String(item.stock||0));
-                    if (newStock===null) return;
-                    await saveProducts(products.map(p=>p.id===item.id?{...p,price:parseFloat(newPrice)||0,stock:parseInt(newStock)||0}:p));
-                  }, style:{ background:T.blueLt, color:T.blue, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Edit"),
-                  E("button", { onClick:async()=>{ if(!confirm(`Remove "${item.name}"?`)) return; await saveProducts(products.filter(p=>p.id!==item.id)); }, style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "✕")
-                )
-              ))
-            )
-          ))
-    );
-  }
-
-  // ── RECEIVE STOCK SUB-TAB ────────────────────────────────────────────────
+  // ── RECEIVE STOCK SUB-TAB  // ── RECEIVE STOCK SUB-TAB ────────────────────────────────────────────────
   // Step 1: Select invoice type before scanning
   if (subTab === "receive" && !invoiceType) return E("div", null,
     tabBar,
