@@ -1406,6 +1406,36 @@ function TicketDetail({
   const doCancel = async () => {
     if (cancelPin !== OWNER_PIN) { setCancelErr("Incorrect PIN."); return; }
     if (!cancelReason.trim()) { setCancelErr("Please enter a reason."); return; }
+
+    // Check for linked receipts (deposits paid against this ticket)
+    const allSales = await loadArr("tpp-sales");
+    const linkedReceipts = allSales.filter(s => s.items?.some(i=>i.ticketId===ticket.id) && !s.voided);
+    if (linkedReceipts.length > 0) {
+      const totalPaid = linkedReceipts.reduce((sum,s)=>sum+(s.total||0),0);
+      const action = confirm(
+        `⚠️ This ticket has ${linkedReceipts.length} linked receipt(s) totalling ${fmtMoney(totalPaid)}.\n\n` +
+        `Receipt(s): ${linkedReceipts.map(s=>s.id).join(", ")}\n\n` +
+        `Click OK to void all linked receipts and cancel the ticket.\n` +
+        `Click Cancel to cancel the ticket only (you can handle receipts manually).`
+      );
+      if (action) {
+        // Void all linked receipts
+        const voidedSales = allSales.map(s =>
+          linkedReceipts.find(lr=>lr.id===s.id)
+            ? { ...s, voided:true, voidReason:`Ticket ${ticket.id} cancelled — ${cancelReason.trim()}`, voidedAt:new Date().toISOString() }
+            : s
+        );
+        await save("tpp-sales", voidedSales);
+        // Create to-do for bookkeeping
+        const todos = await loadArr("tpp-todos");
+        await save("tpp-todos", [{ id:Date.now().toString(), text:`Ticket ${ticket.id} cancelled — ${linkedReceipts.length} receipt(s) voided (${fmtMoney(totalPaid)}). Review bookkeeping and issue refund if applicable. Reason: ${cancelReason.trim()}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" }, ...todos]);
+      } else {
+        // Create to-do to handle receipts manually
+        const todos = await loadArr("tpp-todos");
+        await save("tpp-todos", [{ id:Date.now().toString(), text:`Ticket ${ticket.id} cancelled but ${linkedReceipts.length} linked receipt(s) NOT voided — handle manually: ${linkedReceipts.map(s=>s.id).join(", ")} (${fmtMoney(totalPaid)} paid). Reason: ${cancelReason.trim()}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" }, ...todos]);
+      }
+    }
+
     const next = allTickets.map(t => t.id === ticket.id ? {
       ...t, status: "cancelled", cancelReason: cancelReason.trim(),
       cancelledAt: new Date().toISOString(),
@@ -6520,10 +6550,7 @@ Thank you for choosing The Phone Plug!
 Shop 5D, Hagley Park Plaza, Half Way Tree, Kingston
 📞 876-490-5515`;
 
-const WARRANTY_FOOTER_REPAIR = `REPAIR WARRANTY: To be confirmed.
-• The Phone Plug is not responsible for data loss during repairs. Back up your device before submission.
-• Devices uncollected after 3 days of notification may incur storage fees.
-Thank you for choosing The Phone Plug!`;
+const WARRANTY_FOOTER_REPAIR = `REPAIR WARRANTY: Parts and labour are warranted for 7 days from the date of collection. Warranty covers the specific fault repaired only and does not extend to new or unrelated issues. Warranty is void if the device shows signs of physical damage, liquid damage, or unauthorised repair after collection. The Phone Plug is not responsible for data loss — please back up your device before submission. Devices uncollected after 3 days of notification may incur a storage fee.`;
 
 const SALE_ID_PREFIX = "RCP";
 const genSaleId = (existing=[]) => {
@@ -6539,19 +6566,19 @@ const sendReceiptEmail = async (sale) => {
     to_email: sale.customerEmail,
     customer_name: sale.customerName || "Valued Customer",
     receipt_id: sale.id,
-    date: fmtDate(sale.createdAt),
+    date: sale.createdAt ? `${fmtDate(sale.createdAt)} ${new Date(sale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}` : "",
     items: itemLines,
     subtotal: fmtMoney(sale.subtotal),
     discount: sale.discount ? fmtMoney(sale.discount) : "—",
     total: fmtMoney(sale.total),
     cash: sale.cash ? fmtMoney(sale.cash) : "—",
-    card: sale.card ? fmtMoney(sale.card) : "—",
-    transfer: sale.transfer ? fmtMoney(sale.transfer) : "—",
-    change: sale.change ? fmtMoney(sale.change) : "—",
-    warranty: WARRANTY_FOOTER,
-    store_name: "The Phone Plug",
-    store_address: ADDRESS,
-    store_phone: PHONE_1,
+    debit_card: sale.debitCard ? fmtMoney(sale.debitCard) : "—",
+    credit_card: sale.creditCard ? fmtMoney(sale.creditCard) : "—",
+    ncb_transfer: sale.ncbTransfer ? fmtMoney(sale.ncbTransfer) : "—",
+    scotia_transfer: sale.scotiaTransfer ? fmtMoney(sale.scotiaTransfer) : "—",
+    other_payment: sale.otherPayment ? fmtMoney(sale.otherPayment) : "—",
+    change: sale.change && sale.change > 0 ? fmtMoney(sale.change) : "—",
+    warranty: sale.items?.some(i=>i.type==="deposit") ? WARRANTY_FOOTER_REPAIR : WARRANTY_FOOTER,
   };
   try {
     await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TPL_RECEIPT, params);
