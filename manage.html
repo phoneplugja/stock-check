@@ -721,6 +721,51 @@ function StepBar({
   }))));
 }
 
+// ── Device Make / Model Data ──────────────────────────────────────────────────
+const DEVICE_MAKES = ["Samsung","Apple","Huawei","Xiaomi","OnePlus","Motorola","LG","Sony","Nokia","Tecno","Infinix","Itel","HOTWAV","Other"];
+
+const DEVICE_MODELS = {
+  Samsung: ["Galaxy S24 Ultra","Galaxy S24+","Galaxy S24","Galaxy S23 Ultra","Galaxy S23+","Galaxy S23","Galaxy S22 Ultra","Galaxy S22+","Galaxy S22","Galaxy S21 Ultra","Galaxy S21+","Galaxy S21","Galaxy S20 Ultra","Galaxy S20+","Galaxy S20","Galaxy S10+","Galaxy S10","Galaxy S9+","Galaxy S9","Galaxy A55","Galaxy A54","Galaxy A35","Galaxy A34","Galaxy A25","Galaxy A24","Galaxy A15","Galaxy A14","Galaxy A05s","Galaxy A04","Galaxy Note 20 Ultra","Galaxy Note 20","Galaxy Note 10+","Galaxy Note 10","Galaxy Z Fold 5","Galaxy Z Fold 4","Galaxy Z Flip 5","Galaxy Z Flip 4","Other"],
+  Apple: ["iPhone 15 Pro Max","iPhone 15 Pro","iPhone 15 Plus","iPhone 15","iPhone 14 Pro Max","iPhone 14 Pro","iPhone 14 Plus","iPhone 14","iPhone 13 Pro Max","iPhone 13 Pro","iPhone 13","iPhone 13 Mini","iPhone 12 Pro Max","iPhone 12 Pro","iPhone 12","iPhone 12 Mini","iPhone 11 Pro Max","iPhone 11 Pro","iPhone 11","iPhone XS Max","iPhone XS","iPhone XR","iPhone X","iPhone SE (3rd gen)","iPhone SE (2nd gen)","Other"],
+  Huawei: ["P60 Pro","P50 Pro","P40 Pro","P30 Pro","P30","Mate 50 Pro","Mate 40 Pro","Mate 30 Pro","Nova 11","Nova 10","Nova 9","Other"],
+  Xiaomi: ["14 Ultra","14 Pro","14","13 Pro","13","12 Pro","12","Redmi Note 13 Pro+","Redmi Note 13 Pro","Redmi Note 13","Redmi Note 12","Poco X6 Pro","Poco X5 Pro","Other"],
+  OnePlus: ["12","11","10 Pro","10T","9 Pro","9","Nord 3","Nord 2T","Nord CE 3","Other"],
+  Motorola: ["Edge 40 Pro","Edge 40","Moto G84","Moto G54","Moto G34","Moto G14","Other"],
+  LG: ["V60","V50","G8","G7","Other"],
+  Sony: ["Xperia 1 V","Xperia 5 V","Xperia 10 V","Other"],
+  Nokia: ["G42","G22","G21","C32","C22","Other"],
+  Tecno: ["Phantom X2 Pro","Phantom X2","Spark 20 Pro+","Spark 20","Camon 20 Pro","Camon 20","Other"],
+  Infinix: ["Note 40 Pro","Note 40","Hot 40 Pro","Hot 40","Smart 8","Other"],
+  Itel: ["A70","A60s","P55","S23","Other"],
+  HOTWAV: ["Note 12","Cyber 13 Pro","T8","Other"],
+  Other: ["Other"]
+};
+
+function DevicePicker({ make, model, onMakeChange, onModelChange }) {
+  const E = React.createElement;
+  const models = DEVICE_MODELS[make] || ["Other"];
+  return E("div", { style:{ display:"flex", gap:10 } },
+    E("div", { style:{ flex:1 } },
+      E(Field, { label:"Make / Brand", required:true },
+        E(Sel, { value:make, onChange:e=>{ onMakeChange(e.target.value); onModelChange(""); } },
+          E("option", { value:"" }, "— Select Make —"),
+          DEVICE_MAKES.map(m=>E("option",{key:m,value:m},m))
+        )
+      )
+    ),
+    E("div", { style:{ flex:1 } },
+      E(Field, { label:"Model", required:true },
+        make === "Other"
+          ? E(Input, { placeholder:"Type model name", value:model, onChange:e=>onModelChange(e.target.value) })
+          : E(Sel, { value:model, onChange:e=>onModelChange(e.target.value), disabled:!make },
+              E("option", { value:"" }, make?"— Select Model —":"Select make first"),
+              models.map(m=>E("option",{key:m,value:m},m))
+            )
+      )
+    )
+  );
+}
+
 // ── New Ticket Form ───────────────────────────────────────────────────────────
 function NewTicketForm({
   onCreated,
@@ -862,25 +907,12 @@ function NewTicketForm({
     onChange: e => set("deviceType", e.target.value)
   }, DEVICE_TYPES.map(d => /*#__PURE__*/React.createElement("option", {
     key: d
-  }, d)))), /*#__PURE__*/React.createElement(Field, {
-    label: "Brand",
-    required: true,
-    error: err.deviceBrand
-  }, /*#__PURE__*/React.createElement(Input, {
-    error: !!err.deviceBrand,
-    placeholder: "Apple, Samsung...",
-    value: form.deviceBrand,
-    onChange: e => set("deviceBrand", e.target.value)
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Model",
-    required: true,
-    error: err.deviceModel
-  }, /*#__PURE__*/React.createElement(Input, {
-    error: !!err.deviceModel,
-    placeholder: "iPhone 15 Pro...",
-    value: form.deviceModel,
-    onChange: e => set("deviceModel", e.target.value)
-  }))), /*#__PURE__*/React.createElement("div", {
+  }, d)))), /*#__PURE__*/React.createElement(DevicePicker, {
+    make: form.deviceBrand,
+    model: form.deviceModel,
+    onMakeChange: v => set("deviceBrand", v),
+    onModelChange: v => set("deviceModel", v)
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr 1fr",
@@ -2154,14 +2186,9 @@ function RepairManager() {
     (async () => {
       const s = await loadArr("tpp-tickets-v1", false);
       setTickets(s);
-      // Load online bookings from Firestore
-      const allKeys = await loadArr("tpp-repairs-bookings-index");
-      const bkList = [];
-      for (const key of (allKeys || [])) {
-        const bk = await load(key);
-        if (bk) bkList.push(bk);
-      }
-      setBookings(bkList.filter(b => b.status === "scheduled"));
+      // Load online bookings from Firestore — same key as book-repair.html
+      const bkList = await loadArr("tpp-bookings");
+      setBookings((bkList||[]).filter(b => b.status === "scheduled"));
     })();
   }, []);
 
@@ -2199,7 +2226,10 @@ function RepairManager() {
     };
     const next = [prefilledTicket, ...tickets];
     await saveTickets(next);
-    // Mark booking as converted
+    // Mark booking as converted in Firestore
+    const allBookings = await loadArr("tpp-bookings");
+    const updatedAll = allBookings.map(b => b.bookingRef === booking.bookingRef ? {...b, status:"converted", convertedAt:new Date().toISOString()} : b);
+    await save("tpp-bookings", updatedAll);
     const updatedBookings = bookings.filter(b => b.bookingRef !== booking.bookingRef);
     setBookings(updatedBookings);
     setSelected(prefilledTicket);
