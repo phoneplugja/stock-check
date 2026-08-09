@@ -143,6 +143,9 @@ const PENDING_IDS = ["received", "diagnosing"];
 const PROGRESS_IDS = ["awaiting_parts", "in_repair"];
 const CONDITIONS = ["Screen cracked", "LCD damaged", "Water damage", "Bent / physical damage", "Missing parts / screws", "Back glass broken", "Camera damaged", "Charging port damaged", "Battery swollen", "Previous repair attempt", "Speaker not working", "Mic not working"];
 const DEVICE_TYPES = ["Smartphone", "Tablet", "Laptop", "Smartwatch", "Accessory", "Other"];
+const COMMON_ISSUES = ["Screen Damage","Battery Issue","Charging Port","Camera Fault","Speaker / Mic","Water Damage","Software / Unlock","Back Glass","Button Fault","Overheating","No Power","Other"];
+const DEVICE_COLOURS = ["Black","White","Blue","Gold","Silver","Purple","Green","Red","Pink","Yellow","Graphite","Titanium","Natural","Other"];
+const DEVICE_STORAGE = ["16GB","32GB","64GB","128GB","256GB","512GB","1TB","N/A"];
 const TERMS = `1. DATA RESPONSIBILITY
 The Phone Plug is not responsible for any loss of data during repair. Back up all data prior to submission.
 
@@ -721,6 +724,18 @@ function StepBar({
   }))));
 }
 
+// ── Assigned Tech Picker ──────────────────────────────────────────────────────
+function AssignedTechPicker({ value, onChange }) {
+  const E = React.createElement;
+  const [staff, setStaff] = useState([]);
+  useEffect(() => { load("tpp-staff").then(s => setStaff(s||[])); }, []);
+  return E(Sel, { value: value||"", onChange: e => onChange(e.target.value) },
+    E("option", { value: "" }, "— Unassigned —"),
+    E("option", { value: "Owner" }, "Owner"),
+    ...staff.map(s => E("option", { key: s.name, value: s.name }, s.name))
+  );
+}
+
 // ── Device Make / Model Data ──────────────────────────────────────────────────
 const DEVICE_MAKES = ["Samsung","Apple","Huawei","Xiaomi","OnePlus","Motorola","LG","Sony","Nokia","Tecno","Infinix","Itel","HOTWAV","Other"];
 
@@ -786,7 +801,11 @@ function NewTicketForm({
     techNotes: "",
     estimatedCost: "",
     estimatedCompletion: "",
-    termsAgreed: false
+    termsAgreed: false,
+    deviceColor: "",
+    deviceStorage: "",
+    assignedTo: "",
+    selectedIssues: []
   });
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(emptyForm());
@@ -810,32 +829,24 @@ function NewTicketForm({
   };
   const step2Valid = () => {
     const e = {};
-    if (!form.faultDescription.trim()) e.faultDescription = "Describe the fault.";
+    if (!form.faultDescription.trim() && !(form.selectedIssues||[]).length) e.faultDescription = "Select at least one issue or describe the fault.";
     setErr(e);
     return !Object.keys(e).length;
   };
   const submit = () => {
-    if (!form.termsAgreed) {
-      alert("Customer must agree to Terms & Conditions.");
-      return;
-    }
-    if (!sig) {
-      alert("Please capture the customer's signature.");
-      return;
-    }
+    if (!form.termsAgreed) { alert("Customer must agree to Terms & Conditions."); return; }
+    if (!sig) { alert("Please capture the customer's signature."); return; }
+    const issueText = [...(form.selectedIssues||[]), ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : [])].join(" · ");
     const ticket = {
       id: genId(existingIds),
       ...form,
+      faultDescription: issueText,
       estimatedCost: parseFloat(form.estimatedCost) || "",
       signature: sig,
       status: "received",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      history: [{
-        status: "received",
-        ts: new Date().toISOString(),
-        note: "Device received at store."
-      }]
+      history: [{ status: "received", ts: new Date().toISOString(), note: "Device received at store." }]
     };
     setForm(emptyForm());
     setStep(1);
@@ -932,6 +943,16 @@ function NewTicketForm({
     value: form.deviceColor,
     onChange: e => set("deviceColor", e.target.value)
   })), /*#__PURE__*/React.createElement(Field, {
+    label: "Colour"
+  }, /*#__PURE__*/React.createElement(Sel, {
+    value: form.deviceColor,
+    onChange: e => set("deviceColor", e.target.value)
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "— Select Colour —"), DEVICE_COLOURS.map(c => /*#__PURE__*/React.createElement("option", { key: c }, c)))), /*#__PURE__*/React.createElement(Field, {
+    label: "Storage"
+  }, /*#__PURE__*/React.createElement(Sel, {
+    value: form.deviceStorage,
+    onChange: e => set("deviceStorage", e.target.value)
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "— Select Storage —"), DEVICE_STORAGE.map(s => /*#__PURE__*/React.createElement("option", { key: s }, s)))), /*#__PURE__*/React.createElement(Field, {
     label: "Device PIN",
     hint: "Optional, masked"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1014,34 +1035,26 @@ function NewTicketForm({
       width: 15,
       height: 15
     }
-  }), c)))), /*#__PURE__*/React.createElement(Card, {
-    style: {
-      marginBottom: 14
-    }
-  }, /*#__PURE__*/React.createElement(ST, null, "Repair Details"), /*#__PURE__*/React.createElement(Field, {
-    label: "Fault Description",
-    required: true,
-    error: err.faultDescription
-  }, /*#__PURE__*/React.createElement(Textarea, {
-    error: !!err.faultDescription,
-    placeholder: "Describe the customer's reported issue...",
-    value: form.faultDescription,
-    onChange: e => set("faultDescription", e.target.value)
-  })), /*#__PURE__*/React.createElement(R2, null, /*#__PURE__*/React.createElement(Field, {
-    label: "Estimated Cost (JMD)"
-  }, /*#__PURE__*/React.createElement(Input, {
-    type: "number",
-    min: "0",
-    placeholder: "e.g. 12500",
-    value: form.estimatedCost,
-    onChange: e => set("estimatedCost", e.target.value)
-  })), /*#__PURE__*/React.createElement(Field, {
-    label: "Estimated Completion"
-  }, /*#__PURE__*/React.createElement(Input, {
-    type: "date",
-    value: form.estimatedCompletion,
-    onChange: e => set("estimatedCompletion", e.target.value)
-  })))), /*#__PURE__*/React.createElement(Card, {
+  }), c)))), /*#__PURE__*/React.createElement(Card, { style: { marginBottom: 14 } },
+  /*#__PURE__*/React.createElement(ST, null, "Repair Details"),
+  /*#__PURE__*/React.createElement("div", { style: { marginBottom: 12 } },
+    /*#__PURE__*/React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: T.muted, display: "block", marginBottom: 6 } }, "Issue(s) Reported *"),
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
+      COMMON_ISSUES.map(issue => /*#__PURE__*/React.createElement("button", {
+        key: issue, type: "button",
+        onClick: () => set("selectedIssues", (form.selectedIssues||[]).includes(issue) ? (form.selectedIssues||[]).filter(i=>i!==issue) : [...(form.selectedIssues||[]), issue]),
+        style: { padding: "6px 12px", borderRadius: 99, border: "1.5px solid " + ((form.selectedIssues||[]).includes(issue) ? T.blue : T.border), background: (form.selectedIssues||[]).includes(issue) ? T.blueLt : "#F9FAFB", color: (form.selectedIssues||[]).includes(issue) ? T.blue : T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }
+      }, issue))
+    ),
+    /*#__PURE__*/React.createElement(Textarea, { placeholder: "Additional fault details...", value: form.faultDescription, onChange: e => set("faultDescription", e.target.value) })
+  ),
+  /*#__PURE__*/React.createElement(R2, null,
+    /*#__PURE__*/React.createElement(Field, { label: "Estimated Cost (JMD)" }, /*#__PURE__*/React.createElement(Input, { type: "number", min: "0", placeholder: "e.g. 12500", value: form.estimatedCost, onChange: e => set("estimatedCost", e.target.value) })),
+    /*#__PURE__*/React.createElement(Field, { label: "Estimated Completion" }, /*#__PURE__*/React.createElement(Input, { type: "date", value: form.estimatedCompletion, onChange: e => set("estimatedCompletion", e.target.value) }))
+  ),
+  /*#__PURE__*/React.createElement(Field, { label: "Assigned Technician", style: { marginTop: 12 } },
+    /*#__PURE__*/React.createElement(AssignedTechPicker, { value: form.assignedTo, onChange: v => set("assignedTo", v) })
+  )), /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 20,
       border: "1.5px solid #FDE68A",
@@ -2178,6 +2191,7 @@ function TicketDetail({
 function RepairManager() {
   const [tickets, setTickets] = useState([]);
   const [bookings, setBookings] = useState([]);
+  const [editingBooking, setEditingBooking] = useState(null);
   const [view, setView] = useState("list");
   const [selected, setSelected] = useState(null);
   const [activeTab, setActiveTab] = useState("tickets"); // "tickets" | "bookings"
@@ -2288,8 +2302,16 @@ function RepairManager() {
             bk.preferredDate && React.createElement("div", { style: { fontSize: 12, color: T.muted, marginBottom: 10 } },
               `📅 Preferred: ${bk.preferredDate}${bk.preferredTime ? ' · ' + bk.preferredTime : ''}`
             ),
-            React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+            React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
               React.createElement(Btn, { variant: "primary", style: { fontSize: 12, padding: "8px 14px" }, onClick: () => convertBooking(bk) }, "→ Create Repair Ticket"),
+              React.createElement(Btn, { variant: "ghost", style: { fontSize: 12, padding: "8px 14px" }, onClick: () => setEditingBooking({...bk}) }, "✏️ Edit"),
+              React.createElement(Btn, { variant: "danger", style: { fontSize: 12, padding: "8px 14px" }, onClick: async () => {
+                const reason = prompt("Reason for voiding this booking?");
+                if (!reason) return;
+                const all = await loadArr("tpp-bookings");
+                await save("tpp-bookings", all.map(b => b.bookingRef === bk.bookingRef ? { ...b, status: "voided", voidReason: reason, voidedAt: new Date().toISOString() } : b));
+                setBookings(prev => prev.filter(b => b.bookingRef !== bk.bookingRef));
+              } }, "🚫 Void"),
               React.createElement("div", { style: { fontSize: 11, color: T.muted } }, bk.bookingRef ? `Ref: ${bk.bookingRef}` : "")
             )
           ))
@@ -2297,6 +2319,40 @@ function RepairManager() {
   );
 
   return React.createElement("div", null,
+    editingBooking && React.createElement("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+      React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:560, width:"100%", maxHeight:"85vh", overflowY:"auto" } },
+        React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+          React.createElement("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "✏️ Edit Booking"),
+          React.createElement("button", { onClick:()=>setEditingBooking(null), style:{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:T.muted } }, "✕")
+        ),
+        React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+          React.createElement(Field, { label:"Customer Name" }, React.createElement(Input, { value:editingBooking.customerName||"", onChange:e=>setEditingBooking(b=>({...b,customerName:e.target.value})) })),
+          React.createElement(Field, { label:"Phone" }, React.createElement(Input, { value:editingBooking.customerPhone||"", onChange:e=>setEditingBooking(b=>({...b,customerPhone:e.target.value})) })),
+          React.createElement(Field, { label:"Email" }, React.createElement(Input, { type:"email", value:editingBooking.customerEmail||"", onChange:e=>setEditingBooking(b=>({...b,customerEmail:e.target.value})) })),
+          React.createElement(Field, { label:"Device Type" }, React.createElement(Sel, { value:editingBooking.deviceType||"Smartphone", onChange:e=>setEditingBooking(b=>({...b,deviceType:e.target.value})) }, DEVICE_TYPES.map(d=>React.createElement("option",{key:d},d))))
+        ),
+        React.createElement(DevicePicker, { make:editingBooking.deviceBrand||"", model:editingBooking.deviceModel||"", onMakeChange:v=>setEditingBooking(b=>({...b,deviceBrand:v,deviceModel:""})), onModelChange:v=>setEditingBooking(b=>({...b,deviceModel:v})) }),
+        React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginTop:12, marginBottom:12 } },
+          React.createElement(Field, { label:"Colour" }, React.createElement(Sel, { value:editingBooking.deviceColor||"", onChange:e=>setEditingBooking(b=>({...b,deviceColor:e.target.value})) }, React.createElement("option",{value:""},"— Select —"), DEVICE_COLOURS.map(c=>React.createElement("option",{key:c},c)))),
+          React.createElement(Field, { label:"Storage" }, React.createElement(Sel, { value:editingBooking.deviceStorage||"", onChange:e=>setEditingBooking(b=>({...b,deviceStorage:e.target.value})) }, React.createElement("option",{value:""},"— Select —"), DEVICE_STORAGE.map(s=>React.createElement("option",{key:s},s)))),
+          React.createElement(Field, { label:"Preferred Date" }, React.createElement(Input, { type:"date", value:editingBooking.preferredDate||"", onChange:e=>setEditingBooking(b=>({...b,preferredDate:e.target.value})) })),
+          React.createElement(Field, { label:"Preferred Time" }, React.createElement(Sel, { value:editingBooking.preferredTime||"", onChange:e=>setEditingBooking(b=>({...b,preferredTime:e.target.value})) }, React.createElement("option",{value:""},"Any time"), ["Morning (9am–12pm)","Afternoon (12pm–3pm)","Late afternoon (3pm–6pm)"].map(t=>React.createElement("option",{key:t},t))))
+        ),
+        React.createElement(Field, { label:"Issue Description" }, React.createElement("textarea", { value:editingBooking.issueDescription||"", onChange:e=>setEditingBooking(b=>({...b,issueDescription:e.target.value})), style:{ ...iS, minHeight:80, resize:"vertical" } })),
+        React.createElement(Field, { label:"Notes", style:{ marginTop:10 } }, React.createElement(Input, { value:editingBooking.notes||"", onChange:e=>setEditingBooking(b=>({...b,notes:e.target.value})) })),
+        React.createElement("div", { style:{ display:"flex", gap:8, marginTop:16 } },
+          React.createElement(Btn, { variant:"ghost", onClick:()=>setEditingBooking(null) }, "Cancel"),
+          React.createElement(Btn, { onClick:async()=>{
+            const all = await loadArr("tpp-bookings");
+            const updated = all.map(b => b.bookingRef===editingBooking.bookingRef ? {...editingBooking} : b);
+            await save("tpp-bookings", updated);
+            setBookings(prev => prev.map(b => b.bookingRef===editingBooking.bookingRef ? {...editingBooking} : b));
+            setEditingBooking(null);
+            alert("✅ Booking updated.");
+          } }, "Save Changes")
+        )
+      )
+    ),
     view === "list" && activeTab === "bookings" && bookingsPanel,
     view === "list" && activeTab === "tickets" && React.createElement(React.Fragment, null,
       tabBar,
@@ -5707,6 +5763,9 @@ function OwnerShell({
     id: "todo",
     label: "✅ To Do"
   }, {
+    id: "purchases",
+    label: "💸 Purchases"
+  }, {
     id: "payroll",
     label: "⏱️ Payroll"
   }, {
@@ -5892,7 +5951,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -7623,6 +7682,108 @@ function PayrollManager() {
               ))
             )
           )
+        )
+  );
+}
+
+// ── Purchases Tab ─────────────────────────────────────────────────────────────
+const PURCHASE_TYPE_CATS = {
+  phones: ["Like New Samsung","Like New IPhones","New in box","HOTWAV","Tablets","Gadgets"],
+  accessories: ["Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other","Accessories- Samsung","Accessories- Apple","Tablet Cases"],
+  parts: ["Parts & Components"],
+  gadgets: ["Gadgets"]
+};
+
+function PurchasesTab() {
+  const E = React.createElement;
+  const [history, setHistory] = useState([]);
+  const [filter, setFilter] = useState("all"); // all|phones|accessories|parts|gadgets
+  const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
+
+  useEffect(() => { loadArr("tpp-stock-receives").then(setHistory); }, []);
+
+  const getType = (entry) => {
+    const cat = (entry.category||"").toLowerCase();
+    if (cat.includes("part") || cat.includes("screen") || cat.includes("battery") || cat.includes("port")) return "parts";
+    if (PURCHASE_TYPE_CATS.phones.some(c=>c.toLowerCase()===cat)) return "phones";
+    if (PURCHASE_TYPE_CATS.accessories.some(c=>c.toLowerCase()===cat) || cat.includes("case") || cat.includes("accessory") || cat.includes("accessories")) return "accessories";
+    if (cat.includes("gadget") || cat.includes("tablet")) return "gadgets";
+    return "accessories";
+  };
+
+  const filtered = history.filter(h => {
+    const matchType = filter === "all" || getType(h) === filter;
+    const matchMonth = !monthFilter || (h.receivedDate||h.createdAt||"").startsWith(monthFilter);
+    return matchType && matchMonth && !h.purchase_pending;
+  });
+
+  const pending = history.filter(h => h.purchase_pending);
+
+  const totalByType = { phones:0, accessories:0, parts:0, gadgets:0, other:0 };
+  filtered.forEach(h => {
+    const t = getType(h);
+    const amt = (parseFloat(h.costPerUnit)||0) * (parseInt(h.qty)||0);
+    totalByType[t] = (totalByType[t]||0) + amt;
+  });
+  const grandTotal = Object.values(totalByType).reduce((s,v)=>s+v,0);
+
+  const TYPE_LABELS = { phones:"📱 Phones", accessories:"📦 Accessories", parts:"🔧 Parts", gadgets:"📡 Gadgets" };
+
+  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("div", null,
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💸 Purchases"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Track stock spending by category.")
+      )
+    ),
+
+    // Summary cards
+    E(R2, null,
+      E(StatCard, { label:"Total spent", value:fmtMoney(grandTotal), color:T.blue }),
+      E(StatCard, { label:"PO pending details", value:String(pending.length), color:pending.length>0?T.amber:T.green })
+    ),
+    E("div", { style:{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:20, marginTop:12 } },
+      Object.entries(TYPE_LABELS).map(([type, label]) => E("div", { key:type, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", textAlign:"center" } },
+        E("div", { style:{ fontSize:11, color:T.muted } }, label),
+        E("div", { style:{ fontWeight:700, fontSize:14, color:T.blue, marginTop:4 } }, fmtMoney(totalByType[type]||0))
+      ))
+    ),
+
+    // Filters
+    E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
+      E("input", { type:"month", value:monthFilter, onChange:e=>setMonthFilter(e.target.value), style:{ ...iS, width:"auto" } }),
+      E(Sel, { value:filter, onChange:e=>setFilter(e.target.value), style:{ width:"auto" } },
+        E("option", { value:"all" }, "All Types"),
+        ...Object.entries(TYPE_LABELS).map(([type,label])=>E("option",{key:type,value:type},label))
+      )
+    ),
+
+    // PO pending warning
+    pending.length > 0 && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"12px 16px", marginBottom:16, fontSize:13, color:T.amber } },
+      `⚠️ ${pending.length} stock receive(s) missing purchase details — check your ✅ To Do list.`
+    ),
+
+    // Purchase entries
+    filtered.length === 0
+      ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No purchases found for this period.")
+      : E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+          filtered.map((h,i) => {
+            const lineTotal = (parseFloat(h.costPerUnit)||0) * (parseInt(h.qty)||0);
+            return E(Card, { key:i, style:{ borderLeft:`3px solid ${T.blue}` } },
+              E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+                E("div", null,
+                  E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
+                  E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
+                    `${h.qty} units @ ${fmtMoney(h.costPerUnit||0)} · ${h.receivedDate||fmtDate(h.createdAt)}`,
+                    h.supplier ? ` · ${h.supplier}` : "",
+                    h.poRef ? ` · PO: ${h.poRef}` : "",
+                    ` · ${TYPE_LABELS[getType(h)]||"Other"}`
+                  )
+                ),
+                E("div", { style:{ fontWeight:700, color:T.blue, fontSize:14 } }, fmtMoney(lineTotal))
+              )
+            );
+          })
         )
   );
 }
