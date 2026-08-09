@@ -57,7 +57,7 @@ const EMAILJS_SERVICE_ID  = "service_3znf9oq";       // from EmailJS dashboard
 const EMAILJS_TPL_CONFIRM = "template_0ytxpee";   // received / diagnosing
 const EMAILJS_TPL_UPDATE  = "template_knd80ms";        // awaiting_parts / in_repair
 const EMAILJS_TPL_READY   = "template_ag9mw4k";           // ready for pickup
-const EMAILJS_TPL_RECEIPT = "template_receipt";            // POS sale receipt — create in EmailJS dashboard
+const EMAILJS_TPL_RECEIPT = "template_viixtmu";           // POS sale receipt
 
 const sendTicketEmail = async (ticket, type = "auto") => {
   if (!ticket.customerEmail) {
@@ -3093,7 +3093,7 @@ function StaffManager() {
 
 // ── Invoice Importer (AI-powered) ─────────────────────────────────────────────
 function InvoiceImporter({ user, onDone, allPhones = [] }) {
-  const API_KEY_STORAGE = "tpp_anthropic_key";
+  const API_KEY_STORAGE = API_KEY_STORE;
   const [stage, setStage] = useState("upload");
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -5649,6 +5649,9 @@ function OwnerShell({
   }, {
     id: "payroll",
     label: "⏱️ Payroll"
+  }, {
+    id: "settings",
+    label: "⚙️ Settings"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5829,7 +5832,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -6932,6 +6935,11 @@ function POSSystem({ phones, onPhonesUpdate }) {
       const existing = cart.find(c=>c.id===item.id&&c.type==="deposit");
       if (existing) { alert("This ticket is already in the cart."); return; }
       const isCollection = item.depositsPaid > 0;
+      // Auto-populate customer info from ticket
+      if (item.raw.customerName) setCustomerName(item.raw.customerName);
+      if (item.raw.customerPhone) setCustomerPhone(item.raw.customerPhone);
+      if (item.raw.customerEmail) setCustomerEmail(item.raw.customerEmail);
+      setCustomerSuggestions([]);
       setCart(c=>[...c, {
         type:"deposit", id:item.id,
         name:`Repair${isCollection?" (Collection)":""} — ${item.raw.deviceBrand||""} ${item.raw.deviceModel||""} (${item.id})`,
@@ -7559,6 +7567,109 @@ function PayrollManager() {
             )
           )
         )
+  );
+}
+
+// ── Settings Tab ──────────────────────────────────────────────────────────────
+const API_KEY_STORE = "tpp_anthropic_key";
+
+function SettingsTab() {
+  const E = React.createElement;
+  const [apiKey, setApiKeyState] = useState(() => {
+    try { return localStorage.getItem(API_KEY_STORE) || ""; } catch { return ""; }
+  });
+  const [keyInput, setKeyInput] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const saveKey = () => {
+    if (!keyInput.trim().startsWith("sk-ant-")) {
+      alert("That doesn't look like a valid Anthropic API key. It should start with sk-ant-");
+      return;
+    }
+    try { localStorage.setItem(API_KEY_STORE, keyInput.trim()); } catch {}
+    setApiKeyState(keyInput.trim());
+    setKeyInput("");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const clearKey = () => {
+    if (!confirm("Remove the saved API key? AI scanning on the Phones tab will stop working until you add it back.")) return;
+    try { localStorage.removeItem(API_KEY_STORE); } catch {}
+    setApiKeyState("");
+  };
+
+  const masked = apiKey ? `sk-ant-...${apiKey.slice(-6)}` : "";
+
+  return E("div", { style:{ maxWidth:520, margin:"0 auto" } },
+    E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, marginBottom:4 } }, "⚙️ Settings"),
+    E("div", { style:{ fontSize:13, color:T.muted, marginBottom:28 } }, "Manage API keys and system configuration."),
+
+    // ── Anthropic API Key ──
+    E(Card, { style:{ marginBottom:20 } },
+      E(ST, null, "Anthropic API Key"),
+      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:16, lineHeight:1.7 } },
+        "Required for AI invoice scanning on the 📦 Products tab. ",
+        E("a", { href:"https://console.anthropic.com", target:"_blank", rel:"noopener noreferrer", style:{ color:T.blue } }, "Get your key at console.anthropic.com"),
+        " — it starts with ", E("code", { style:{ background:"#F3F4F6", padding:"1px 6px", borderRadius:4, fontSize:12 } }, "sk-ant-..."),
+        ". The key is stored only in this browser — never sent to any server except Anthropic."
+      ),
+      apiKey
+        ? E("div", null,
+            E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", background:T.greenLt, border:"1px solid #A7F3D0", borderRadius:10, padding:"12px 16px", marginBottom:12 } },
+              E("div", null,
+                E("div", { style:{ fontSize:13, fontWeight:700, color:T.green } }, "✅ API key saved"),
+                E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, showKey ? apiKey : masked,
+                  E("button", { onClick:()=>setShowKey(s=>!s), style:{ background:"none", border:"none", cursor:"pointer", color:T.blue, fontSize:11, marginLeft:8 } }, showKey?"Hide":"Show")
+                )
+              ),
+              E(Btn, { variant:"danger", style:{ fontSize:12, padding:"6px 12px" }, onClick:clearKey }, "Remove")
+            ),
+            E("div", { style:{ fontSize:12, color:T.muted } }, "To replace it, enter a new key below:"),
+            E("div", { style:{ display:"flex", gap:8, marginTop:8 } },
+              E(Input, { type:"password", placeholder:"sk-ant-...", value:keyInput, onChange:e=>setKeyInput(e.target.value), onKeyDown:e=>e.key==="Enter"&&saveKey() }),
+              E(Btn, { onClick:saveKey, disabled:!keyInput.trim() }, "Replace")
+            )
+          )
+        : E("div", null,
+            E("div", { style:{ background:T.amberLt, border:"1px solid #FDE68A", borderRadius:10, padding:"12px 16px", marginBottom:12, fontSize:13, color:T.amber, fontWeight:600 } },
+              "⚠️ No API key set — AI invoice scanning is disabled"
+            ),
+            E("div", { style:{ display:"flex", gap:8 } },
+              E(Input, { type:"password", placeholder:"Paste your sk-ant-... key here", value:keyInput, onChange:e=>setKeyInput(e.target.value), onKeyDown:e=>e.key==="Enter"&&saveKey() }),
+              E(Btn, { onClick:saveKey, disabled:!keyInput.trim() }, "Save Key")
+            ),
+            saved && E("div", { style:{ color:T.green, fontSize:13, fontWeight:600, marginTop:8 } }, "✅ Key saved successfully!")
+          )
+    ),
+
+    // ── EmailJS ──
+    E(Card, { style:{ marginBottom:20 } },
+      E(ST, null, "EmailJS — Receipt Emails"),
+      E("div", { style:{ fontSize:13, color:T.muted, lineHeight:1.7 } },
+        "Your EmailJS service is configured. Receipt emails send using:",
+        E("div", { style:{ background:"#F3F4F6", borderRadius:8, padding:"10px 14px", marginTop:10, fontFamily:"monospace", fontSize:12 } },
+          E("div", null, "Service ID: ", E("strong", null, "service_3znf9oq")),
+          E("div", null, "Receipt Template: ", E("strong", null, "template_viixtmu")),
+          E("div", null, "Public Key: ", E("strong", null, "BdjrEVD77D_bpBwT5"))
+        ),
+        E("div", { style:{ marginTop:12, fontSize:12 } },
+          "To test: complete a sale with a customer email entered, then tap 📧 Email Receipt on the confirmation screen."
+        )
+      )
+    ),
+
+    // ── Store Info ──
+    E(Card, null,
+      E(ST, null, "Store Information"),
+      E("div", { style:{ fontSize:13, color:T.muted, lineHeight:1.8 } },
+        E("div", null, "📍 ", ADDRESS),
+        E("div", null, "📞 ", PHONE_1, " · ", PHONE_2),
+        E("div", null, "📷 ", INSTAGRAM),
+        E("div", { style:{ marginTop:8, fontSize:12 } }, "To update store info, contact your developer.")
+      )
+    )
   );
 }
 
