@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0A0A0A">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Phone Plug">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/logo.png">
   <title>The Phone Plug — Business Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -5820,6 +5827,12 @@ function OwnerShell({
     id: "purchases",
     label: "💸 Purchases"
   }, {
+    id: "valuation",
+    label: "📊 Valuation"
+  }, {
+    id: "count",
+    label: "🔢 Stock Count"
+  }, {
     id: "payroll",
     label: "⏱️ Payroll"
   }, {
@@ -6005,7 +6018,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, null), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -7740,6 +7753,368 @@ function PayrollManager() {
   );
 }
 
+// ── Inventory Valuation ───────────────────────────────────────────────────────
+function InventoryValuation({ phones }) {
+  const E = React.createElement;
+  const [products, setProducts] = useState([]);
+  const [view, setView] = useState("cost"); // "cost" | "retail"
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const meta = await load("tpp-products-meta");
+        if (meta && meta.chunks) {
+          const all = [];
+          for (let i = 0; i < meta.chunks; i++) {
+            const chunk = await load(`tpp-products-chunk-${i}`);
+            if (Array.isArray(chunk)) all.push(...chunk);
+          }
+          setProducts(all);
+        } else {
+          setProducts(await loadArr("tpp-products"));
+        }
+      } catch { setProducts(await loadArr("tpp-products")); }
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return E("div", { style:{ textAlign:"center", padding:"60px 20px", color:T.muted } }, "Loading inventory...");
+
+  // Phone valuation — available phones only
+  const availablePhones = phones.filter(p => !p.voided && p.availability === "Available");
+  const phoneCostTotal = availablePhones.reduce((s,p) => s + (parseFloat(p.total_invoice)||0), 0);
+  const phoneRetailTotal = availablePhones.reduce((s,p) => s + (parseFloat(p.expected_sell)||0), 0);
+
+  // Catalog products — group by category
+  const catGroups = {};
+  products.filter(p => (p.stock||0) > 0).forEach(p => {
+    const cat = p.category || "Other";
+    if (!catGroups[cat]) catGroups[cat] = { items:[], costTotal:0, retailTotal:0 };
+    const cost = (parseFloat(p.cost)||0) * (p.stock||0);
+    const retail = (parseFloat(p.price)||0) * (p.stock||0);
+    catGroups[cat].items.push({ ...p, costValue: cost, retailValue: retail });
+    catGroups[cat].costTotal += cost;
+    catGroups[cat].retailTotal += retail;
+  });
+
+  const catalogCostTotal = Object.values(catGroups).reduce((s,g)=>s+g.costTotal,0);
+  const catalogRetailTotal = Object.values(catGroups).reduce((s,g)=>s+g.retailTotal,0);
+  const grandCost = phoneCostTotal + catalogCostTotal;
+  const grandRetail = phoneRetailTotal + catalogRetailTotal;
+  const showVal = view === "cost";
+
+  return E("div", { style:{ maxWidth:700, margin:"0 auto" } },
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("div", null,
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "📊 Inventory Valuation"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Current stock value based on cost and retail prices.")
+      ),
+      E("div", { style:{ display:"flex", gap:6 } },
+        E("button", { onClick:()=>setView("cost"), style:{ background:view==="cost"?T.blue:"#F3F4F6", color:view==="cost"?"#fff":T.muted, border:"none", borderRadius:7, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "Cost Value"),
+        E("button", { onClick:()=>setView("retail"), style:{ background:view==="retail"?T.blue:"#F3F4F6", color:view==="retail"?"#fff":T.muted, border:"none", borderRadius:7, padding:"7px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "Retail Value")
+      )
+    ),
+
+    // Grand total
+    E("div", { style:{ background:T.blue, borderRadius:14, padding:"20px 24px", marginBottom:20, color:"#fff" } },
+      E("div", { style:{ fontSize:13, opacity:0.8, marginBottom:4 } }, view==="cost"?"Total inventory at cost price":"Total inventory at retail price"),
+      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:32 } }, fmtMoney(showVal?grandCost:grandRetail)),
+      showVal && E("div", { style:{ fontSize:12, opacity:0.7, marginTop:4 } }, `Potential retail value: ${fmtMoney(grandRetail)} · Margin: ${fmtMoney(grandRetail-grandCost)}`)
+    ),
+
+    // Summary row
+    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:24 } },
+      E(Card, null,
+        E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, "📱 Phones (", availablePhones.length, " units)"),
+        E("div", { style:{ fontWeight:700, fontSize:18, color:T.blue } }, fmtMoney(showVal?phoneCostTotal:phoneRetailTotal)),
+        E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, showVal?`Retail: ${fmtMoney(phoneRetailTotal)}`:`Cost: ${fmtMoney(phoneCostTotal)}`)
+      ),
+      E(Card, null,
+        E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, "📦 Catalog (", products.filter(p=>(p.stock||0)>0).length, " SKUs)"),
+        E("div", { style:{ fontWeight:700, fontSize:18, color:T.blue } }, fmtMoney(showVal?catalogCostTotal:catalogRetailTotal)),
+        E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, showVal?`Retail: ${fmtMoney(catalogRetailTotal)}`:`Cost: ${fmtMoney(catalogCostTotal)}`)
+      )
+    ),
+
+    // Phones breakdown
+    availablePhones.length > 0 && E("div", { style:{ marginBottom:24 } },
+      E(ST, null, `📱 Phones (${availablePhones.length} in stock)`),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
+        availablePhones.map((p,i) => E("div", { key:i, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, `${p.make} ${p.model} ${p.storage||""} — ${p.color||""}`),
+            E("div", { style:{ fontSize:11, color:T.muted } }, p.imei ? `IMEI: ${p.imei}` : "No IMEI")
+          ),
+          E("div", { style:{ textAlign:"right" } },
+            E("div", { style:{ fontWeight:700, color:T.blue } }, fmtMoney(showVal?parseFloat(p.total_invoice)||0:parseFloat(p.expected_sell)||0)),
+            E("div", { style:{ fontSize:11, color:T.muted } }, showVal?"cost":"retail")
+          )
+        ))
+      )
+    ),
+
+    // Catalog breakdown by category
+    Object.entries(catGroups).sort((a,b)=>(b[1].costTotal-a[1].costTotal)).map(([cat, group]) =>
+      E("div", { key:cat, style:{ marginBottom:20 } },
+        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 } },
+          E(ST, { style:{ margin:0 } }, cat, ` (${group.items.length} SKUs)`),
+          E("div", { style:{ fontWeight:700, color:T.blue, fontSize:14 } }, fmtMoney(showVal?group.costTotal:group.retailTotal))
+        ),
+        E("div", { style:{ display:"flex", flexDirection:"column", gap:4 } },
+          group.items.map((item,i) => E("div", { key:i, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+            E("div", null,
+              E("div", { style:{ fontSize:13, fontWeight:500 } }, item.name),
+              E("div", { style:{ fontSize:11, color:T.muted } }, `${item.stock} units × ${fmtMoney(showVal?item.cost||0:item.price||0)}`)
+            ),
+            E("div", { style:{ fontWeight:700, color:T.blue } }, fmtMoney(showVal?item.costValue:item.retailValue))
+          ))
+        )
+      )
+    )
+  );
+}
+
+// ── Inventory Count ───────────────────────────────────────────────────────────
+function InventoryCount() {
+  const E = React.createElement;
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null); // null | "active" | "review"
+  const [counts, setCounts] = useState({}); // { productId: countedQty }
+  const [scanInput, setScanInput] = useState("");
+  const [lastScanned, setLastScanned] = useState(null);
+  const [scanMode, setScanMode] = useState(false);
+  const [catFilter, setCatFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const scanRef = React.useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const meta = await load("tpp-products-meta");
+        if (meta && meta.chunks) {
+          const all = [];
+          for (let i = 0; i < meta.chunks; i++) {
+            const chunk = await load(`tpp-products-chunk-${i}`);
+            if (Array.isArray(chunk)) all.push(...chunk);
+          }
+          setProducts(all);
+        } else {
+          setProducts(await loadArr("tpp-products"));
+        }
+      } catch { setProducts(await loadArr("tpp-products")); }
+      setHistory(await loadArr("tpp-count-history"));
+      setLoading(false);
+    })();
+  }, []);
+
+  // Focus scan input when scan mode active
+  useEffect(() => {
+    if (scanMode && scanRef.current) scanRef.current.focus();
+  }, [scanMode]);
+
+  const startCount = () => {
+    const initial = {};
+    products.forEach(p => { initial[p.id] = ""; });
+    setCounts(initial);
+    setSession("active");
+    setLastScanned(null);
+  };
+
+  const handleScan = (barcode) => {
+    const trimmed = barcode.trim();
+    if (!trimmed) return;
+    const product = products.find(p => p.barcode === trimmed || p.sku === trimmed);
+    if (product) {
+      setCounts(prev => ({ ...prev, [product.id]: (parseInt(prev[product.id])||0) + 1 }));
+      setLastScanned({ name: product.name, newCount: (parseInt(counts[product.id])||0) + 1 });
+      setTimeout(() => setLastScanned(null), 2000);
+    } else {
+      setLastScanned({ name: `Unknown barcode: ${trimmed}`, newCount: null, error: true });
+      setTimeout(() => setLastScanned(null), 2000);
+    }
+    setScanInput("");
+  };
+
+  const discrepancies = products.filter(p => counts[p.id] !== "" && parseInt(counts[p.id]) !== (p.stock||0));
+  const counted = products.filter(p => counts[p.id] !== "");
+
+  const commitCount = async () => {
+    setSaving(true);
+    try {
+      const meta = await load("tpp-products-meta");
+      let allProducts = [];
+      if (meta && meta.chunks) {
+        for (let i = 0; i < meta.chunks; i++) {
+          const chunk = await load(`tpp-products-chunk-${i}`);
+          if (Array.isArray(chunk)) allProducts.push(...chunk);
+        }
+      } else {
+        allProducts = await loadArr("tpp-products");
+      }
+
+      const adjustments = [];
+      const updated = allProducts.map(p => {
+        const counted_qty = counts[p.id];
+        if (counted_qty === "" || counted_qty === undefined) return p;
+        const newStock = parseInt(counted_qty)||0;
+        if (newStock !== (p.stock||0)) {
+          adjustments.push({ name:p.name, expected:p.stock||0, counted:newStock, diff:newStock-(p.stock||0) });
+        }
+        return { ...p, stock: newStock };
+      });
+
+      // Save updated products
+      if (meta && meta.chunks) {
+        const CHUNK = 100; const chunks = [];
+        for (let i = 0; i < updated.length; i += CHUNK) chunks.push(updated.slice(i, i+CHUNK));
+        await save("tpp-products-meta", { ...meta, total:updated.length });
+        for (let i = 0; i < chunks.length; i++) await save(`tpp-products-chunk-${i}`, chunks[i]);
+      } else {
+        await save("tpp-products", updated);
+      }
+      setProducts(updated);
+
+      // Save count history
+      const countRecord = { id:Date.now().toString(), date:todayStr(), createdAt:new Date().toISOString(), totalCounted:counted.length, adjustments };
+      const updatedHistory = [countRecord, ...history];
+      await save("tpp-count-history", updatedHistory);
+      setHistory(updatedHistory);
+
+      setSession(null); setCounts({}); setScanMode(false);
+      alert(`✅ Count complete. ${adjustments.length} adjustment(s) made.`);
+    } finally { setSaving(false); }
+  };
+
+  const cats = ["all", ...Array.from(new Set(products.map(p=>p.category).filter(Boolean))).sort()];
+  const filteredProducts = products.filter(p => {
+    const matchCat = catFilter === "all" || p.category === catFilter;
+    const matchQ = !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search);
+    return matchCat && matchQ;
+  });
+
+  if (loading) return E("div", { style:{ textAlign:"center", padding:"60px 20px", color:T.muted } }, "Loading...");
+
+  // ── No active session ──────────────────────────────────────────────────────
+  if (!session) return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("div", null,
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "🔢 Stock Count"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Count your physical stock and reconcile with the system.")
+      ),
+      E(Btn, { onClick:startCount }, "▶ Start New Count")
+    ),
+    history.length > 0 && E("div", null,
+      E(ST, null, "Previous Counts"),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+        history.slice(0,5).map((h,i) => E(Card, { key:i },
+          E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+            E("div", null,
+              E("div", { style:{ fontWeight:600, fontSize:13 } }, fmtDate(h.createdAt)),
+              E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, `${h.totalCounted} items counted · ${h.adjustments?.length||0} adjustments`)
+            ),
+            h.adjustments?.length > 0 && E("span", { style:{ background:T.amberLt, color:T.amber, borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 } }, `${h.adjustments.length} adj.`)
+          )
+        ))
+      )
+    )
+  );
+
+  // ── Active count session ───────────────────────────────────────────────────
+  return E("div", { style:{ maxWidth:700, margin:"0 auto" } },
+    // Header
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+      E("div", null,
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "🔢 Count in Progress"),
+        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, `${counted.length} of ${products.length} items counted · ${discrepancies.length} discrepancy(s)`)
+      ),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn, { variant:"ghost", onClick:()=>{ if(confirm("Abandon this count?")) { setSession(null); setCounts({}); } } }, "✕ Abandon"),
+        E(Btn, { variant:"green", disabled:counted.length===0||saving, onClick:commitCount }, saving?"Saving...":"✅ Commit Count")
+      )
+    ),
+
+    // Scan mode toggle + input
+    E("div", { style:{ background:scanMode?T.blueLt:T.card, border:`1px solid ${scanMode?T.blue:T.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 } },
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:scanMode?12:0 } },
+        E("div", null,
+          E("div", { style:{ fontWeight:700, fontSize:14 } }, "📷 Barcode Scanner Mode"),
+          E("div", { style:{ fontSize:12, color:T.muted } }, "Use camera or plug in USB/Bluetooth scanner — scans auto-increment count")
+        ),
+        E("button", { onClick:()=>setScanMode(s=>!s), style:{ background:scanMode?T.blue:"#F3F4F6", color:scanMode?"#fff":T.muted, border:"none", borderRadius:8, padding:"8px 16px", fontWeight:700, fontSize:13, cursor:"pointer", fontFamily:"inherit" } }, scanMode?"ON":"OFF")
+      ),
+      scanMode && E("div", null,
+        lastScanned && E("div", { style:{ background:lastScanned.error?T.redLt:T.greenLt, border:`1px solid ${lastScanned.error?"#FECACA":"#A7F3D0"}`, borderRadius:8, padding:"8px 14px", marginBottom:8, fontSize:13, fontWeight:600, color:lastScanned.error?T.red:T.green } },
+          lastScanned.error ? `❌ ${lastScanned.name}` : `✅ ${lastScanned.name} — Count: ${lastScanned.newCount}`
+        ),
+        E("div", { style:{ display:"flex", gap:8 } },
+          E("input", {
+            ref: scanRef,
+            placeholder: "Scan barcode or type and press Enter...",
+            value: scanInput,
+            onChange: e => setScanInput(e.target.value),
+            onKeyDown: e => { if (e.key === "Enter") { handleScan(scanInput); } },
+            style: { ...iS, flex:1, fontSize:15, fontWeight:700, letterSpacing:1 },
+            autoComplete: "off"
+          }),
+          E(Btn, { onClick:()=>handleScan(scanInput) }, "→")
+        ),
+        E("div", { style:{ fontSize:11, color:T.muted, marginTop:6 } }, "💡 USB/Bluetooth scanners work automatically — just scan and it increments the count.")
+      )
+    ),
+
+    // Discrepancy summary
+    discrepancies.length > 0 && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:13 } },
+      E("div", { style:{ fontWeight:700, color:T.amber, marginBottom:6 } }, `⚠️ ${discrepancies.length} discrepancy(s) found`),
+      discrepancies.slice(0,3).map((p,i) => E("div", { key:i, style:{ fontSize:12, color:"#92400E" } },
+        `${p.name}: expected ${p.stock||0}, counted ${counts[p.id]||0} (${parseInt(counts[p.id]||0)-(p.stock||0)>0?"+":""}${parseInt(counts[p.id]||0)-(p.stock||0)})`
+      )),
+      discrepancies.length > 3 && E("div", { style:{ fontSize:11, color:T.amber, marginTop:4 } }, `+ ${discrepancies.length-3} more...`)
+    ),
+
+    // Filter bar
+    E("div", { style:{ display:"flex", gap:8, marginBottom:12 } },
+      E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto" } },
+        cats.map(c=>E("option",{key:c,value:c},c==="all"?"All Categories":c))
+      ),
+      E(Input, { placeholder:"🔍 Search name or barcode...", value:search, onChange:e=>setSearch(e.target.value) })
+    ),
+
+    // Product list with count inputs
+    E("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
+      filteredProducts.map((p,i) => {
+        const counted_qty = counts[p.id];
+        const hasDiff = counted_qty !== "" && counted_qty !== undefined && parseInt(counted_qty) !== (p.stock||0);
+        const diff = counted_qty !== "" && counted_qty !== undefined ? parseInt(counted_qty||0) - (p.stock||0) : 0;
+        return E("div", { key:i, style:{ background:T.card, border:`1px solid ${hasDiff?"#FDE68A":T.border}`, borderRadius:10, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 } },
+          E("div", { style:{ flex:1, minWidth:0 } },
+            E("div", { style:{ fontSize:13, fontWeight:500, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" } }, p.name),
+            E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, p.category, p.barcode ? ` · ${p.barcode}` : "")
+          ),
+          E("div", { style:{ display:"flex", alignItems:"center", gap:8, flexShrink:0 } },
+            E("div", { style:{ fontSize:12, color:T.muted, textAlign:"right" } },
+              E("div", null, "Expected"),
+              E("div", { style:{ fontWeight:700, color:T.text } }, p.stock||0)
+            ),
+            E("input", {
+              type: "number",
+              min: "0",
+              placeholder: "Count",
+              value: counts[p.id] || "",
+              onChange: e => setCounts(prev => ({ ...prev, [p.id]: e.target.value })),
+              style: { ...iS, width:70, textAlign:"center", padding:"6px 8px", borderColor: hasDiff?"#FDE68A":T.border }
+            }),
+            hasDiff && E("div", { style:{ fontSize:12, fontWeight:700, color:diff>0?T.green:T.red, minWidth:36, textAlign:"center" } }, `${diff>0?"+":""}${diff}`)
+          )
+        );
+      })
+    )
+  );
+}
+
 // ── Purchases Tab ─────────────────────────────────────────────────────────────
 const PURCHASE_TYPE_CATS = {
   phones: ["Like New Samsung","Like New IPhones","New in box","HOTWAV","Tablets","Gadgets"],
@@ -9012,6 +9387,13 @@ function App() {
 }
 
     ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+
+  // Register PWA service worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    });
+  }
   </script>
 </body>
 </html>
