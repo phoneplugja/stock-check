@@ -264,10 +264,33 @@
                 </select>
               </Field>
               <Field label="Brand" required error={errs.deviceBrand}>
-                <input style={errs.deviceBrand?iSErr:iS} placeholder="Apple, Samsung…" value={form.deviceBrand} onChange={e=>set("deviceBrand",e.target.value)} />
+                <select style={errs.deviceBrand?{...iS,borderColor:"#DC2626"}:iS} value={form.deviceBrand} onChange={e=>{ set("deviceBrand",e.target.value); set("deviceModel",""); }}>
+                  <option value="">— Select Make —</option>
+                  {["Samsung","Apple","Huawei","Xiaomi","OnePlus","Motorola","LG","Sony","Nokia","Tecno","Infinix","Itel","HOTWAV","Other"].map(m=><option key={m}>{m}</option>)}
+                </select>
               </Field>
               <Field label="Model" required error={errs.deviceModel}>
-                <input style={errs.deviceModel?iSErr:iS} placeholder="iPhone 15, S24…" value={form.deviceModel} onChange={e=>set("deviceModel",e.target.value)} />
+                {form.deviceBrand === "Other" || !form.deviceBrand
+                  ? <input style={errs.deviceModel?{...iS,borderColor:"#DC2626"}:iS} placeholder={form.deviceBrand?"Type model name":"Select make first"} value={form.deviceModel} onChange={e=>set("deviceModel",e.target.value)} disabled={!form.deviceBrand} />
+                  : <select style={errs.deviceModel?{...iS,borderColor:"#DC2626"}:iS} value={form.deviceModel} onChange={e=>set("deviceModel",e.target.value)} disabled={!form.deviceBrand}>
+                      <option value="">— Select Model —</option>
+                      {({
+                        Samsung:["Galaxy S24 Ultra","Galaxy S24+","Galaxy S24","Galaxy S23 Ultra","Galaxy S23+","Galaxy S23","Galaxy S22 Ultra","Galaxy S22+","Galaxy S22","Galaxy S21 Ultra","Galaxy S21+","Galaxy S21","Galaxy S20 Ultra","Galaxy S20+","Galaxy S20","Galaxy A55","Galaxy A54","Galaxy A35","Galaxy A34","Galaxy A25","Galaxy A24","Galaxy A15","Galaxy A14","Galaxy A05s","Galaxy Note 20 Ultra","Galaxy Note 20","Galaxy Z Fold 5","Galaxy Z Flip 5","Other"],
+                        Apple:["iPhone 15 Pro Max","iPhone 15 Pro","iPhone 15 Plus","iPhone 15","iPhone 14 Pro Max","iPhone 14 Pro","iPhone 14 Plus","iPhone 14","iPhone 13 Pro Max","iPhone 13 Pro","iPhone 13","iPhone 13 Mini","iPhone 12 Pro Max","iPhone 12 Pro","iPhone 12","iPhone 12 Mini","iPhone 11 Pro Max","iPhone 11 Pro","iPhone 11","iPhone XS Max","iPhone XR","iPhone X","iPhone SE (3rd gen)","iPhone SE (2nd gen)","Other"],
+                        Huawei:["P60 Pro","P50 Pro","P40 Pro","P30 Pro","Mate 50 Pro","Mate 40 Pro","Nova 11","Nova 10","Other"],
+                        Xiaomi:["14 Ultra","14 Pro","14","13 Pro","Redmi Note 13 Pro+","Redmi Note 13","Poco X6 Pro","Other"],
+                        OnePlus:["12","11","10 Pro","Nord 3","Nord 2T","Other"],
+                        Motorola:["Edge 40 Pro","Moto G84","Moto G54","Moto G34","Other"],
+                        LG:["V60","V50","G8","Other"],
+                        Sony:["Xperia 1 V","Xperia 5 V","Other"],
+                        Nokia:["G42","G22","C32","Other"],
+                        Tecno:["Phantom X2 Pro","Spark 20 Pro+","Camon 20 Pro","Other"],
+                        Infinix:["Note 40 Pro","Hot 40 Pro","Smart 8","Other"],
+                        Itel:["A70","P55","S23","Other"],
+                        HOTWAV:["Note 12","Cyber 13 Pro","T8","Other"]
+                      }[form.deviceBrand]||["Other"]).map(m=><option key={m}>{m}</option>)}
+                    </select>
+                }
               </Field>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
