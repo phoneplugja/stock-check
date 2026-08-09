@@ -1435,6 +1435,16 @@ function TicketDetail({
   onUpdateStatus
 }) {
   const [statusMenu, setStatusMenu] = useState(false);
+  const [editModal, setEditModal] = useState(false);
+  const [editForm, setEditFormS] = useState({
+    customerName: ticket.customerName||"", customerPhone: ticket.customerPhone||"", customerEmail: ticket.customerEmail||"",
+    deviceBrand: ticket.deviceBrand||"", deviceModel: ticket.deviceModel||"", deviceColor: ticket.deviceColor||"",
+    deviceStorage: ticket.deviceStorage||"", deviceImei: ticket.deviceImei||"",
+    faultDescription: ticket.faultDescription||"", estimatedCost: ticket.estimatedCost||"",
+    estimatedCompletion: ticket.estimatedCompletion||"", finalCost: ticket.finalCost||"",
+    assignedTo: ticket.assignedTo||"", techNotes: ticket.techNotes||""
+  });
+  const setEF = (k,v) => setEditFormS(p=>({...p,[k]:v}));
   const [note, setNote] = useState("");
   const [editPricing, setEditPricing] = useState(false);
   const [estCost, setEstCost] = useState(ticket.estimatedCost || "");
@@ -1713,7 +1723,47 @@ function TicketDetail({
       color: blue ? T.blue : T.text
     }
   }, value || "—"));
-  return /*#__PURE__*/React.createElement("div", null, showPartsModal && /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null,
+  editModal && /*#__PURE__*/React.createElement("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20, overflowY:"auto" } },
+    /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:600, width:"100%", maxHeight:"90vh", overflowY:"auto" } },
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+        /*#__PURE__*/React.createElement("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "✏️ Edit Ticket — ", ticket.id),
+        /*#__PURE__*/React.createElement("button", { onClick:()=>setEditModal(false), style:{ background:"none", border:"none", fontSize:20, cursor:"pointer" } }, "✕")
+      ),
+      /*#__PURE__*/React.createElement(ST, null, "Customer"),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:16 } },
+        /*#__PURE__*/React.createElement(Field, { label:"Name" }, /*#__PURE__*/React.createElement(Input, { value:editForm.customerName, onChange:e=>setEF("customerName",e.target.value) })),
+        /*#__PURE__*/React.createElement(Field, { label:"Phone" }, /*#__PURE__*/React.createElement(Input, { value:editForm.customerPhone, onChange:e=>setEF("customerPhone",e.target.value) })),
+        /*#__PURE__*/React.createElement(Field, { label:"Email" }, /*#__PURE__*/React.createElement(Input, { type:"email", value:editForm.customerEmail, onChange:e=>setEF("customerEmail",e.target.value) }))
+      ),
+      /*#__PURE__*/React.createElement(ST, null, "Device"),
+      /*#__PURE__*/React.createElement(DevicePicker, { make:editForm.deviceBrand, model:editForm.deviceModel, onMakeChange:v=>setEF("deviceBrand",v), onModelChange:v=>setEF("deviceModel",v) }),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:10, marginBottom:16 } },
+        /*#__PURE__*/React.createElement(Field, { label:"Colour" }, /*#__PURE__*/React.createElement(Sel, { value:editForm.deviceColor, onChange:e=>setEF("deviceColor",e.target.value) }, /*#__PURE__*/React.createElement("option",{value:""},"— Select —"), DEVICE_COLOURS.map(c=>/*#__PURE__*/React.createElement("option",{key:c},c)))),
+        /*#__PURE__*/React.createElement(Field, { label:"Storage" }, /*#__PURE__*/React.createElement(Sel, { value:editForm.deviceStorage, onChange:e=>setEF("deviceStorage",e.target.value) }, /*#__PURE__*/React.createElement("option",{value:""},"— Select —"), DEVICE_STORAGE.map(s=>/*#__PURE__*/React.createElement("option",{key:s},s)))),
+        /*#__PURE__*/React.createElement(Field, { label:"IMEI" }, /*#__PURE__*/React.createElement(Input, { value:editForm.deviceImei, onChange:e=>setEF("deviceImei",e.target.value), placeholder:"15-digit IMEI" }))
+      ),
+      /*#__PURE__*/React.createElement(ST, null, "Repair"),
+      /*#__PURE__*/React.createElement(Field, { label:"Fault Description" }, /*#__PURE__*/React.createElement("textarea", { value:editForm.faultDescription, onChange:e=>setEF("faultDescription",e.target.value), style:{ ...iS, minHeight:70, resize:"vertical" } })),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10, marginBottom:10 } },
+        /*#__PURE__*/React.createElement(Field, { label:"Estimated Cost (JMD)" }, /*#__PURE__*/React.createElement(Input, { type:"number", value:editForm.estimatedCost, onChange:e=>setEF("estimatedCost",e.target.value), placeholder:"0" })),
+        /*#__PURE__*/React.createElement(Field, { label:"Final Cost (JMD)" }, /*#__PURE__*/React.createElement(Input, { type:"number", value:editForm.finalCost, onChange:e=>setEF("finalCost",e.target.value), placeholder:"0" })),
+        /*#__PURE__*/React.createElement(Field, { label:"Est. Completion" }, /*#__PURE__*/React.createElement(Input, { type:"date", value:editForm.estimatedCompletion, onChange:e=>setEF("estimatedCompletion",e.target.value) })),
+        /*#__PURE__*/React.createElement(Field, { label:"Assigned Technician" }, /*#__PURE__*/React.createElement(AssignedTechPicker, { value:editForm.assignedTo, onChange:v=>setEF("assignedTo",v) }))
+      ),
+      /*#__PURE__*/React.createElement(Field, { label:"Tech Notes (internal)" }, /*#__PURE__*/React.createElement("textarea", { value:editForm.techNotes, onChange:e=>setEF("techNotes",e.target.value), style:{ ...iS, minHeight:60, resize:"vertical" } })),
+      /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginTop:16 } },
+        /*#__PURE__*/React.createElement(Btn, { variant:"ghost", onClick:()=>setEditModal(false) }, "Cancel"),
+        /*#__PURE__*/React.createElement(Btn, { onClick:async()=>{
+          const updated = allTickets.map(t => t.id===ticket.id ? { ...t, ...editForm, estimatedCost:parseFloat(editForm.estimatedCost)||"", finalCost:parseFloat(editForm.finalCost)||"", updatedAt:new Date().toISOString(), history:[...(t.history||[]),{ status:t.status, ts:new Date().toISOString(), note:"Ticket details edited." }] } : t);
+          await saveTickets(updated);
+          setEditModal(false);
+          alert("✅ Ticket updated.");
+        } }, "Save Changes")
+      )
+    )
+  ),
+  showPartsModal && /*#__PURE__*/React.createElement("div", {
     style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }
   }, /*#__PURE__*/React.createElement("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:480, width:"100%", maxHeight:"80vh", overflowY:"auto" } },
     /*#__PURE__*/React.createElement("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18, marginBottom:4 } }, "🔧 Log Parts Used"),
@@ -1830,6 +1880,10 @@ function TicketDetail({
     variant: "ghost",
     onClick: printReceipt
   }, "\uD83D\uDDA8\uFE0F Print Receipt"), !isCancelled && /*#__PURE__*/React.createElement(Btn, {
+    variant: "ghost",
+    onClick: () => setEditModal(true),
+    style: { fontSize:12, padding:"8px 14px" }
+  }, "✏️ Edit Ticket"), !isCancelled && /*#__PURE__*/React.createElement(Btn, {
     variant: "danger",
     onClick: () => setCancelModal(true),
     style: { fontSize:12, padding:"8px 14px" }
@@ -7697,16 +7751,42 @@ const PURCHASE_TYPE_CATS = {
 function PurchasesTab() {
   const E = React.createElement;
   const [history, setHistory] = useState([]);
-  const [filter, setFilter] = useState("all"); // all|phones|accessories|parts|gadgets
+  const [pos, setPos] = useState([]); // purchase orders
+  const [filter, setFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
+  const [showAddPO, setShowAddPO] = useState(false);
+  const [newPO, setNewPOS] = useState({ supplier:"", poRef:"", date:todayStr(), total:"", type:"accessories", notes:"" });
+  const setNPO = (k,v) => setNewPOS(p=>({...p,[k]:v}));
+  const [view, setView] = useState("history"); // "history" | "pos"
 
-  useEffect(() => { loadArr("tpp-stock-receives").then(setHistory); }, []);
+  useEffect(() => {
+    loadArr("tpp-stock-receives").then(setHistory);
+    loadArr("tpp-purchase-orders").then(setPos);
+  }, []);
+
+  const savePO = async () => {
+    if (!newPO.supplier.trim()) { alert("Supplier required."); return; }
+    const po = { id: Date.now().toString(), ...newPO, total: parseFloat(newPO.total)||0, createdAt: new Date().toISOString(), status: "open" };
+    const updated = [po, ...pos];
+    await save("tpp-purchase-orders", updated);
+    setPos(updated);
+    setNewPOS({ supplier:"", poRef:"", date:todayStr(), total:"", type:"accessories", notes:"" });
+    setShowAddPO(false);
+  };
+
+  const voidPO = async (id) => {
+    const reason = prompt("Reason for voiding this PO?");
+    if (!reason) return;
+    const updated = pos.map(p => p.id===id ? {...p, status:"voided", voidReason:reason, voidedAt:new Date().toISOString()} : p);
+    await save("tpp-purchase-orders", updated);
+    setPos(updated);
+  };
 
   const getType = (entry) => {
     const cat = (entry.category||"").toLowerCase();
     if (cat.includes("part") || cat.includes("screen") || cat.includes("battery") || cat.includes("port")) return "parts";
     if (PURCHASE_TYPE_CATS.phones.some(c=>c.toLowerCase()===cat)) return "phones";
-    if (PURCHASE_TYPE_CATS.accessories.some(c=>c.toLowerCase()===cat) || cat.includes("case") || cat.includes("accessory") || cat.includes("accessories")) return "accessories";
+    if (cat.includes("case") || cat.includes("accessory") || cat.includes("accessories")) return "accessories";
     if (cat.includes("gadget") || cat.includes("tablet")) return "gadgets";
     return "accessories";
   };
@@ -7714,77 +7794,119 @@ function PurchasesTab() {
   const filtered = history.filter(h => {
     const matchType = filter === "all" || getType(h) === filter;
     const matchMonth = !monthFilter || (h.receivedDate||h.createdAt||"").startsWith(monthFilter);
-    return matchType && matchMonth && !h.purchase_pending;
+    return matchType && matchMonth;
   });
 
   const pending = history.filter(h => h.purchase_pending);
 
-  const totalByType = { phones:0, accessories:0, parts:0, gadgets:0, other:0 };
+  const totalByType = { phones:0, accessories:0, parts:0, gadgets:0 };
   filtered.forEach(h => {
     const t = getType(h);
     const amt = (parseFloat(h.costPerUnit)||0) * (parseInt(h.qty)||0);
     totalByType[t] = (totalByType[t]||0) + amt;
   });
   const grandTotal = Object.values(totalByType).reduce((s,v)=>s+v,0);
-
   const TYPE_LABELS = { phones:"📱 Phones", accessories:"📦 Accessories", parts:"🔧 Parts", gadgets:"📡 Gadgets" };
 
   return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
     E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
-      E("div", null,
-        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💸 Purchases"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Track stock spending by category.")
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💸 Purchases"),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E("button", { onClick:()=>setView("history"), style:{ background:view==="history"?T.blue:"#F3F4F6", color:view==="history"?"#fff":T.muted, border:"none", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "📋 History"),
+        E("button", { onClick:()=>setView("pos"), style:{ background:view==="pos"?T.blue:"#F3F4F6", color:view==="pos"?"#fff":T.muted, border:"none", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "📄 Purchase Orders"),
+        E(Btn, { onClick:()=>{ setShowAddPO(s=>!s); setView("pos"); } }, showAddPO?"✕ Cancel":"+ New PO")
       )
     ),
 
-    // Summary cards
-    E(R2, null,
-      E(StatCard, { label:"Total spent", value:fmtMoney(grandTotal), color:T.blue }),
-      E(StatCard, { label:"PO pending details", value:String(pending.length), color:pending.length>0?T.amber:T.green })
-    ),
-    E("div", { style:{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:20, marginTop:12 } },
-      Object.entries(TYPE_LABELS).map(([type, label]) => E("div", { key:type, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", textAlign:"center" } },
-        E("div", { style:{ fontSize:11, color:T.muted } }, label),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.blue, marginTop:4 } }, fmtMoney(totalByType[type]||0))
-      ))
-    ),
-
-    // Filters
-    E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
-      E("input", { type:"month", value:monthFilter, onChange:e=>setMonthFilter(e.target.value), style:{ ...iS, width:"auto" } }),
-      E(Sel, { value:filter, onChange:e=>setFilter(e.target.value), style:{ width:"auto" } },
-        E("option", { value:"all" }, "All Types"),
-        ...Object.entries(TYPE_LABELS).map(([type,label])=>E("option",{key:type,value:type},label))
-      )
-    ),
-
-    // PO pending warning
-    pending.length > 0 && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"12px 16px", marginBottom:16, fontSize:13, color:T.amber } },
-      `⚠️ ${pending.length} stock receive(s) missing purchase details — check your ✅ To Do list.`
+    // Add PO form
+    showAddPO && E(Card, { style:{ marginBottom:16 } },
+      E(ST, null, "New Purchase Order"),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+        E(Field, { label:"Supplier", required:true }, E(Input, { placeholder:"e.g. Cell Parts JA", value:newPO.supplier, onChange:e=>setNPO("supplier",e.target.value) })),
+        E(Field, { label:"PO / Invoice Reference" }, E(Input, { placeholder:"Invoice # or PO number", value:newPO.poRef, onChange:e=>setNPO("poRef",e.target.value) })),
+        E(Field, { label:"Date" }, E(Input, { type:"date", value:newPO.date, onChange:e=>setNPO("date",e.target.value) })),
+        E(Field, { label:"Total Amount (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newPO.total, onChange:e=>setNPO("total",e.target.value) })),
+        E(Field, { label:"Stock Type" }, E(Sel, { value:newPO.type, onChange:e=>setNPO("type",e.target.value) },
+          E("option",{value:"accessories"},"📦 Accessories"),
+          E("option",{value:"phones"},"📱 Phones"),
+          E("option",{value:"parts"},"🔧 Parts"),
+          E("option",{value:"gadgets"},"📡 Gadgets"),
+          E("option",{value:"mixture"},"🔀 Mixture")
+        ))
+      ),
+      E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:newPO.notes, onChange:e=>setNPO("notes",e.target.value) })),
+      E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:savePO }, "Save Purchase Order"))
     ),
 
-    // Purchase entries
-    filtered.length === 0
-      ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No purchases found for this period.")
-      : E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-          filtered.map((h,i) => {
-            const lineTotal = (parseFloat(h.costPerUnit)||0) * (parseInt(h.qty)||0);
-            return E(Card, { key:i, style:{ borderLeft:`3px solid ${T.blue}` } },
-              E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+    // Purchase Orders list
+    view === "pos" && E("div", null,
+      E(ST, null, `Purchase Orders (${pos.filter(p=>p.status==="open").length} open)`),
+      pos.length === 0
+        ? E("div", { style:{ textAlign:"center", padding:"30px 20px", color:T.muted } }, "No purchase orders yet. Create one above and reference it when receiving stock.")
+        : E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+            pos.map((po,i) => E("div", { key:i, style:{ background:T.card, border:`1px solid ${po.status==="voided"?"#FECACA":T.border}`, borderRadius:12, padding:"14px 16px", opacity:po.status==="voided"?0.5:1, borderLeft:`3px solid ${po.status==="voided"?T.red:po.status==="closed"?T.green:T.blue}` } },
+              E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
                 E("div", null,
-                  E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
-                  E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
-                    `${h.qty} units @ ${fmtMoney(h.costPerUnit||0)} · ${h.receivedDate||fmtDate(h.createdAt)}`,
-                    h.supplier ? ` · ${h.supplier}` : "",
-                    h.poRef ? ` · PO: ${h.poRef}` : "",
-                    ` · ${TYPE_LABELS[getType(h)]||"Other"}`
-                  )
+                  E("div", { style:{ fontWeight:700, fontSize:14 } }, po.supplier, po.poRef ? ` — ${po.poRef}` : ""),
+                  E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, po.date, ` · ${TYPE_LABELS[po.type]||po.type}`, po.notes ? ` · ${po.notes}` : ""),
+                  po.status === "voided" && E("div", { style:{ fontSize:11, color:T.red, marginTop:2 } }, `Voided: ${po.voidReason}`)
                 ),
-                E("div", { style:{ fontWeight:700, color:T.blue, fontSize:14 } }, fmtMoney(lineTotal))
+                E("div", { style:{ display:"flex", alignItems:"center", gap:8 } },
+                  po.total > 0 && E("div", { style:{ fontWeight:700, color:T.blue } }, fmtMoney(po.total)),
+                  E("span", { style:{ background:po.status==="open"?T.blueLt:po.status==="closed"?T.greenLt:T.redLt, color:po.status==="open"?T.blue:po.status==="closed"?T.green:T.red, borderRadius:6, padding:"2px 8px", fontSize:11, fontWeight:700 } }, po.status),
+                  po.status === "open" && E("button", { onClick:()=>voidPO(po.id), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Void")
+                )
               )
-            );
-          })
+            ))
+          )
+    ),
+
+    // History view
+    view === "history" && E("div", null,
+      E(R2, null,
+        E(StatCard, { label:"Total spent", value:fmtMoney(grandTotal), color:T.blue }),
+        E(StatCard, { label:"PO pending details", value:String(pending.length), color:pending.length>0?T.amber:T.green })
+      ),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:20, marginTop:12 } },
+        Object.entries(TYPE_LABELS).map(([type, label]) => E("div", { key:type, style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", textAlign:"center" } },
+          E("div", { style:{ fontSize:11, color:T.muted } }, label),
+          E("div", { style:{ fontWeight:700, fontSize:14, color:T.blue, marginTop:4 } }, fmtMoney(totalByType[type]||0))
+        ))
+      ),
+      E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
+        E("input", { type:"month", value:monthFilter, onChange:e=>setMonthFilter(e.target.value), style:{ ...iS, width:"auto" } }),
+        E(Sel, { value:filter, onChange:e=>setFilter(e.target.value), style:{ width:"auto" } },
+          E("option", { value:"all" }, "All Types"),
+          ...Object.entries(TYPE_LABELS).map(([type,label])=>E("option",{key:type,value:type},label))
         )
+      ),
+      pending.length > 0 && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"12px 16px", marginBottom:16, fontSize:13, color:T.amber } },
+        `⚠️ ${pending.length} stock receive(s) missing purchase details — check your ✅ To Do list.`
+      ),
+      filtered.length === 0
+        ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No purchases found for this period.")
+        : E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+            filtered.map((h,i) => {
+              const lineTotal = (parseFloat(h.costPerUnit)||0) * (parseInt(h.qty)||0);
+              const linkedPO = pos.find(p => p.poRef === h.poRef && p.supplier === h.supplier);
+              return E(Card, { key:i, style:{ borderLeft:`3px solid ${h.purchase_pending?T.amber:T.green}` } },
+                E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+                  E("div", null,
+                    E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
+                    E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
+                      `${h.qty} units @ ${fmtMoney(h.costPerUnit||0)} · ${h.receivedDate||fmtDate(h.createdAt)}`,
+                      h.supplier ? ` · ${h.supplier}` : "",
+                      h.poRef ? ` · PO: ${h.poRef}` : "",
+                      linkedPO ? E("span", { style:{ color:T.green, marginLeft:4 } }, "✅ PO on file") : ""
+                    ),
+                    h.purchase_pending && E("span", { style:{ background:T.amberLt, color:T.amber, borderRadius:4, padding:"1px 6px", fontSize:10, fontWeight:700 } }, "⚠️ PO pending")
+                  ),
+                  E("div", { style:{ fontWeight:700, color:T.blue, fontSize:14 } }, fmtMoney(lineTotal))
+                )
+              );
+            })
+          )
+    )
   );
 }
 
@@ -8509,6 +8631,12 @@ Return ONLY valid JSON, no markdown:
   // PO header state
   const emptyPO = { supplier:"", poRef:"", invoiceTotal:"", receivedDate:todayStr(), notes:"" };
   const [po, setPOS] = useState(emptyPO);
+  const [savedPOs, setSavedPOs] = useState([]);
+  const [showPOPicker, setShowPOPicker] = useState(false);
+
+  useEffect(() => {
+    loadArr("tpp-purchase-orders").then(all => setSavedPOs((all||[]).filter(p=>p.status==="open")));
+  }, [view]);
   const setPO = (k,v) => setPOS(p=>({...p,[k]:v}));
 
   // Line items
@@ -8721,7 +8849,19 @@ Proceed anyway?`);
       `⚠️ ${lines.filter(l=>l.needsVerification).length} AI-scanned item(s) need to be matched to your catalog or confirmed as new. Use the dropdown on each flagged line.`
     ),
     E(Card, { style:{ marginBottom:16 } },
-      E(ST, null, "Purchase Order Details"),
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
+        E(ST, { style:{ margin:0 } }, "Purchase Order Details"),
+        savedPOs.length > 0 && E("button", { onClick:()=>setShowPOPicker(s=>!s), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "📄 Load Saved PO")
+      ),
+      showPOPicker && E("div", { style:{ background:"#F9FAFB", border:`1px solid ${T.border}`, borderRadius:8, padding:12, marginBottom:12 } },
+        savedPOs.map((sp,i) => E("div", { key:i, onClick:()=>{ setPOS({ supplier:sp.supplier, poRef:sp.poRef||"", invoiceTotal:String(sp.total||""), receivedDate:sp.date||todayStr(), notes:sp.notes||"" }); setShowPOPicker(false); }, style:{ padding:"8px 12px", cursor:"pointer", background:"#fff", borderRadius:6, marginBottom:6, border:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, sp.supplier, sp.poRef ? ` — ${sp.poRef}` : ""),
+            E("div", { style:{ fontSize:11, color:T.muted } }, sp.date, sp.total ? ` · ${fmtMoney(sp.total)}` : "")
+          ),
+          E("span", { style:{ color:T.blue, fontSize:12, fontWeight:700 } }, "Load →")
+        ))
+      ),
       E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
         E(Field, { label:"Supplier" }, E(Input, { placeholder:"e.g. Cell Parts JA", value:po.supplier, onChange:e=>setPO("supplier",e.target.value) })),
         E(Field, { label:"PO / Invoice Reference" }, E(Input, { placeholder:"Invoice # or PO number", value:po.poRef, onChange:e=>setPO("poRef",e.target.value) })),
