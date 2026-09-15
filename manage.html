@@ -5722,6 +5722,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [lastSale,setLastSale]=useState(null);
   // History
   const [selectedSale,setSelectedSale]=useState(null);
+  const [unitPicker,setUnitPicker]=useState(null); // {product, units[]}
   const [showVoided,setShowVoided]=useState(false);
   const [historySearch,setHistorySearch]=useState("");
   const [emailModal,setEmailModal]=useState(null); // {sale, email}
@@ -5737,13 +5738,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   useEffect(()=>{
     (async()=>{
-      // Load products (chunked or flat)
+      // Load unified catalog
       let prods=[];
-      try{
-        const meta=await load("tpp-products-meta");
-        if(meta&&meta.chunks){for(let i=0;i<meta.chunks;i++){const c=await load(`tpp-products-chunk-${i}`);if(Array.isArray(c))prods.push(...c);}}
-        else prods=await loadArr("tpp-products");
-      }catch{prods=await loadArr("tpp-products");}
+      try{ prods=await loadCatalog(); }catch{ prods=await loadArr("tpp-products"); }
       setProducts(prods);
       // Load tickets — only open ones
       const t=await loadArr("tpp-tickets-v1");
@@ -5770,12 +5767,27 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   useEffect(()=>{
     if(!search.trim()){setSearchResults([]);return;}
     const q=search.toLowerCase();
-    const phoneRes=(phones||[])
-      .filter(p=>!p.voided&&p.availability==="Available"&&[p.make,p.model,p.color,p.imei,p.storage].some(v=>v?.toLowerCase().includes(q)))
-      .slice(0,5).map(p=>({type:"phone",id:p.imei||p.id,name:`${p.make||""} ${p.model||""} ${p.storage||""} ${p.color||""}`.trim(),price:parseFloat(p.expected_sell)||0,imei:p.imei,raw:p}));
-    const prodRes=products
-      .filter(p=>(p.stock||0)>0&&(p.name?.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search)))
-      .slice(0,5).map(p=>({type:"product",id:p.id,name:p.name,price:parseFloat(p.price)||0,raw:p}));
+    // Search unified catalog — IMEI products show available units, others show stock count
+    const catalogRes=products
+      .filter(p=>{
+        const avail=getAvailableStock(p);
+        if(avail<=0)return false;
+        return p.name?.toLowerCase().includes(q)||(p.barcode||"").includes(search);
+      })
+      .slice(0,8).map(p=>{
+        const isImei=isImeiCategory(p.category);
+        const availUnits=isImei?(p.units||[]).filter(u=>u.status==="Available"):[];
+        return {
+          type:isImei?"imei_product":"product",
+          id:p.id,name:p.name,
+          price:parseFloat(p.price)||0,
+          stock:getAvailableStock(p),
+          availUnits,
+          raw:p
+        };
+      });
+    const phoneRes=[]; // phones now in unified catalog
+    const prodRes=catalogRes;
     const tickRes=tickets
       .filter(t=>t.id?.toLowerCase().includes(q)||t.customerName?.toLowerCase().includes(q)||t.customerPhone?.includes(q))
       .slice(0,3).map(t=>({type:"ticket",id:t.id,name:`Repair Deposit — ${t.customerName} (${t.id})`,price:0,subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`,raw:t}));
@@ -5786,12 +5798,22 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     if(item.type==="ticket"){
       if(cart.find(c=>c.ticketId===item.id)){alert("This ticket is already in the cart.");return;}
       setCart(c=>[...c,{type:"ticket",id:item.id,name:item.name,price:0,qty:1,ticketId:item.id,isDeposit:true,raw:item.raw}]);
-    }else{
+      setSearch("");setSearchResults([]);
+    } else if(item.type==="imei_product"){
+      // Show unit picker for IMEI products
+      setUnitPicker({product:item.raw,units:item.availUnits});
+      setSearch("");setSearchResults([]);
+    } else {
       const ex=cart.find(c=>c.id===item.id&&c.type!=="ticket");
       if(ex)setCart(c=>c.map(ci=>ci.id===item.id?{...ci,qty:(ci.qty||1)+1}:ci));
-      else setCart(c=>[...c,{type:item.type,id:item.id,name:item.name,price:item.price,qty:1,imei:item.imei||"",note:"",raw:item.raw}]);
+      else setCart(c=>[...c,{type:"product",id:item.id,name:item.name,price:item.price,qty:1,imei:"",note:"",raw:item.raw}]);
+      setSearch("");setSearchResults([]);
     }
-    setSearch("");setSearchResults([]);
+  };
+
+  const addUnitToCart=(product,unit)=>{
+    setCart(c=>[...c,{type:"catalog_phone",id:unit.id,name:product.name,price:unit.sellPrice||parseFloat(product.price)||0,qty:1,imei:unit.imei,note:"",raw:{product,unit}}]);
+    setUnitPicker(null);
   };
 
   const removeFromCart=(idx)=>setCart(c=>c.filter((_,i)=>i!==idx));
@@ -5872,12 +5894,27 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       };
       await save("tpp-sales",[sale,...existing]);setSales(prev=>[sale,...prev]);
 
-      // Mark phones sold
+      // Mark catalog IMEI units as Sold
+      const catalogPhoneItems = cart.filter(i=>i.type==="catalog_phone");
+      if (catalogPhoneItems.length>0) {
+        const updatedCatalog = await loadCatalog();
+        catalogPhoneItems.forEach(item=>{
+          const productIdx = updatedCatalog.findIndex(p=>p.id===item.raw?.product?.id);
+          if (productIdx>=0) {
+            updatedCatalog[productIdx].units = (updatedCatalog[productIdx].units||[]).map(u=>
+              u.id===item.id ? {...u,status:"Sold",soldAt:new Date().toISOString(),saleId,soldBy:servedBy,actual_sell:String(item.price),history:[...(u.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]} : u
+            );
+            updatedCatalog[productIdx].stock = updatedCatalog[productIdx].units.filter(u=>u.status==="Available").length;
+          }
+        });
+        await saveCatalog(updatedCatalog);
+      }
+      // Legacy phone update (backward compat)
       let updatedPhones=[...phones];
       cart.filter(i=>i.type==="phone").forEach(item=>{
         updatedPhones=updatedPhones.map(p=>p.imei===item.id?{...p,availability:"Sold",date_sold:todayStr(),actual_sell:String(item.price),sold_by:servedBy,history:[...(p.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]}:p);
       });
-      if(onPhonesUpdate)await onPhonesUpdate(updatedPhones);
+      if(onPhonesUpdate&&cart.some(i=>i.type==="phone"))await onPhonesUpdate(updatedPhones);
 
       // Update product stock
       let updatedProducts=[...products];
@@ -5971,7 +6008,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     const existing=await loadArr("tpp-sales");
     const returnSale={id:genSaleId(existing.map(s=>s.id),"RCP"),customerName,customerPhone,customerEmail,items:selected.map(i=>({...i,price:-Math.abs(i.price),qty:i.returnQty||1})),subtotal:-refundTotal,discounts:[],totalDiscount:0,total:-refundTotal,refundType:returnCredit,refundAmount:refundTotal,returnOrigSaleId:returnOrigSale.id,isReturn:true,servedBy:user?.name||"",createdAt:new Date().toISOString(),date:todayStr()};
     await save("tpp-sales",[returnSale,...existing]);setSales(prev=>[returnSale,...prev]);
-    alert(`↩ Return processed — ${fmtMoney(refundTotal)}\n${returnCredit==="store_credit"?"🏪 Store credit issued (valid 1 year).":"💳 Refund to be processed."}\n${selected.filter(i=>i.type==="phone").length>0?"📱 Returned phones sent to testing queue.":""}`);
+    alert(`↩ Return processed — ${fmtMoney(refundTotal)}\n${returnCredit==="store_credit"?"🏪 Store credit issued (valid 1 year).":returnCredit==="bank_transfer"?"🏦 Bank transfer refund to be processed.":"💵 Cash refund to be given."}\n${selected.filter(i=>i.type==="phone").length>0?"📱 Returned phones sent to testing queue.":""}`);
     resetForm();setView("pos");
   };
 
@@ -6130,9 +6167,10 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       ))
     ),
     E(ST,null,"Refund method:"),
-    E("div",{style:{display:"flex",gap:8,marginBottom:12}},
-      E("button",{onClick:()=>setReturnCredit("refund"),style:{flex:1,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="refund"?T.blue:T.border}`,background:returnCredit==="refund"?T.blueLt:"transparent",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="refund"?T.blue:T.muted}},"💳 Cash / Bank Transfer"),
-      E("button",{onClick:()=>setReturnCredit("store_credit"),style:{flex:1,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="store_credit"?T.green:T.border}`,background:returnCredit==="store_credit"?T.greenLt:"transparent",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="store_credit"?T.green:T.muted}},"🏪 Store Credit (1 yr)")
+    E("div",{style:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}},
+      E("button",{onClick:()=>setReturnCredit("cash"),style:{flex:1,minWidth:100,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="cash"?T.blue:T.border}`,background:returnCredit==="cash"?T.blueLt:"transparent",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="cash"?T.blue:T.muted}},"💵 Cash"),
+      E("button",{onClick:()=>setReturnCredit("bank_transfer"),style:{flex:1,minWidth:100,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="bank_transfer"?T.blue:T.border}`,background:returnCredit==="bank_transfer"?T.blueLt:"transparent",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="bank_transfer"?T.blue:T.muted}},"🏦 Bank Transfer"),
+      E("button",{onClick:()=>setReturnCredit("store_credit"),style:{flex:1,minWidth:100,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="store_credit"?T.green:T.border}`,background:returnCredit==="store_credit"?T.greenLt:"transparent",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="store_credit"?T.green:T.muted}},"🏪 Store Credit (1yr)")
     ),
     E("div",{style:{background:T.amberLt,border:`1px solid #FDE68A`,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#92400E"}},"📱 Returned phones go to Under Testing before resale."),
     E(Btn,{full:true,onClick:processReturn},`↩ Return — ${fmtMoney(returnItems.filter(i=>i.selected).reduce((s,i)=>s+(i.price*(i.returnQty||1)),0))}`)
@@ -6169,6 +6207,26 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   // ── Main POS ──────────────────────────────────────────────────────────────────
   return E("div",{style:{maxWidth:680,margin:"0 auto"}},
     showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}},onClose:()=>setShowScanner(false)}),
+
+    // Unit picker modal for IMEI products
+    unitPicker&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:440,width:"100%",maxHeight:"80vh",overflowY:"auto"}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17}},unitPicker.product.name),
+          E("button",{onClick:()=>setUnitPicker(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")
+        ),
+        E("div",{style:{fontSize:13,color:T.muted,marginBottom:14}},`Select a unit (${unitPicker.units.length} available):`),
+        E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+          unitPicker.units.map((unit,i)=>E("div",{key:i,onClick:()=>addUnitToCart(unitPicker.product,unit),style:{background:"#F9FAFB",border:`1px solid ${T.border}`,borderRadius:8,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            E("div",null,
+              E("div",{style:{fontFamily:"monospace",fontWeight:700,fontSize:14}},unit.imei||"No IMEI"),
+              unit.receivedDate&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},"Received: ",fmtDate(unit.receivedDate))
+            ),
+            E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(unit.sellPrice||unitPicker.product.price||0))
+          ))
+        )
+      )
+    ),
 
     // Header
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
@@ -6233,9 +6291,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
       searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}},
         E("div",null,
-          E("div",{style:{fontWeight:600,fontSize:13}},r.type==="ticket"?"🎫":r.type==="phone"?"📱":"📦"," ",r.name),
-          r.raw?.imei&&E("div",{style:{fontSize:10,color:T.muted}},"IMEI: ",r.raw.imei),
-          r.subLabel&&E("div",{style:{fontSize:11,color:T.muted}},r.subLabel)
+          E("div",{style:{fontWeight:600,fontSize:13}},
+            r.type==="ticket"?"🎫":isImeiCategory(r.raw?.category)?"📱":"📦"," ",r.name
+          ),
+          r.subLabel&&E("div",{style:{fontSize:11,color:T.muted}},r.subLabel),
+          r.stock!==undefined&&E("div",{style:{fontSize:11,color:T.muted}},`${r.stock} available`,r.type==="imei_product"?" — tap to select unit":"")
         ),
         r.type!=="ticket"&&E("div",{style:{fontWeight:700,color:T.blue,fontSize:13}},fmtMoney(r.price))
       ))
@@ -7901,6 +7961,7 @@ function StockReceiving({ products, onProductsUpdate, invoiceType, allPhones = [
   const [history, setHistory] = useState([]);
   const [view, setView] = useState("main"); // "main" | "po" | "history"
   const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   // AI scanning state
   const [scanning, setScanning] = useState(false);
@@ -8539,6 +8600,8 @@ function PayrollManager() {
   const [month, setMonth] = useState(todayStr().slice(0,7));
   const [staff, setStaff] = useState([]);
   const [filterStaff, setFilterStaff] = useState("all");
+  const [editingShift, setEditingShift] = useState(null);
+  const [editNote, setEditNoteS] = useState("");
   useEffect(()=>{
     Promise.all([loadArr("tpp-shifts"),load("tpp-staff")]).then(([s,st])=>{
       setShifts(s||[]); setStaff(st||[]);
@@ -8546,7 +8609,37 @@ function PayrollManager() {
   },[]);
   const filtered = shifts.filter(s=>s.clockOut && (s.clockIn||"").startsWith(month) && (filterStaff==="all"||s.staffName===filterStaff));
   const fmtDuration=(cin,cout)=>{ const mins=Math.round((new Date(cout)-new Date(cin))/60000); return `${Math.floor(mins/60)}h ${mins%60}m`; };
+  const saveShiftEdit = async () => {
+    if(!editNote.trim()){alert("Please enter a reason for the edit.");return;}
+    const base=new Date(editingShift.clockIn).toDateString();
+    const applyT=(iso,t)=>t?new Date(`${base} ${t}`).toISOString():iso;
+    const updatedShift={...editingShift,editNote,editedAt:new Date().toISOString()};
+    const all=await loadArr("tpp-shifts");
+    await save("tpp-shifts",all.map(x=>x.id===editingShift.id?updatedShift:x));
+    setShifts(prev=>prev.map(x=>x.id===editingShift.id?updatedShift:x));
+    setEditingShift(null);setEditNoteS("");
+  };
+  const fmt24=(iso)=>iso?new Date(iso).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}):"";
+  const applyTime=(field,val)=>{if(!val)return;const base=new Date(editingShift.clockIn).toDateString();setEditingShift(prev=>({...prev,[field]:new Date(`${base} ${val}`).toISOString()}));};
+
   return E("div",{style:{maxWidth:640,margin:"0 auto"}},
+    editingShift&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:440,width:"100%"}},
+        E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,marginBottom:4}},"✏️ Edit Shift"),
+        E("div",{style:{fontSize:13,color:T.muted,marginBottom:16}},editingShift.staffName," · ",new Date(editingShift.clockIn).toLocaleDateString()),
+        E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+          E(Field,{label:"Clock In"},E("input",{type:"time",value:fmt24(editingShift.clockIn),onChange:e=>applyTime("clockIn",e.target.value),style:{...iS,padding:"8px"}})),
+          E(Field,{label:"Lunch Out"},E("input",{type:"time",value:fmt24(editingShift.lunchOut)||"",onChange:e=>applyTime("lunchOut",e.target.value),style:{...iS,padding:"8px"}})),
+          E(Field,{label:"Lunch Back"},E("input",{type:"time",value:fmt24(editingShift.lunchBack)||"",onChange:e=>applyTime("lunchBack",e.target.value),style:{...iS,padding:"8px"}})),
+          E(Field,{label:"Clock Out"},E("input",{type:"time",value:fmt24(editingShift.clockOut)||"",onChange:e=>applyTime("clockOut",e.target.value),style:{...iS,padding:"8px"}}))
+        ),
+        E(Field,{label:"Reason for edit (required)"},E(Input,{placeholder:"e.g. Staff forgot to clock out",value:editNote,onChange:e=>setEditNoteS(e.target.value)})),
+        E("div",{style:{display:"flex",gap:8,marginTop:14}},
+          E(Btn,{variant:"ghost",onClick:()=>{setEditingShift(null);setEditNoteS("");}},"Cancel"),
+          E(Btn,{onClick:saveShiftEdit},"Save Changes")
+        )
+      )
+    ),
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"⏱️ Payroll"),
       E("div",{style:{display:"flex",gap:8}},
@@ -8572,16 +8665,7 @@ function PayrollManager() {
                 s.clockOut&&E("div",{style:{fontWeight:700}},fmtDuration(s.clockIn,s.clockOut)),
                 E("div",{style:{display:"flex",gap:6}},
                   s.earlyFlag&&!s.approved&&E(Btn,{style:{fontSize:10,padding:"4px 8px"},onClick:async()=>{const updated=[...shifts];const idx2=shifts.findIndex(x=>x.id===s.id);if(idx2>=0){updated[idx2]={...s,approved:true};const all=await loadArr("tpp-shifts");await save("tpp-shifts",all.map(x=>x.id===s.id?{...x,approved:true}:x));setShifts(updated);flash("Early clock-in approved ✓");}}},"✅ Approve"),
-                  E(Btn,{variant:"ghost",style:{fontSize:10,padding:"4px 8px"},onClick:async()=>{
-                    const newIn=prompt("Edit clock-in time (HH:MM):",new Date(s.clockIn).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}));
-                    if(!newIn)return;
-                    const newOut=prompt("Edit clock-out time (HH:MM):",s.clockOut?new Date(s.clockOut).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}):"");
-                    const note=prompt("Reason for edit:");if(!note)return;
-                    const baseDate=new Date(s.clockIn).toDateString();
-                    const updatedShift={...s,clockIn:new Date(`${baseDate} ${newIn}`).toISOString(),clockOut:newOut?new Date(`${baseDate} ${newOut}`).toISOString():s.clockOut,editNote:note,editedAt:new Date().toISOString()};
-                    const all=await loadArr("tpp-shifts");await save("tpp-shifts",all.map(x=>x.id===s.id?updatedShift:x));
-                    setShifts(prev=>prev.map(x=>x.id===s.id?updatedShift:x));flash("Shift updated ✓");
-                  }},"✏️ Edit")
+                  E(Btn,{variant:"ghost",style:{fontSize:10,padding:"4px 8px"},onClick:()=>setEditingShift({...s})},"✏️ Edit")
                 )
               )
             )
@@ -8778,6 +8862,7 @@ function InventoryCount({ user, isOwner }) {
       }
       setSession(null);setCounts({});setScanMode(false);
       alert(staffSubmit?`✅ Count submitted for owner approval. ${adjustments.length} discrepancy(s) found.`:`✅ Count complete. ${adjustments.length} adjustment(s) made.`);
+      setSubmitted(true);
     } finally{setSaving(false);}
   };
 
@@ -8927,7 +9012,7 @@ function InventoryCount({ user, isOwner }) {
       ),
       E("div",{style:{display:"flex",gap:8}},
         E(Btn,{variant:"ghost",onClick:()=>{if(confirm("Abandon count?"))setSession(null);}},"✕ Abandon"),
-        E(Btn,{variant:"green",disabled:counted.length===0||saving,onClick:commitCount},saving?"Saving...":isOwner===false?"Submit for Approval":"✅ Commit Count")
+        E(Btn,{variant:"green",disabled:counted.length===0||saving||submitted,onClick:commitCount},saving?"Saving...":submitted?"✅ Submitted":isOwner===false?"Submit for Approval":"✅ Commit Count")
       )
     ),
     E("div",{style:{background:scanMode?T.blueLt:T.card,border:`1px solid ${scanMode?T.blue:T.border}`,borderRadius:12,padding:"14px 16px",marginBottom:16}},
@@ -9134,150 +9219,728 @@ function PurchasesTab() {
 }
 
 // ── Catalog Sub-Tab Component ─────────────────────────────────────────────────
-const LOYVERSE_ALL_CATS = ["Like New Samsung","Like New IPhones","New in box","HOTWAV","Tablets","Gadgets","Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other","Accessories- Samsung","Accessories- Apple","Tablet Cases","Parts & Components","Other"];
+// ── Unified Catalog System ─────────────────────────────────────────────────────
+// All inventory lives here. Phones/tablets have individual IMEI-tracked units.
+// Accessories/parts/gadgets use stock counts only.
 
-function CatalogSubTab({ products, saveProducts }) {
+const LOYVERSE_ALL_CATS = [
+  "Like New Samsung","Like New iPhones","New in box","HOTWAV",
+  "Tablets","Gadgets",
+  "Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other",
+  "Accessories - Samsung","Accessories - Apple","Tablet Cases",
+  "Parts & Components","Other"
+];
+
+const IMEI_CATEGORIES = ["Like New Samsung","Like New iPhones","New in box","HOTWAV","Tablets"];
+const isImeiCategory = (cat) => IMEI_CATEGORIES.includes(cat);
+const isTabletCategory = (cat) => cat === "Tablets";
+
+// ── Helper: get available stock for a product ─────────────────────────────────
+const getAvailableStock = (product) => {
+  if (isImeiCategory(product.category)) {
+    return (product.units||[]).filter(u=>u.status==="Available").length;
+  }
+  return product.stock || 0;
+};
+
+// ── Save/load catalog (chunked for large catalogs) ────────────────────────────
+const saveCatalog = async (products) => {
+  if (products.length > 80) {
+    const CHUNK = 80, chunks = [];
+    for (let i = 0; i < products.length; i += CHUNK) chunks.push(products.slice(i, i+CHUNK));
+    await save("tpp-products-meta", { total: products.length, chunks: chunks.length, updated: new Date().toISOString() });
+    for (let i = 0; i < chunks.length; i++) await save(`tpp-products-chunk-${i}`, chunks[i]);
+  } else {
+    await save("tpp-products", products);
+    await save("tpp-products-meta", null);
+  }
+};
+
+const loadCatalog = async () => {
+  try {
+    const meta = await load("tpp-products-meta");
+    if (meta && meta.chunks) {
+      const all = [];
+      for (let i = 0; i < meta.chunks; i++) {
+        const c = await load(`tpp-products-chunk-${i}`);
+        if (Array.isArray(c)) all.push(...c);
+      }
+      return all;
+    }
+  } catch {}
+  return await loadArr("tpp-products");
+};
+
+// ── AI IMEI Scanner ───────────────────────────────────────────────────────────
+function ImeiScanner({ onDetected, onClose }) {
   const E = React.createElement;
-  const [catFilter, setCatFilter] = useState("all");
-  const [catSearch, setCatSearch] = useState("");
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newItem, setNewItemS] = useState({ name:"", category:"Accessories - Samsung Cases", price:"", cost:"", barcode:"", sku:"", stock:"" });
-  const setNI=(k,v)=>setNewItemS(p=>({...p,[k]:v}));
-  const cats=["all",...LOYVERSE_ALL_CATS];
-  const filtered=products.filter(p=>{
-    const mc=catFilter==="all"||p.category===catFilter;
-    const mq=!catSearch||p.name.toLowerCase().includes(catSearch.toLowerCase())||(p.barcode||"").includes(catSearch)||(p.sku||"").includes(catSearch);
-    return mc&&mq;
-  });
-  const grouped={};filtered.forEach(p=>{const cat=p.category||"Other";if(!grouped[cat])grouped[cat]=[];grouped[cat].push(p);});
-  return E("div",null,
-    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"Catalog ",E("span",{style:{fontSize:14,color:T.muted,fontWeight:400}},`· ${products.length} items`)),
-      E(Btn,{onClick:()=>setShowAddForm(s=>!s)},showAddForm?"✕ Cancel":"+ Add Item")
-    ),
-    showAddForm&&E(Card,{style:{marginBottom:16}},
-      E(ST,null,"New Item"),
-      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
-        E(Field,{label:"Name",required:true},E(Input,{value:newItem.name,onChange:e=>setNI("name",e.target.value),placeholder:"e.g. Samsung S24 Case"})),
-        E(Field,{label:"Category"},E(Sel,{value:newItem.category,onChange:e=>setNI("category",e.target.value)},LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c)))),
-        E(Field,{label:"Price (JMD)"},E(Input,{type:"number",value:newItem.price,onChange:e=>setNI("price",e.target.value),placeholder:"0"})),
-        E(Field,{label:"Cost (JMD)"},E(Input,{type:"number",value:newItem.cost,onChange:e=>setNI("cost",e.target.value),placeholder:"0"})),
-        E(Field,{label:"Stock Qty"},E(Input,{type:"number",value:newItem.stock,onChange:e=>setNI("stock",e.target.value),placeholder:"0"})),
-        E(Field,{label:"Barcode / SKU"},E(Input,{value:newItem.barcode,onChange:e=>setNI("barcode",e.target.value),placeholder:"optional"}))
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const fileRef = React.useRef(null);
+
+  const scanImage = async (file) => {
+    setLoading(true); setError(""); setResult("");
+    try {
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      setPreview(URL.createObjectURL(file));
+      const apiKey = (() => { try { return localStorage.getItem("tpp_anthropic_key") || ""; } catch { return ""; } })();
+      if (!apiKey) { setError("No API key. Add one in Settings."); setLoading(false); return; }
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6", max_tokens: 200,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
+            { type: "text", text: "Extract the IMEI number from this image. Return ONLY the IMEI number (15 digits), nothing else. If multiple IMEIs are visible, return each on a new line. If no IMEI is visible, return 'NOT_FOUND'." }
+          ]}]
+        })
+      });
+      const data = await resp.json();
+      const text = data.content?.[0]?.text?.trim() || "";
+      if (text === "NOT_FOUND" || !text) { setError("No IMEI found in image. Please try again or enter manually."); }
+      else { setResult(text); }
+    } catch (e) { setError("Scan failed: " + e.message); }
+    setLoading(false);
+  };
+
+  return E("div", { style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+    E("div", { style: { background:"#fff", borderRadius:16, padding:24, maxWidth:400, width:"100%", maxHeight:"85vh", overflowY:"auto" } },
+      E("div", { style: { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+        E("div", { style: { fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "📷 Scan IMEI"),
+        E("button", { onClick: onClose, style: { background:"none", border:"none", fontSize:20, cursor:"pointer" } }, "✕")
       ),
-      E(Btn,{onClick:async()=>{
-        if(!newItem.name.trim()){alert("Name required.");return;}
-        const item={id:`manual-${Date.now()}`,...newItem,price:parseFloat(newItem.price)||0,cost:parseFloat(newItem.cost)||0,stock:parseInt(newItem.stock)||0,variable_price:!newItem.price};
-        await saveProducts([item,...products]);setNewItemS({name:"",category:"Accessories - Samsung Cases",price:"",cost:"",barcode:"",sku:"",stock:""});setShowAddForm(false);
-      }},"Save Item")
-    ),
-    E("div",{style:{display:"flex",gap:8,marginBottom:16}},
-      E(Sel,{value:catFilter,onChange:e=>setCatFilter(e.target.value),style:{width:"auto"}},cats.map(c=>E("option",{key:c,value:c},c==="all"?"All Categories":c))),
-      E(Input,{placeholder:"🔍 Search...",value:catSearch,onChange:e=>setCatSearch(e.target.value)})
-    ),
-    Object.keys(grouped).length===0?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No items found."):
-    Object.entries(grouped).map(([cat,items])=>E("div",{key:cat,style:{marginBottom:24}},
-      E(ST,null,cat,` (${items.length})`),
-      E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
-        items.map((item,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-          E("div",null,
-            E("div",{style:{fontWeight:600,fontSize:13}},item.name),
-            E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},`Stock: ${item.stock||0}`,item.barcode?` · ${item.barcode}`:"",item.variable_price?" · Variable":"")
-          ),
-          E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-            E("div",{style:{fontWeight:700,color:T.blue}},item.variable_price?"Variable":fmtMoney(item.price||0)),
-            E("button",{onClick:async()=>{
-              const np=prompt("New price (JMD):",String(item.price||0));if(np===null)return;
-              const ns=prompt("Stock count:",String(item.stock||0));if(ns===null)return;
-              await saveProducts(products.map(p=>p.id===item.id?{...p,price:parseFloat(np)||0,stock:parseInt(ns)||0}:p));
-            },style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"Edit"),
-            E("button",{onClick:async()=>{if(!confirm(`Remove "${item.name}"?`))return;await saveProducts(products.filter(p=>p.id!==item.id));},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✕")
+      E("div", { style: { fontSize:13, color:T.muted, marginBottom:14 } }, "Take a photo or upload an image of the IMEI barcode/label."),
+      preview && E("img", { src:preview, style:{ width:"100%", borderRadius:8, marginBottom:12, maxHeight:180, objectFit:"contain" } }),
+      loading && E("div", { style:{ textAlign:"center", padding:"20px", color:T.muted } }, "🔍 Scanning..."),
+      error && E("div", { style:{ background:T.redLt, borderRadius:8, padding:"10px 14px", fontSize:13, color:T.red, marginBottom:12 } }, error),
+      result && E("div", { style:{ background:T.greenLt, borderRadius:8, padding:"12px 14px", marginBottom:12 } },
+        E("div", { style:{ fontSize:11, color:T.muted, marginBottom:4 } }, "IMEI detected:"),
+        result.split("\n").filter(Boolean).map((imei, i) =>
+          E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 } },
+            E("div", { style:{ fontFamily:"monospace", fontWeight:700, fontSize:14 } }, imei),
+            E("button", { onClick:()=>onDetected(imei), style:{ background:T.blue, color:"#fff", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer" } }, "Use")
           )
-        ))
+        )
+      ),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+        E("button", { onClick:()=>fileRef.current?.click(), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.blue}33`, borderRadius:8, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "📁 Upload Photo"),
+        E("input", { ref:fileRef, type:"file", accept:"image/*", capture:"environment", style:{ display:"none" }, onChange:e=>e.target.files[0]&&scanImage(e.target.files[0]) })
       )
-    ))
+    )
   );
 }
 
-// ── Products Tab ──────────────────────────────────────────────────────────────
+// ── Purchase Orders Tab ───────────────────────────────────────────────────────
+const PO_CURRENCIES = ["JMD", "USD"];
+const PO_STATUSES = ["Open","Ordered","Partial","Received","Voided"];
+
+function PurchasesTab() {
+  const E = React.createElement;
+  const [pos, setPos] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [view, setView] = useState("pos"); // pos | new | receive | history
+  const [viewingPO, setViewingPO] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
+
+  // New PO form
+  const emptyPO = () => ({
+    supplier:"", poRef:"", date:todayStr(), currency:"JMD",
+    shipping:"", shippingPct:false,
+    tax:"", taxPct:false,
+    notes:"", lines:[]
+  });
+  const [po, setPOS] = useState(emptyPO());
+  const setPO = (k,v) => setPOS(p=>({...p,[k]:v}));
+  const [showAddLine, setShowAddLine] = useState(false);
+  const [newLine, setNewLineS] = useState({ name:"", category:"Like New Samsung", qty:"1", unitCost:"" });
+  const setNL = (k,v) => setNewLineS(p=>({...p,[k]:v}));
+
+  useEffect(() => {
+    Promise.all([loadArr("tpp-purchase-orders"), loadArr("tpp-stock-receives")]).then(([p,h]) => {
+      setPos(p||[]); setHistory(h||[]);
+    });
+  }, []);
+
+  const lineSubtotal = (po.lines||[]).reduce((s,l) => s+(parseFloat(l.unitCost)||0)*(parseInt(l.qty)||0), 0);
+  const shippingAmt = po.shippingPct ? lineSubtotal*(parseFloat(po.shipping)||0)/100 : parseFloat(po.shipping)||0;
+  const taxAmt = po.taxPct ? lineSubtotal*(parseFloat(po.tax)||0)/100 : parseFloat(po.tax)||0;
+  const invoiceTotal = lineSubtotal + shippingAmt + taxAmt;
+
+  const addLine = () => {
+    if (!newLine.name.trim()) { alert("Product name required."); return; }
+    const line = { id:Date.now().toString(), name:newLine.name.trim(), category:newLine.category, qty:parseInt(newLine.qty)||1, unitCost:parseFloat(newLine.unitCost)||0 };
+    setPO("lines", [...(po.lines||[]), line]);
+    setNewLineS({ name:"", category:"Like New Samsung", qty:"1", unitCost:"" });
+    setShowAddLine(false);
+  };
+
+  const savePO = async () => {
+    if (!po.supplier.trim()) { alert("Supplier required."); return; }
+    if (!po.lines?.length) { alert("Add at least one line item."); return; }
+    const record = {
+      id: Date.now().toString(), ...po,
+      shipping: shippingAmt, tax: taxAmt, invoiceTotal,
+      status: "Ordered", createdAt: new Date().toISOString()
+    };
+    const updated = [record, ...pos];
+    await save("tpp-purchase-orders", updated); setPos(updated);
+    setPOS(emptyPO()); setView("pos");
+    alert(`✅ Purchase Order saved — ${fmtMoney(invoiceTotal)} ${po.currency}`);
+  };
+
+  const voidPO = async (id) => {
+    const reason = prompt("Reason for voiding?"); if (!reason) return;
+    const updated = pos.map(p=>p.id===id?{...p,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
+    await save("tpp-purchase-orders", updated); setPos(updated);
+    if (viewingPO?.id===id) setViewingPO(updated.find(p=>p.id===id));
+  };
+
+  const openPos = pos.filter(p=>p.status!=="Voided");
+  const allTypes = ["phones","accessories","parts","gadgets","mixture"];
+
+  // ── PO Detail Modal ─────────────────────────────────────────────────────────
+  const PODetail = () => viewingPO && E("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+    E("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:560, width:"100%", maxHeight:"88vh", overflowY:"auto" } },
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
+        E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "📄 Purchase Order"),
+        E("button", { onClick:()=>setViewingPO(null), style:{ background:"none", border:"none", fontSize:20, cursor:"pointer" } }, "✕")
+      ),
+      viewingPO.status==="Voided" && E("div", { style:{ background:T.redLt, borderRadius:8, padding:"8px 14px", marginBottom:12, fontSize:12, color:T.red, fontWeight:700 } }, `🚫 Voided: ${viewingPO.voidReason||""}`),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, fontSize:13, marginBottom:16 } },
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Supplier"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.supplier||"—")),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Reference"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.poRef||"—")),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Date"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.date||"—")),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Currency"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.currency||"JMD")),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Status"),E("div",{style:{fontWeight:700,color:viewingPO.status==="Voided"?T.red:viewingPO.status==="Received"?T.green:T.blue,marginTop:2}},viewingPO.status)),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},fmtMoney(viewingPO.invoiceTotal||0)," ",viewingPO.currency||"JMD"))
+      ),
+      (viewingPO.lines||[]).length>0 && E("div", { style:{ marginBottom:14 } },
+        E(ST, null, "Line Items"),
+        (viewingPO.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:`1px dashed ${T.border}`}},
+          E("div",null,E("div",{style:{fontWeight:500}},l.name),E("div",{style:{color:T.muted}},l.category," · qty ",l.qty)),
+          E("div",{style:{fontWeight:600}},fmtMoney((l.unitCost||0)*(l.qty||1))," ",viewingPO.currency||"JMD")
+        ))
+      ),
+      E("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 } }, E("span",{style:{color:T.muted}},"Shipping"), E("span",null,fmtMoney(viewingPO.shipping||0))),
+      E("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:10 } }, E("span",{style:{color:T.muted}},"Tax"), E("span",null,fmtMoney(viewingPO.tax||0))),
+      viewingPO.notes && E("div",{style:{fontSize:12,color:T.muted,fontStyle:"italic",marginBottom:16}},viewingPO.notes),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn,{variant:"ghost",onClick:()=>setViewingPO(null)},"Close"),
+        viewingPO.status!=="Voided"&&viewingPO.status!=="Received"&&E(Btn,{variant:"ghost",style:{color:T.green},onClick:()=>{setViewingPO(null);setView("receive");}},"📥 Receive Stock"),
+        viewingPO.status!=="Voided"&&E(Btn,{variant:"danger",onClick:()=>voidPO(viewingPO.id)},"🚫 Void")
+      )
+    )
+  );
+
+  // ── New PO Form ─────────────────────────────────────────────────────────────
+  if (view==="new") return E("div", { style:{ maxWidth:640, margin:"0 auto" } },
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📄 New Purchase Order"),
+      E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
+    ),
+    E(Card,{style:{marginBottom:16}},
+      E(ST,null,"Order Details"),
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+        E(Field,{label:"Supplier",required:true},E(Input,{placeholder:"e.g. Cell Parts JA",value:po.supplier,onChange:e=>setPO("supplier",e.target.value)})),
+        E(Field,{label:"PO / Invoice Reference"},E(Input,{placeholder:"Invoice # or PO number",value:po.poRef,onChange:e=>setPO("poRef",e.target.value)})),
+        E(Field,{label:"Date"},E(Input,{type:"date",value:po.date,onChange:e=>setPO("date",e.target.value)})),
+        E(Field,{label:"Currency"},E(Sel,{value:po.currency,onChange:e=>setPO("currency",e.target.value)},PO_CURRENCIES.map(c=>E("option",{key:c,value:c},c))))
+      ),
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr auto 1fr auto",gap:8,alignItems:"flex-end",marginBottom:12}},
+        E(Field,{label:"Shipping"},E(Input,{type:"number",placeholder:"0",value:po.shipping,onChange:e=>setPO("shipping",e.target.value)})),
+        E("div",{style:{marginBottom:8}},E("label",{style:{fontSize:12,display:"flex",alignItems:"center",gap:4,cursor:"pointer",whiteSpace:"nowrap"}},E("input",{type:"checkbox",checked:po.shippingPct,onChange:e=>setPO("shippingPct",e.target.checked)})," %")),
+        E(Field,{label:"Tax"},E(Input,{type:"number",placeholder:"0",value:po.tax,onChange:e=>setPO("tax",e.target.value)})),
+        E("div",{style:{marginBottom:8}},E("label",{style:{fontSize:12,display:"flex",alignItems:"center",gap:4,cursor:"pointer",whiteSpace:"nowrap"}},E("input",{type:"checkbox",checked:po.taxPct,onChange:e=>setPO("taxPct",e.target.checked)})," %"))
+      ),
+      E(Field,{label:"Notes"},E(Input,{placeholder:"Optional",value:po.notes,onChange:e=>setPO("notes",e.target.value)}))
+    ),
+    E(Card,{style:{marginBottom:16}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+        E(ST,{style:{margin:0}},`Line Items (${(po.lines||[]).length})`),
+        E(Btn,{style:{fontSize:12},onClick:()=>setShowAddLine(s=>!s)},showAddLine?"✕ Cancel":"+ Add Item")
+      ),
+      showAddLine && E("div",{style:{background:"#F9FAFB",borderRadius:8,padding:14,marginBottom:12}},
+        E("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginBottom:10}},
+          E(Field,{label:"Product Name",required:true},E(Input,{placeholder:"e.g. Like New Samsung S23 Black",value:newLine.name,onChange:e=>setNL("name",e.target.value)})),
+          E(Field,{label:"Category"},E(Sel,{value:newLine.category,onChange:e=>setNL("category",e.target.value)},LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c))))
+        ),
+        E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
+          E(Field,{label:"Quantity"},E(Input,{type:"number",min:1,placeholder:"1",value:newLine.qty,onChange:e=>setNL("qty",e.target.value)})),
+          E(Field,{label:`Unit Cost (${po.currency})`},E(Input,{type:"number",placeholder:"0",value:newLine.unitCost,onChange:e=>setNL("unitCost",e.target.value)}))
+        ),
+        E(Btn,{onClick:addLine},"Add Line")
+      ),
+      (po.lines||[]).length===0
+        ? E("div",{style:{textAlign:"center",padding:"20px",color:T.muted,fontSize:13}},"No line items yet. Tap + Add Item.")
+        : E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            (po.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#F9FAFB",borderRadius:8}},
+              E("div",null,
+                E("div",{style:{fontSize:13,fontWeight:500}},l.name),
+                E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",fmtMoney(l.unitCost))
+              ),
+              E("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                E("div",{style:{fontWeight:700,fontSize:13}},fmtMoney(l.unitCost*l.qty)," ",po.currency),
+                E("button",{onClick:()=>setPO("lines",(po.lines||[]).filter((_,j)=>j!==i)),style:{background:T.redLt,color:T.red,border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}},"✕")
+              )
+            ))
+          ),
+      (po.lines||[]).length>0 && E("div",{style:{borderTop:`1px solid ${T.border}`,marginTop:10,paddingTop:10}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Subtotal"),E("span",null,fmtMoney(lineSubtotal))),
+        shippingAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Shipping"),E("span",null,fmtMoney(shippingAmt))),
+        taxAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Tax"),E("span",null,fmtMoney(taxAmt))),
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue}},fmtMoney(invoiceTotal)," ",po.currency))
+      )
+    ),
+    E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},"💾 Save Purchase Order")
+  );
+
+  // ── Main PO List ────────────────────────────────────────────────────────────
+  return E("div",{style:{maxWidth:680,margin:"0 auto"}},
+    E(PODetail,null),
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💸 Purchases"),
+      E("div",{style:{display:"flex",gap:8}},
+        E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("history")},"📋 Spend History"),
+        E(Btn,{onClick:()=>setView("new")},"+ New PO")
+      )
+    ),
+    E(ST,null,`Purchase Orders (${openPos.length} open)`),
+    pos.length===0
+      ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchase orders yet.")
+      :E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+          pos.map((p,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${p.status==="Voided"?"#FECACA":T.border}`,borderRadius:12,padding:"14px 16px",opacity:p.status==="Voided"?0.6:1,borderLeft:`3px solid ${p.status==="Voided"?T.red:p.status==="Received"?T.green:T.blue}`}},
+            E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
+              E("div",null,
+                E("div",{style:{fontWeight:700,fontSize:14}},p.supplier,p.poRef?` — ${p.poRef}`:""),
+                E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},p.date,` · ${(p.lines||[]).length} items · `,p.currency),
+                p.status==="Voided"&&E("div",{style:{fontSize:11,color:T.red,marginTop:2}},"Voided: ",p.voidReason)
+              ),
+              E("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)),
+                E("span",{style:{background:p.status==="Voided"?T.redLt:p.status==="Received"?T.greenLt:T.blueLt,color:p.status==="Voided"?T.red:p.status==="Received"?T.green:T.blue,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}},p.status),
+                E("button",{onClick:()=>setViewingPO(p),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"View")
+              )
+            )
+          ))
+        ),
+    view==="history"&&E("div",{style:{marginTop:24}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+        E(ST,{style:{margin:0}},"Stock Receive History"),
+        E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer"}},"✕")
+      ),
+      E("div",{style:{display:"flex",gap:8,marginBottom:12}},
+        E("input",{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{...iS,width:"auto"}}),
+        E(Sel,{value:filter,onChange:e=>setFilter(e.target.value),style:{width:"auto"}},
+          E("option",{value:"all"},"All Categories"),
+          LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c))
+        )
+      ),
+      history.filter(h=>(filter==="all"||(h.category||"")===(filter))&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter))).length===0
+        ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No receive history found.")
+        :E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            history.filter(h=>(filter==="all"||(h.category||"")===(filter))&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter))).map((h,i)=>E(Card,{key:i},
+              E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                E("div",null,
+                  E("div",{style:{fontWeight:600,fontSize:13}},h.productName||h.name),
+                  E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},h.category,` · qty ${h.qty||1} · ${h.receivedDate||fmtDate(h.createdAt)}`,h.supplier?` · ${h.supplier}`:"",h.poRef?` · PO: ${h.poRef}`:"")
+                ),
+                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney((h.unitCost||h.costPerUnit||0)*(h.qty||1)))
+              )
+            ))
+          )
+    )
+  );
+}
+
+// ── Receive Stock Tab ─────────────────────────────────────────────────────────
+function ReceiveStockTab({ onCatalogUpdate }) {
+  const E = React.createElement;
+  const [view, setView] = useState("choose"); // choose | manual | ai | existing | imei_entry
+  const [pos, setPos] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [selectedPO, setSelectedPO] = useState(null);
+  const [receiveLines, setReceiveLines] = useState([]); // lines being received
+  const [showImeiScanner, setShowImeiScanner] = useState(false);
+  const [imeiTargetLine, setImeiTargetLine] = useState(null); // which line we're scanning IMEI for
+  const [saving, setSaving] = useState(false);
+  const [flagAllTesting, setFlagAllTesting] = useState(false);
+
+  useEffect(()=>{
+    Promise.all([loadArr("tpp-purchase-orders"), loadCatalog()]).then(([p,c])=>{
+      setPos((p||[]).filter(x=>x.status!=="Voided"&&x.status!=="Received"));
+      setCatalog(c||[]);
+    });
+  },[]);
+
+  // Set up receive lines from a PO
+  const loadPOForReceiving = (po) => {
+    setSelectedPO(po);
+    setReceiveLines((po.lines||[]).map(l=>({
+      ...l,
+      receivedQty: l.qty,
+      units: isImeiCategory(l.category) ? Array.from({length:l.qty},(_,i)=>({tempId:i,imei:"",status:"Available"})) : [],
+      matchedProductId: null,
+      isNew: false,
+      sellPrice: "",
+    })));
+    setView("imei_entry");
+  };
+
+  // Update a unit's IMEI or status
+  const updateUnit = (lineIdx, unitIdx, field, val) => {
+    setReceiveLines(prev=>prev.map((l,li)=>li!==lineIdx?l:{
+      ...l, units: l.units.map((u,ui)=>ui!==unitIdx?u:{...u,[field]:val})
+    }));
+  };
+
+  // Commit the received stock to catalog
+  const commitReceive = async () => {
+    setSaving(true);
+    try {
+      let updatedCatalog = [...catalog];
+      const receiveHistory = [];
+      const today = todayStr();
+
+      for (const line of receiveLines) {
+        const isImei = isImeiCategory(line.category);
+        const units = flagAllTesting
+          ? line.units.map(u=>({...u,status:"Under Testing"}))
+          : line.units;
+
+        if (isImei) {
+          // Find or create catalog product
+          let product = updatedCatalog.find(p=>
+            p.name?.toLowerCase()===line.name.toLowerCase() && p.category===line.category
+          );
+          if (!product) {
+            product = {
+              id: `prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+              name: line.name, category: line.category,
+              price: parseFloat(line.sellPrice)||0,
+              cost: parseFloat(line.unitCost)||0,
+              stock: 0, units: [],
+              variable_price: false, createdAt: new Date().toISOString()
+            };
+            updatedCatalog = [product, ...updatedCatalog];
+          }
+          // Add units
+          const newUnits = units.filter(u=>u.imei).map(u=>({
+            id: `unit-${Date.now()}-${u.imei||Math.random().toString(36).slice(2,8)}`,
+            imei: u.imei, status: u.status||"Available",
+            cost: parseFloat(line.unitCost)||0,
+            sellPrice: parseFloat(line.sellPrice)||0,
+            receivedDate: today,
+            poRef: selectedPO?.poRef||"",
+            supplier: selectedPO?.supplier||"",
+            history: [{status:u.status||"Available",ts:new Date().toISOString(),note:`Received${selectedPO?.poRef?" via PO "+selectedPO.poRef:""}`}]
+          }));
+          product.units = [...(product.units||[]), ...newUnits];
+          product.stock = product.units.filter(u=>u.status==="Available").length;
+          product.cost = parseFloat(line.unitCost)||product.cost;
+          if (parseFloat(line.sellPrice)) product.price = parseFloat(line.sellPrice);
+          updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
+          receiveHistory.push({ productName:line.name, category:line.category, qty:newUnits.length, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
+        } else {
+          // Non-IMEI: just add to stock count
+          let product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
+          if (!product) {
+            product = { id:`prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, name:line.name, category:line.category, price:parseFloat(line.sellPrice)||0, cost:parseFloat(line.unitCost)||0, stock:0, units:[], variable_price:false, createdAt:new Date().toISOString() };
+            updatedCatalog = [product, ...updatedCatalog];
+          }
+          product.stock = (product.stock||0) + (parseInt(line.receivedQty)||0);
+          if (parseFloat(line.unitCost)) product.cost = parseFloat(line.unitCost);
+          if (parseFloat(line.sellPrice)) product.price = parseFloat(line.sellPrice);
+          updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
+          receiveHistory.push({ productName:line.name, category:line.category, qty:parseInt(line.receivedQty)||0, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
+        }
+      }
+
+      await saveCatalog(updatedCatalog);
+      // Save receive history
+      const existingHistory = await loadArr("tpp-stock-receives");
+      await save("tpp-stock-receives", [...receiveHistory, ...existingHistory]);
+      // Mark PO as received
+      if (selectedPO) {
+        const allPOs = await loadArr("tpp-purchase-orders");
+        await save("tpp-purchase-orders", allPOs.map(p=>p.id===selectedPO.id?{...p,status:"Received",receivedAt:new Date().toISOString()}:p));
+      }
+      if (onCatalogUpdate) onCatalogUpdate(updatedCatalog);
+      setCatalog(updatedCatalog);
+      alert(`✅ Stock received!\n${receiveLines.length} product(s) updated in catalog.${flagAllTesting?"\n⚠️ All phone/tablet units flagged for testing.":""}`);
+      setView("choose"); setSelectedPO(null); setReceiveLines([]); setFlagAllTesting(false);
+    } finally { setSaving(false); }
+  };
+
+  // ── IMEI Entry Screen ───────────────────────────────────────────────────────
+  if (view==="imei_entry") return E("div",{style:{maxWidth:680,margin:"0 auto"}},
+    showImeiScanner && E(ImeiScanner,{
+      onDetected:(imei)=>{
+        if(imeiTargetLine!==null){
+          const line=receiveLines[imeiTargetLine.lineIdx];
+          const nextEmpty=line.units.findIndex((u,i)=>i>=imeiTargetLine.unitIdx&&!u.imei);
+          if(nextEmpty>=0) updateUnit(imeiTargetLine.lineIdx,nextEmpty,"imei",imei);
+        }
+        setShowImeiScanner(false); setImeiTargetLine(null);
+      },
+      onClose:()=>{setShowImeiScanner(false);setImeiTargetLine(null);}
+    }),
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+      E("button",{onClick:()=>{setView("choose");setSelectedPO(null);setReceiveLines([]);},style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back"),
+      E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},selectedPO?`Receiving PO — ${selectedPO.poRef||selectedPO.supplier}`:"Receiving Stock")
+    ),
+    // Flag all for testing
+    E("div",{style:{background:T.amberLt,border:`1px solid #FDE68A`,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      E("div",{style:{fontSize:13,color:"#92400E"}},"Flag all phones/tablets for testing before sale"),
+      E("label",{style:{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:700,color:"#92400E"}},
+        E("input",{type:"checkbox",checked:flagAllTesting,onChange:e=>setFlagAllTesting(e.target.checked)}),"Flag all"
+      )
+    ),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+      receiveLines.map((line,li)=>{
+        const isImei = isImeiCategory(line.category);
+        return E(Card,{key:li},
+          E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}},
+            E("div",null,
+              E("div",{style:{fontWeight:700,fontSize:14}},line.name),
+              E("div",{style:{fontSize:12,color:T.muted}},line.category," · qty ",line.qty)
+            ),
+            isImei&&E("div",{style:{display:"flex",gap:6}},
+              E("button",{onClick:()=>{setImeiTargetLine({lineIdx:li,unitIdx:0});setShowImeiScanner(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"📷 Scan IMEI")
+            )
+          ),
+          E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
+            E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))})),
+            E(Field,{label:"Sell Price"},E(Input,{type:"number",placeholder:"0",value:line.sellPrice||"",onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,sellPrice:e.target.value}:l))}))
+          ),
+          isImei
+            ? E("div",null,
+                E("div",{style:{fontSize:12,fontWeight:700,color:T.muted,marginBottom:8}},`Enter IMEI for each unit (${line.units.filter(u=>u.imei).length}/${line.qty} entered):`),
+                E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+                  line.units.map((unit,ui)=>E("div",{key:ui,style:{display:"flex",gap:8,alignItems:"center"}},
+                    E("div",{style:{fontSize:11,color:T.muted,minWidth:20}},`${ui+1}.`),
+                    E(Input,{placeholder:`IMEI ${ui+1}`,value:unit.imei,onChange:e=>updateUnit(li,ui,"imei",e.target.value),style:{flex:1,fontSize:12}}),
+                    E(Sel,{value:unit.status,onChange:e=>updateUnit(li,ui,"status",e.target.value),style:{width:"auto",fontSize:11}},
+                      E("option",{value:"Available"},"✅ Available"),
+                      E("option",{value:"Under Testing"},"🔬 Testing")
+                    ),
+                    E("button",{onClick:()=>{setImeiTargetLine({lineIdx:li,unitIdx:ui});setShowImeiScanner(true);},style:{background:"#F3F4F6",border:"none",borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:12}},"📷")
+                  ))
+                )
+              )
+            : E(Field,{label:"Qty Received"},E(Input,{type:"number",min:1,value:line.receivedQty,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,receivedQty:e.target.value}:l))}))
+        );
+      })
+    ),
+    E("div",{style:{marginTop:20}},
+      E(Btn,{full:true,disabled:saving,onClick:commitReceive},saving?"Saving...":"✅ Confirm Receipt & Update Inventory")
+    )
+  );
+
+  // ── Choose receive method ───────────────────────────────────────────────────
+  return E("div",{style:{maxWidth:600,margin:"0 auto"}},
+    E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,marginBottom:8}},"📥 Receive Stock"),
+    E("div",{style:{fontSize:13,color:T.muted,marginBottom:24}},"How are you receiving this stock?"),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+      E("button",{onClick:()=>setView("existing"),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"📄 Receive from Existing PO"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${pos.length} open PO${pos.length!==1?"s":""}  available`)),
+        E("div",{style:{fontSize:20}},"→")
+      ),
+      E("button",{onClick:()=>{setSelectedPO(null);setReceiveLines([{name:"",category:"Like New Samsung",qty:"1",unitCost:"",sellPrice:"",units:[{tempId:0,imei:"",status:"Available"}],receivedQty:"1"}]);setView("imei_entry");},style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"✏️ Manual Entry"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Enter stock details manually")),
+        E("div",{style:{fontSize:20}},"→")
+      ),
+      E("button",{onClick:()=>setView("ai"),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"🤖 Scan AI Invoice"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Upload a photo of your invoice")),
+        E("div",{style:{fontSize:20}},"→")
+      )
+    ),
+    view==="existing"&&E("div",{style:{marginTop:24}},
+      E(ST,null,"Select a Purchase Order"),
+      pos.length===0
+        ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No open POs. Create one in the Purchases tab.")
+        :E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+            pos.map((p,i)=>E("div",{key:i,onClick:()=>loadPOForReceiving(p),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              E("div",null,
+                E("div",{style:{fontWeight:700,fontSize:13}},p.supplier,p.poRef?` — ${p.poRef}`:""),
+                E("div",{style:{fontSize:11,color:T.muted}},p.date,` · ${(p.lines||[]).length} line items`)
+              ),
+              E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)," ",p.currency)
+            ))
+          )
+    ),
+    view==="ai"&&E("div",{style:{marginTop:24}},
+      E(ST,null,"AI Invoice Scanner"),
+      E("div",{style:{textAlign:"center",padding:"30px",background:"#F9FAFB",borderRadius:12,color:T.muted}},
+        E("div",{style:{fontSize:32,marginBottom:8}},"🤖"),
+        E("div",{style:{fontWeight:600,marginBottom:4}},"AI Invoice Scanning"),
+        E("div",{style:{fontSize:13}},"Use the AI invoice scanner in the Products tab to scan and import invoice data. Once imported, return here to enter IMEIs and confirm receipt.")
+      )
+    )
+  );
+}
+
+// ── Catalog Sub-Tab ───────────────────────────────────────────────────────────
+function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
+  const E = React.createElement;
+  const [catFilter, setCatFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [expandedProduct, setExpandedProduct] = useState(null);
+  const emptyForm = () => ({ name:"", category:"Like New Samsung", price:"", cost:"", barcode:"", stock:"", variable_price:false });
+  const [form, setFormS] = useState(emptyForm());
+  const setF = (k,v) => setFormS(p=>({...p,[k]:v}));
+
+  const filtered = catalog.filter(p=>{
+    const mc = catFilter==="all" || p.category===catFilter;
+    const mq = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search);
+    return mc && mq;
+  });
+
+  const grouped = {};
+  filtered.forEach(p=>{ const c=p.category||"Other"; if(!grouped[c])grouped[c]=[]; grouped[c].push(p); });
+
+  const saveProduct = async () => {
+    if (!form.name.trim()) { alert("Name required."); return; }
+    const isImei = isImeiCategory(form.category);
+    const product = editingProduct
+      ? { ...editingProduct, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
+      : { id:`prod-${Date.now()}`, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?0:parseInt(form.stock)||0, units:[], createdAt:new Date().toISOString() };
+    const updated = editingProduct ? catalog.map(p=>p.id===editingProduct.id?product:p) : [product,...catalog];
+    await saveCatalogFn(updated);
+    setFormS(emptyForm()); setShowAddForm(false); setEditingProduct(null);
+  };
+
+  return E("div",null,
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"Catalog ",E("span",{style:{fontSize:14,color:T.muted,fontWeight:400}},`· ${catalog.length} products`)),
+      E(Btn,{onClick:()=>{setShowAddForm(s=>!s);setEditingProduct(null);setFormS(emptyForm());}},showAddForm?"✕ Cancel":"+ Add Product")
+    ),
+    showAddForm && E(Card,{style:{marginBottom:16}},
+      E(ST,null,editingProduct?"Edit Product":"New Product"),
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
+        E(Field,{label:"Name",required:true},E(Input,{value:form.name,onChange:e=>setF("name",e.target.value),placeholder:"e.g. Samsung S24 Case Black"})),
+        E(Field,{label:"Category"},E(Sel,{value:form.category,onChange:e=>setF("category",e.target.value)},LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c)))),
+        E(Field,{label:"Price (JMD)"},E(Input,{type:"number",value:form.price,onChange:e=>setF("price",e.target.value),placeholder:"0"})),
+        E(Field,{label:"Cost (JMD)"},E(Input,{type:"number",value:form.cost,onChange:e=>setF("cost",e.target.value),placeholder:"0"})),
+        !isImeiCategory(form.category)&&E(Field,{label:"Stock Qty"},E(Input,{type:"number",value:form.stock,onChange:e=>setF("stock",e.target.value),placeholder:"0"})),
+        E(Field,{label:"Barcode"},E(Input,{value:form.barcode||"",onChange:e=>setF("barcode",e.target.value),placeholder:"Optional"})),
+        E(Field,{label:"Variable price?"},E("label",{style:{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",marginTop:8}},E("input",{type:"checkbox",checked:!!form.variable_price,onChange:e=>setF("variable_price",e.target.checked)}),"Yes — price set at sale time"))
+      ),
+      isImeiCategory(form.category)&&E("div",{style:{background:T.blueLt,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.blue,marginBottom:12}},"📱 IMEI-tracked product — individual units managed in Receive Stock."),
+      E("div",{style:{display:"flex",gap:8}},
+        E(Btn,{variant:"ghost",onClick:()=>{setShowAddForm(false);setEditingProduct(null);setFormS(emptyForm());}},"Cancel"),
+        E(Btn,{onClick:saveProduct},editingProduct?"Save Changes":"Add Product")
+      )
+    ),
+    E("div",{style:{display:"flex",gap:8,marginBottom:16}},
+      E(Sel,{value:catFilter,onChange:e=>setCatFilter(e.target.value),style:{width:"auto"}},
+        E("option",{value:"all"},"All Categories"),
+        LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c))
+      ),
+      E(Input,{placeholder:"🔍 Search...",value:search,onChange:e=>setSearch(e.target.value)})
+    ),
+    Object.keys(grouped).length===0
+      ?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No products found.")
+      :Object.entries(grouped).map(([cat,items])=>E("div",{key:cat,style:{marginBottom:24}},
+          E(ST,null,cat,` (${items.length})`),
+          E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            items.map((product,i)=>{
+              const avail = getAvailableStock(product);
+              const isImei = isImeiCategory(product.category);
+              const expanded = expandedProduct===product.id;
+              return E("div",{key:i},
+                E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:isImei?"pointer":"default"},onClick:()=>isImei&&setExpandedProduct(expanded?null:product.id)},
+                  E("div",{style:{flex:1,minWidth:0}},
+                    E("div",{style:{fontWeight:600,fontSize:13,display:"flex",alignItems:"center",gap:8}},
+                      product.name,
+                      isImei&&E("span",{style:{fontSize:10,color:T.muted}},"▸")
+                    ),
+                    E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},
+                      `Stock: ${avail}`,
+                      product.barcode?` · ${product.barcode}`:"",
+                      product.variable_price?" · Variable":""
+                    )
+                  ),
+                  E("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                    E("div",{style:{fontWeight:700,color:avail>0?T.blue:T.red}},product.variable_price?"Variable":fmtMoney(product.price||0)),
+                    E("button",{onClick:e=>{e.stopPropagation();setEditingProduct(product);setFormS({name:product.name,category:product.category,price:String(product.price||""),cost:String(product.cost||""),barcode:product.barcode||"",stock:String(product.stock||""),variable_price:!!product.variable_price});setShowAddForm(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✏️"),
+                    E("button",{onClick:async e=>{e.stopPropagation();if(!confirm(`Remove "${product.name}"?`))return;await saveCatalogFn(catalog.filter(p=>p.id!==product.id));},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🗑️")
+                  )
+                ),
+                // Expanded IMEI units
+                isImei&&expanded&&E("div",{style:{background:"#F9FAFB",border:`1px solid ${T.border}`,borderTop:"none",borderRadius:"0 0 10px 10px",padding:"10px 16px"}},
+                  E("div",{style:{fontSize:11,fontWeight:700,color:T.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}},
+                    `${(product.units||[]).length} units — ${avail} available`
+                  ),
+                  E("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+                    (product.units||[]).slice(0,20).map((unit,ui)=>E("div",{key:ui,style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"4px 0",borderBottom:`1px dashed ${T.border}`}},
+                      E("span",{style:{fontFamily:"monospace"}},unit.imei||"No IMEI"),
+                      E("span",{style:{color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}},unit.status)
+                    ))
+                  ),
+                  (product.units||[]).length>20&&E("div",{style:{fontSize:11,color:T.muted,marginTop:6}},`+ ${(product.units||[]).length-20} more units`)
+                )
+              );
+            })
+          )
+        ))
+  );
+}
+
+// ── Products Tab (wrapper) ────────────────────────────────────────────────────
 const INVOICE_TYPES = [
-  { id:"phones", label:"📱 Phones", hint:"IMEI-tracked devices" },
-  { id:"accessories", label:"📦 Accessories", hint:"Cases, chargers, cables" },
-  { id:"parts", label:"🔧 Phone Parts", hint:"Screens, batteries, ports" },
-  { id:"gadgets", label:"📡 Tech Gadgets", hint:"Watches, earbuds, tablets" },
-  { id:"mixture", label:"🔀 Mixture", hint:"Mixed invoice" },
+  {id:"phones",label:"📱 Phones",hint:"IMEI-tracked devices"},
+  {id:"accessories",label:"📦 Accessories",hint:"Cases, chargers, cables"},
+  {id:"parts",label:"🔧 Phone Parts",hint:"Screens, batteries, ports"},
+  {id:"gadgets",label:"📡 Tech Gadgets",hint:"Watches, earbuds, tablets"},
+  {id:"mixture",label:"🔀 Mixture",hint:"Mixed invoice"},
 ];
 
 function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
   const E = React.createElement;
-  const [subTab, setSubTab] = useState("phones");
-  const [pv, setPv] = useState("list");
-  const [products, setProducts] = useState([]);
-  const [invoiceType, setInvoiceType] = useState(null);
+  const [subTab, setSubTab] = useState("catalog");
+  const [catalog, setCatalogState] = useState([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
 
   useEffect(()=>{
-    (async()=>{
-      try {
-        const meta=await load("tpp-products-meta");
-        if(meta&&meta.chunks){const all=[];for(let i=0;i<meta.chunks;i++){const c=await load(`tpp-products-chunk-${i}`);if(Array.isArray(c))all.push(...c);}setProducts(all);}
-        else setProducts(await loadArr("tpp-products"));
-      } catch{setProducts(await loadArr("tpp-products"));}
-    })();
+    loadCatalog().then(c=>{ setCatalogState(c||[]); setCatalogLoaded(true); });
   },[]);
 
-  const saveProducts=async(updated)=>{
-    if(updated.length>100){const CHUNK=100;const chunks=[];for(let i=0;i<updated.length;i+=CHUNK)chunks.push(updated.slice(i,i+CHUNK));await save("tpp-products-meta",{total:updated.length,chunks:chunks.length,updated:new Date().toISOString()});for(let i=0;i<chunks.length;i++)await save(`tpp-products-chunk-${i}`,chunks[i]);}
-    else{await save("tpp-products",updated);}
-    setProducts(updated);
+  const saveCatalogFn = async (updated) => {
+    await saveCatalog(updated);
+    setCatalogState(updated);
   };
 
-  const subTabs=[{id:"phones",label:"📱 Phones"},{id:"catalog",label:"📦 Catalog"},{id:"receive",label:"📥 Receive Stock"}];
-  const tabBar=E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12}},
-    subTabs.map(st=>E("button",{key:st.id,onClick:()=>{setSubTab(st.id);if(st.id!=="receive"){setInvoiceType(null);}},style:{background:subTab===st.id?T.blue:"#F3F4F6",color:subTab===st.id?"#fff":T.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},st.label))
+  const subTabs=[
+    {id:"catalog",label:"📦 Catalog"},
+    {id:"receive",label:"📥 Receive Stock"},
+    {id:"ai",label:"🤖 AI Invoice"},
+  ];
+
+  const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12}},
+    subTabs.map(st=>E("button",{key:st.id,onClick:()=>setSubTab(st.id),style:{background:subTab===st.id?T.blue:"#F3F4F6",color:subTab===st.id?"#fff":T.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},st.label))
   );
 
-  if(subTab==="phones")return E("div",null,tabBar,
-    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"Phone Inventory ",E("span",{style:{fontSize:14,color:T.muted,fontWeight:400}},"· ",(data.phones||[]).length," total")),
-      E("div",{style:{display:"flex",gap:8}},
-        E(Btn,{variant:"ghost",onClick:archiveOldSales,style:{fontSize:12}},"📦 Archive"),
-        E(Btn,{onClick:()=>setPv(pv==="list"?"add":"list")},pv!=="list"?"← Back":"➕ Add Phone"),
-        pv==="list"&&E(Btn,{variant:"ghost",onClick:()=>setPv("import"),style:{fontSize:12}},"📄 Import Invoice")
-      )
-    ),
-    pv==="add"?E(PhoneForm,{onDone:()=>{fetchAll();setPv("list");}})
-    :pv==="import"?E(InvoiceImporter,{user,allPhones:data.phones||[],onDone:()=>{fetchAll();setPv("list");}})
-    :E(PhoneInventory,{phones:data.phones||[],onUpdate:updatePhones})
-  );
+  if (!catalogLoaded) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading catalog...");
 
-  if(subTab==="catalog")return E("div",null,tabBar,E(CatalogSubTab,{products,saveProducts}));
-
-  if(subTab==="receive"&&!invoiceType)return E("div",null,tabBar,
-    E("div",{style:{marginBottom:20}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📥 Receive Stock"),
-      E("div",{style:{fontSize:13,color:T.muted,marginTop:4}},"What type of stock are you receiving?")
-    ),
-    E("div",{style:{display:"flex",flexDirection:"column",gap:10}},
-      INVOICE_TYPES.map(t=>E("button",{key:t.id,onClick:()=>setInvoiceType(t.id),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"16px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},t.label),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},t.hint)),
-        E("div",{style:{fontSize:20}},"→")
-      ))
-    )
-  );
-
-  if(subTab==="receive"&&invoiceType)return E("div",null,tabBar,
-    E("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:20}},
-      E("button",{onClick:()=>setInvoiceType(null),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Change type"),
-      E("div",{style:{background:T.blueLt,color:T.blue,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 12px",fontSize:12,fontWeight:700}},INVOICE_TYPES.find(t=>t.id===invoiceType)?.label)
-    ),
-    E(StockReceiving,{products,onProductsUpdate:saveProducts,invoiceType,allPhones:data.phones||[],onPhonesDone:(updatedPhones)=>{if(updatedPhones)updatePhones(updatedPhones);fetchAll();setSubTab("phones");}})
-  );
+  if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
+  if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
+  if (subTab==="ai") return E("div",null,tabBar,E(InvoiceImporter,{user,allPhones:data?.phones||[],onDone:()=>{loadCatalog().then(c=>setCatalogState(c||[]));fetchAll&&fetchAll();setSubTab("catalog");}}));
 
   return null;
 }
 
 
-// ── Phone Testing Queue ───────────────────────────────────────────────────────
 function PhoneTestingQueue({ phones, onUpdate }) {
   const E = React.createElement;
   const [testingPhone, setTestingPhone] = useState(null);
