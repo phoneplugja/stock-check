@@ -5536,6 +5536,31 @@ function RecentEntries({ storeKey, label, formatLine }) {
 }
 
 // ── Staff Shell ───────────────────────────────────────────────────────────────
+// ── Staff POS Wrapper — loads phone data for staff ────────────────────────────
+function StaffPOS({ user }) {
+  const E = React.createElement;
+  const [phones, setPhones] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(()=>{
+    (async()=>{
+      try {
+        const p = await loadArr("tpp-phones-v1") || await loadArr("tpp-phones") || [];
+        setPhones(p);
+      } catch { setPhones([]); }
+      setLoading(false);
+    })();
+  },[]);
+  if (loading) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading...");
+  return E(POSSystem,{
+    user,
+    phones,
+    onPhonesUpdate: async (updated) => {
+      await save("tpp-phones-v1", updated);
+      setPhones(updated);
+    }
+  });
+}
+
 function StaffShell({
   user,
   onLogout
@@ -5653,7 +5678,7 @@ function StaffShell({
       maxWidth: 960,
       margin: "0 auto"
     }
-  }, tab === "pos" && /*#__PURE__*/React.createElement(POSSystem, { user: user }), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
+  }, tab === "pos" && /*#__PURE__*/React.createElement(StaffPOS, { user: user }), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
     user: user
   }), tab === "expense" && /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(ExpenseForm, { user: user }),
