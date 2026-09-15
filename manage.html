@@ -5537,6 +5537,461 @@ function RecentEntries({ storeKey, label, formatLine }) {
 
 // ── Staff Shell ───────────────────────────────────────────────────────────────
 // ── Staff POS Wrapper — loads phone data for staff ────────────────────────────
+
+// ── POS System ────────────────────────────────────────────────────────────────
+
+const WARRANTY_FOOTER = `WARRANTY & TERMS
+• Repairs: 7-day warranty on specific repair only. Does not cover new or unrelated faults.
+• Accessories: Non-refundable after 24 hours. Exchange only with original receipt.
+• Phones: 7-day warranty. No warranty on water-damaged or physically damaged devices after sale.
+• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
+• Devices uncollected after 3 days of notification may incur storage fees.
+Thank you for choosing The Phone Plug!`;
+
+const SALE_ID_PREFIX = "RCP";
+const genSaleId = (existing=[]) => {
+  let id;
+  do { id = SALE_ID_PREFIX + "-" + Array.from({length:6},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join(""); } while(existing.includes(id));
+  return id;
+};
+
+const sendReceiptEmail = async (sale) => {
+  if (!sale.customerEmail) return false;
+  const itemLines = sale.items.map(i => `${i.name} x${i.qty} — ${fmtMoney(i.price * i.qty)}`).join("\n");
+  const params = {
+    to_email: sale.customerEmail,
+    customer_name: sale.customerName || "Valued Customer",
+    receipt_id: sale.id,
+    date: fmtDate(sale.createdAt),
+    items: itemLines,
+    subtotal: fmtMoney(sale.subtotal),
+    discount: sale.discount ? fmtMoney(sale.discount) : "—",
+    total: fmtMoney(sale.total),
+    cash: sale.cash ? fmtMoney(sale.cash) : "—",
+    card: sale.card ? fmtMoney(sale.card) : "—",
+    transfer: sale.transfer ? fmtMoney(sale.transfer) : "—",
+    change: sale.change ? fmtMoney(sale.change) : "—",
+    warranty: WARRANTY_FOOTER,
+    store_name: "The Phone Plug",
+    store_address: ADDRESS,
+    store_phone: PHONE_1,
+  };
+  try {
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TPL_RECEIPT, params);
+    return true;
+  } catch(e) {
+    console.error("Receipt email error:", e);
+    return false;
+  }
+};
+
+const printReceipt = (sale) => {
+  const itemLines = sale.items.map(i =>
+    `<tr><td>${i.name}</td><td style="text-align:right">${fmtMoney(i.price)}</td></tr>`
+    + (i.qty > 1 ? `<tr><td style="font-size:10px;color:#666">  x${i.qty}</td><td style="text-align:right;font-size:10px;color:#666">${fmtMoney(i.price * i.qty)}</td></tr>` : "")
+  ).join("");
+  const payLines = [
+    sale.cash   ? `<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>` : "",
+    sale.card   ? `<tr><td>Card</td><td style="text-align:right">${fmtMoney(sale.card)}</td></tr>` : "",
+    sale.transfer ? `<tr><td>Transfer</td><td style="text-align:right">${fmtMoney(sale.transfer)}</td></tr>` : "",
+    sale.change && sale.change > 0 ? `<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>` : "",
+  ].join("");
+  const depositNote = sale.items.some(i=>i.type==="deposit") ? `<p style="font-size:10px;text-align:center;color:#333">DEPOSIT RECEIPT — Balance due on collection.</p>` : "";
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <style>
+    @media print { @page { margin:2mm; size:80mm auto; } }
+    body { font-family:'Courier New',monospace; font-size:12px; width:76mm; margin:0 auto; padding:4px; }
+    h1 { font-size:14px; text-align:center; margin:4px 0 2px; }
+    .sub { font-size:10px; text-align:center; color:#444; margin:0; }
+    hr { border:none; border-top:1px dashed #000; margin:6px 0; }
+    table { width:100%; border-collapse:collapse; }
+    td { padding:2px 0; vertical-align:top; }
+    .total td { font-weight:bold; font-size:13px; border-top:1px solid #000; padding-top:4px; }
+    .warranty { font-size:8px; color:#444; margin-top:6px; white-space:pre-wrap; }
+    .ref { font-size:10px; text-align:center; color:#444; }
+  </style></head><body>
+  <h1>THE PHONE PLUG</h1>
+  <p class="sub">${ADDRESS}</p>
+  <p class="sub">📞 ${PHONE_1} | 📷 ${INSTAGRAM}</p>
+  <hr>
+  <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)}</p>
+  ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}</p>` : ""}
+  <hr>
+  <table>${itemLines}</table>
+  <hr>
+  ${sale.discount ? `<table><tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(sale.subtotal)}</td></tr><tr><td>Discount</td><td style="text-align:right">-${fmtMoney(sale.discount)}</td></tr></table>` : ""}
+  <table class="total"><tr><td>TOTAL</td><td style="text-align:right">${fmtMoney(sale.total)}</td></tr></table>
+  <hr>
+  <table>${payLines}</table>
+  <hr>
+  ${depositNote}
+  <div class="warranty">${WARRANTY_FOOTER}</div>
+  <hr>
+  <p style="text-align:center;font-size:10px;">Thank you — see you again soon!</p>
+  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
+  </body></html>`;
+  const w = window.open("","_blank","width=400,height=600");
+  if (w) { w.document.write(html); w.document.close(); }
+};
+
+// ── Barcode Scanner ───────────────────────────────────────────────────────────
+function BarcodeScanner({ onDetected, onClose }) {
+  const E = React.createElement;
+  const videoRef = React.useRef(null);
+  const [error, setError] = useState("");
+  const [scanning, setScanning] = useState(true);
+
+  useEffect(() => {
+    let stream = null;
+    let interval = null;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        // Use BarcodeDetector if available, else show manual entry
+        if ("BarcodeDetector" in window) {
+          const detector = new BarcodeDetector({ formats: ["ean_13","ean_8","code_128","code_39","upc_a","upc_e","qr_code"] });
+          interval = setInterval(async () => {
+            if (videoRef.current && scanning) {
+              try {
+                const codes = await detector.detect(videoRef.current);
+                if (codes.length > 0) {
+                  clearInterval(interval);
+                  onDetected(codes[0].rawValue);
+                }
+              } catch {}
+            }
+          }, 300);
+        } else {
+          setError("Camera scanning not supported on this browser. Use manual entry below.");
+        }
+      } catch(e) {
+        setError("Camera access denied. Please allow camera access or enter barcode manually.");
+      }
+    })();
+    return () => {
+      clearInterval(interval);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    };
+  }, []);
+
+  const [manualCode, setManualCode] = useState("");
+
+  return E("div", { style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:2000, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:20 } },
+    E("div", { style: { color:"#fff", fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18, marginBottom:4 } }, "📷 Scan Barcode"),
+    !error && E("video", { ref: videoRef, autoPlay: true, playsInline: true, style: { width:"100%", maxWidth:360, borderRadius:12, border:"3px solid "+T.blue } }),
+    error && E("div", { style: { color:T.amber, fontSize:13, textAlign:"center", maxWidth:320 } }, error),
+    E("div", { style: { display:"flex", gap:8, width:"100%", maxWidth:360 } },
+      E(Input, { placeholder:"Or type barcode manually...", value:manualCode, onChange:e=>setManualCode(e.target.value), onKeyDown:e=>e.key==="Enter"&&manualCode.trim()&&onDetected(manualCode.trim()), style:{ flex:1, background:"#fff" } }),
+      E(Btn, { onClick:()=>manualCode.trim()&&onDetected(manualCode.trim()) }, "→")
+    ),
+    E(Btn, { variant:"ghost", onClick:onClose, style:{ color:"#fff", border:"1px solid rgba(255,255,255,0.3)" } }, "✕ Cancel")
+  );
+}
+
+// ── Product Catalog Manager ───────────────────────────────────────────────────
+function ProductCatalog({ onBack }) {
+  const E = React.createElement;
+  const [products, setProducts] = useState([]);
+  const [form, setFormS] = useState({ name:"", category:"Accessory", price:"", barcode:"", stock:"" });
+  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState("");
+  const set = (k,v) => setFormS(p=>({...p,[k]:v}));
+
+  useEffect(() => { loadArr("tpp-products").then(setProducts); }, []);
+
+  const saveProduct = async () => {
+    if (!form.name.trim() || !form.price) { alert("Name and price required."); return; }
+    const newP = { id: genId(products.map(p=>p.id)), ...form, price: parseFloat(form.price), stock: parseInt(form.stock)||0, createdAt: new Date().toISOString() };
+    const updated = [newP, ...products];
+    await save("tpp-products", updated);
+    setProducts(updated);
+    setFormS({ name:"", category:"Accessory", price:"", barcode:"", stock:"" });
+    setAdding(false);
+  };
+
+  const removeProduct = async (id) => {
+    if (!confirm("Remove this product?")) return;
+    const updated = products.filter(p=>p.id!==id);
+    await save("tpp-products", updated);
+    setProducts(updated);
+  };
+
+  const filtered = products.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search));
+
+  return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
+    E("button", { onClick:onBack, style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back to POS"),
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20 } }, "Product Catalog"),
+      E(Btn, { onClick:()=>setAdding(a=>!a) }, adding ? "✕ Cancel" : "+ Add Product")
+    ),
+    adding && E(Card, { style:{ marginBottom:16 } },
+      E(ST, null, "New Product"),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
+        E(Field, { label:"Name", required:true }, E(Input, { placeholder:"e.g. iPhone 15 Case", value:form.name, onChange:e=>set("name",e.target.value) })),
+        E(Field, { label:"Category" }, E(Sel, { value:form.category, onChange:e=>set("category",e.target.value) },
+          ["Accessory","Case","Charger","Screen Protector","Cable","Headphones","Repair Service","Other"].map(c=>E("option",{key:c},c))
+        )),
+        E(Field, { label:"Price (JMD)", required:true }, E(Input, { type:"number", placeholder:"0.00", value:form.price, onChange:e=>set("price",e.target.value) })),
+        E(Field, { label:"Stock Qty" }, E(Input, { type:"number", placeholder:"0", value:form.stock, onChange:e=>set("stock",e.target.value) }))
+      ),
+      E(Field, { label:"Barcode", hint:"optional — for scanner" }, E(Input, { placeholder:"Scan or type barcode", value:form.barcode, onChange:e=>set("barcode",e.target.value) })),
+      E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:saveProduct }, "Save Product"))
+    ),
+    E(Input, { placeholder:"🔍 Search products or barcode...", value:search, onChange:e=>setSearch(e.target.value), style:{ marginBottom:14 } }),
+    filtered.length === 0 ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No products yet. Add your accessories and services above.") :
+    E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
+      filtered.map((p,i) => E(Card, { key:i },
+        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
+          E("div", null,
+            E("div", { style:{ fontWeight:700, fontSize:14 } }, p.name),
+            E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, p.category, p.barcode ? ` · ${p.barcode}` : "", ` · Stock: ${p.stock}`)
+          ),
+          E("div", { style:{ display:"flex", alignItems:"center", gap:10 } },
+            E("div", { style:{ fontWeight:700, color:T.blue, fontSize:15 } }, fmtMoney(p.price)),
+            E("button", { onClick:()=>removeProduct(p.id), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "✕")
+          )
+        )
+      ))
+    )
+  );
+}
+
+// ── POS Main ─────────────────────────────────────────────────────────────────
+function POSSystem({ phones, onPhonesUpdate }) {
+  const E = React.createElement;
+  const [view, setView] = useState("pos"); // "pos" | "catalog" | "history"
+  const [cart, setCart] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [tickets, setTickets] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showScanner, setShowScanner] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [cash, setCash] = useState("");
+  const [card, setCard] = useState("");
+  const [transfer, setTransfer] = useState("");
+  const [note, setNote] = useState("");
+  const [processing, setSaving_] = useState(false);
+  const [lastSale, setLastSale] = useState(null);
+  const [emailSending, setEmailSending] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [p, t, s] = await Promise.all([
+        loadArr("tpp-products"),
+        loadArr("tpp-tickets-v1", false),
+        loadArr("tpp-sales")
+      ]);
+      setProducts(p);
+      setTickets(t.filter(tk => ["received","diagnosing","awaiting_parts","in_repair","ready"].includes(tk.status)));
+      setSales(s);
+    })();
+  }, []);
+
+  // ── Search across phones, products, and repair tickets ──────────────────
+  useEffect(() => {
+    if (!search.trim()) { setSearchResults([]); return; }
+    const q = search.toLowerCase();
+    const phoneResults = phones
+      .filter(p => !p.voided && p.availability === "Available" && [p.make,p.model,p.color,p.imei,p.storage].some(v=>v?.toLowerCase().includes(q)))
+      .slice(0,5)
+      .map(p => ({ type:"phone", id:p.imei||p.order_number, name:`${p.make} ${p.model} ${p.color} ${p.storage}`, price: parseFloat(p.expected_sell)||0, imei:p.imei, raw:p }));
+    const productResults = products
+      .filter(p => p.name.toLowerCase().includes(q) || (p.barcode||"").includes(search))
+      .slice(0,5)
+      .map(p => ({ type:"product", id:p.id, name:p.name, price:p.price, raw:p }));
+    const ticketResults = tickets
+      .filter(t => t.id.toLowerCase().includes(q) || t.customerName?.toLowerCase().includes(q) || t.customerPhone?.includes(q))
+      .slice(0,3)
+      .map(t => ({ type:"ticket", id:t.id, name:`Deposit — ${t.customerName} (${t.id})`, price:0, subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`, raw:t }));
+    setSearchResults([...phoneResults, ...productResults, ...ticketResults]);
+  }, [search, phones, products, tickets]);
+
+  const addToCart = (item) => {
+    if (item.type === "ticket") {
+      const existing = cart.find(c=>c.id===item.id&&c.type==="deposit");
+      if (existing) { alert("This ticket is already in the cart."); return; }
+      setCart(c=>[...c, { type:"deposit", id:item.id, name:item.name, price:0, qty:1, ticketId:item.id, raw:item.raw }]);
+    } else {
+      const existing = cart.find(c=>c.id===item.id&&c.type!=="deposit");
+      if (existing) {
+        setCart(c=>c.map(ci=>ci.id===item.id ? {...ci, qty:ci.qty+1} : ci));
+      } else {
+        setCart(c=>[...c, { type:item.type, id:item.id, name:item.name, price:item.price, qty:1, raw:item.raw }]);
+      }
+    }
+    setSearch(""); setSearchResults([]);
+  };
+
+  const removeFromCart = (idx) => setCart(c=>c.filter((_,i)=>i!==idx));
+  const updateCartPrice = (idx, val) => setCart(c=>c.map((ci,i)=>i===idx?{...ci,price:parseFloat(val)||0}:ci));
+  const updateCartQty = (idx, val) => setCart(c=>c.map((ci,i)=>i===idx?{...ci,qty:Math.max(1,parseInt(val)||1)}:ci));
+
+  const subtotal = cart.reduce((s,i)=>s+(i.price*i.qty),0);
+  const discountAmt = parseFloat(discount)||0;
+  const total = Math.max(0, subtotal - discountAmt);
+  const totalPaid = (parseFloat(cash)||0) + (parseFloat(card)||0) + (parseFloat(transfer)||0);
+  const change = Math.max(0, (parseFloat(cash)||0) - (total - (parseFloat(card)||0) - (parseFloat(transfer)||0)));
+  const canCheckout = cart.length > 0 && totalPaid >= total;
+
+  const handleBarcodeDetected = (code) => {
+    setShowScanner(false);
+    const product = products.find(p=>p.barcode===code);
+    if (product) {
+      addToCart({ type:"product", id:product.id, name:product.name, price:product.price, raw:product });
+    } else {
+      const phone = phones.find(p=>p.imei===code);
+      if (phone && phone.availability==="Available") {
+        addToCart({ type:"phone", id:phone.imei, name:`${phone.make} ${phone.model} ${phone.color} ${phone.storage}`, price:parseFloat(phone.expected_sell)||0, raw:phone });
+      } else {
+        setSearch(code);
+        alert(`No item found for barcode: ${code}. Showing search results.`);
+      }
+    }
+  };
+
+  const checkout = async () => {
+    if (!canCheckout) return;
+    setSaving_(true);
+    try {
+      const existing = await loadArr("tpp-sales");
+      const saleId = genSaleId(existing.map(s=>s.id));
+      const sale = {
+        id: saleId, customerName, customerEmail,
+        items: cart, subtotal, discount: discountAmt, total,
+        cash: parseFloat(cash)||0, card: parseFloat(card)||0,
+        transfer: parseFloat(transfer)||0, change,
+        note, createdAt: new Date().toISOString(),
+        date: todayStr()
+      };
+      // Save sale
+      const updatedSales = [sale, ...existing];
+      await save("tpp-sales", updatedSales);
+      setSales(updatedSales);
+      // Update phone availability for any phones sold
+      let updatedPhones = [...phones];
+      cart.filter(i=>i.type==="phone").forEach(item => {
+        updatedPhones = updatedPhones.map(p =>
+          p.imei === item.id ? { ...p, availability:"Sold", date_sold:todayStr(), actual_sell:String(item.price), sold_by:"POS", actual_profit:String(item.price-(parseFloat(p.total_invoice)||0)) } : p
+        );
+      });
+      if (updatedPhones !== phones) await onPhonesUpdate(updatedPhones);
+      // Update product stock
+      const updatedProducts = [...products];
+      cart.filter(i=>i.type==="product").forEach(item => {
+        const idx = updatedProducts.findIndex(p=>p.id===item.id);
+        if (idx>=0) updatedProducts[idx] = { ...updatedProducts[idx], stock: Math.max(0,(updatedProducts[idx].stock||0)-item.qty) };
+      });
+      await save("tpp-products", updatedProducts);
+      setProducts(updatedProducts);
+      // Show success
+      setLastSale(sale);
+      setCart([]); setCustomerName(""); setCustomerEmail(""); setDiscount(""); setCash(""); setCard(""); setTransfer(""); setNote("");
+    } finally { setSaving_(false); }
+  };
+
+  if (view === "catalog") return E(ProductCatalog, { onBack:()=>setView("pos") });
+
+  if (lastSale) return E("div", { style:{ maxWidth:560, margin:"0 auto" } },
+    E(Card, { style:{ textAlign:"center", padding:"28px 24px" } },
+      E("div", { style:{ fontSize:48, marginBottom:8 } }, "✅"),
+      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, marginBottom:4 } }, "Sale Complete!"),
+      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, `Receipt: ${lastSale.id}`),
+      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, color:T.blue, margin:"8px 0 20px" } }, fmtMoney(lastSale.total)),
+      lastSale.change > 0 && E("div", { style:{ background:T.greenLt, border:"1px solid #A7F3D0", borderRadius:10, padding:"10px 16px", fontSize:14, fontWeight:700, color:T.green, marginBottom:20 } }, `💵 Change: ${fmtMoney(lastSale.change)}`),
+      E("div", { style:{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginBottom:20 } },
+        E(Btn, { onClick:()=>printReceipt(lastSale) }, "🖨️ Print Receipt"),
+        lastSale.customerEmail && E(Btn, { variant:"ghost", disabled:emailSending, onClick:async()=>{ setEmailSending(true); const ok=await sendReceiptEmail(lastSale); setEmailSending(false); if(ok) alert("✅ Receipt emailed!"); } }, emailSending?"Sending…":"📧 Email Receipt"),
+      ),
+      E(Btn, { variant:"ghost", full:true, onClick:()=>setLastSale(null) }, "+ New Sale")
+    )
+  );
+
+  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
+    showScanner && E(BarcodeScanner, { onDetected:handleBarcodeDetected, onClose:()=>setShowScanner(false) }),
+
+    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
+      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💰 Point of Sale"),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("catalog") }, "📦 Products"),
+        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("history") }, "📋 Sales History")
+      )
+    ),
+
+    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 } },
+      E(Field, { label:"Customer Name" }, E(Input, { placeholder:"Optional", value:customerName, onChange:e=>setCustomerName(e.target.value) })),
+      E(Field, { label:"Customer Email" }, E(Input, { type:"email", placeholder:"For email receipt", value:customerEmail, onChange:e=>setCustomerEmail(e.target.value) }))
+    ),
+
+    E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
+      E(Input, {
+        placeholder:"🔍 Search phone, accessory, repair ticket, or service...",
+        value:search,
+        onChange:e=>setSearch(e.target.value),
+        onKeyDown:e=>{ if(e.key==="Enter"&&searchResults.length===1) addToCart(searchResults[0]); },
+        style:{ flex:1 }
+      }),
+      E(Btn, { variant:"ghost", onClick:()=>setShowScanner(true), style:{ padding:"10px 14px", fontSize:16 } }, "📷")
+    ),
+
+    searchResults.length > 0 && E("div", { style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, marginBottom:12, overflow:"hidden", boxShadow:"0 4px 16px rgba(0,0,0,0.1)" } },
+      searchResults.map((r,i) => E("div", { key:i, onClick:()=>addToCart(r), style:{ padding:"10px 14px", cursor:"pointer", borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", alignItems:"center" } },
+        E("div", null,
+          E("div", { style:{ fontWeight:600, fontSize:13 } }, r.type==="ticket"?"🎫":r.type==="phone"?"📱":"📦", " ", r.name),
+          r.subLabel && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, r.subLabel)
+        ),
+        r.type!=="ticket" && E("div", { style:{ fontWeight:700, color:T.blue, fontSize:13 } }, fmtMoney(r.price))
+      ))
+    ),
+
+    cart.length === 0 ? E("div", { style:{ background:T.card, border:`1px dashed ${T.border}`, borderRadius:12, padding:"32px 20px", textAlign:"center", color:T.muted, marginBottom:16 } },
+      E("div", { style:{ fontSize:32, marginBottom:8 } }, "🛒"),
+      E("div", null, "Cart is empty. Search for a phone, accessory, or repair ticket above.")
+    ) :
+    E("div", { style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden", marginBottom:16 } },
+      E(ST, { style:{ padding:"14px 16px 0", margin:0 } }, "Cart"),
+      cart.map((item, idx) => E("div", { key:idx, style:{ padding:"10px 16px", borderTop:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 } },
+        E("div", { style:{ flex:1, fontSize:13, fontWeight:500 } },
+          item.type==="deposit" ? "🎫" : item.type==="phone" ? "📱" : "📦", " ", item.name,
+          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Repair deposit — enter amount below")
+        ),
+        item.type!=="deposit" && E("input", { type:"number", value:item.qty, onChange:e=>updateCartQty(idx,e.target.value), style:{ ...iS, width:48, textAlign:"center", padding:"6px" }, min:1 }),
+        E("input", { type:"number", value:item.price, onChange:e=>updateCartPrice(idx,e.target.value), style:{ ...iS, width:100, textAlign:"right", padding:"6px" }, placeholder:"Price" }),
+        E("button", { onClick:()=>removeFromCart(idx), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontWeight:700, cursor:"pointer", fontSize:12 } }, "✕")
+      )),
+      E("div", { style:{ padding:"12px 16px", borderTop:`1px solid ${T.border}` } },
+        E(Field, { label:"Discount (JMD)" }, E(Input, { type:"number", placeholder:"0", value:discount, onChange:e=>setDiscount(e.target.value), style:{ width:140 } }))
+      )
+    ),
+
+    cart.length > 0 && E(Card, { style:{ marginBottom:16 } },
+      E(ST, null, "Payment"),
+      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:12 } },
+        E(Field, { label:"💵 Cash (JMD)" }, E(Input, { type:"number", placeholder:"0", value:cash, onChange:e=>setCash(e.target.value) })),
+        E(Field, { label:"💳 Card (JMD)" }, E(Input, { type:"number", placeholder:"0", value:card, onChange:e=>setCard(e.target.value) })),
+        E(Field, { label:"🏦 Transfer (JMD)" }, E(Input, { type:"number", placeholder:"0", value:transfer, onChange:e=>setTransfer(e.target.value) }))
+      ),
+      E("div", { style:{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, fontSize:14 } },
+        discountAmt > 0 && E("div", { style:{ color:T.muted } }, "Subtotal: ", E("strong", null, fmtMoney(subtotal))),
+        discountAmt > 0 && E("div", { style:{ color:T.green } }, "Discount: -", E("strong", null, fmtMoney(discountAmt))),
+        E("div", { style:{ fontWeight:700, fontSize:18 } }, "Total: ", E("span", { style:{ color:T.blue } }, fmtMoney(total))),
+        totalPaid >= total && change > 0 && E("div", { style:{ color:T.green, fontWeight:700 } }, "💵 Change: ", fmtMoney(change)),
+        totalPaid > 0 && totalPaid < total && E("div", { style:{ color:T.red, fontWeight:700 } }, "⚠️ Still owed: ", fmtMoney(total - totalPaid))
+      ),
+      E(Field, { label:"Note", style:{ marginTop:12 } }, E(Input, { placeholder:"Optional note for receipt", value:note, onChange:e=>setNote(e.target.value) })),
+      E("div", { style:{ marginTop:14 } },
+        E(Btn, { full:true, disabled:!canCheckout||processing, onClick:checkout, style:{ fontSize:15, padding:"13px" } },
+          processing ? "Processing…" : `✓ Complete Sale — ${fmtMoney(total)}`
+        )
+      )
+    )
+  );
+}
+
 function StaffPOS({ user }) {
   const E = React.createElement;
   const [phones, setPhones] = useState([]);
