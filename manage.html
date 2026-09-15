@@ -5894,41 +5894,31 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       };
       await save("tpp-sales",[sale,...existing]);setSales(prev=>[sale,...prev]);
 
-      // Mark catalog IMEI units as Sold
-      const catalogPhoneItems = cart.filter(i=>i.type==="catalog_phone");
-      if (catalogPhoneItems.length>0) {
-        const updatedCatalog = await loadCatalog();
-        catalogPhoneItems.forEach(item=>{
-          const productIdx = updatedCatalog.findIndex(p=>p.id===item.raw?.product?.id);
-          if (productIdx>=0) {
-            updatedCatalog[productIdx].units = (updatedCatalog[productIdx].units||[]).map(u=>
-              u.id===item.id ? {...u,status:"Sold",soldAt:new Date().toISOString(),saleId,soldBy:servedBy,actual_sell:String(item.price),history:[...(u.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]} : u
-            );
-            updatedCatalog[productIdx].stock = updatedCatalog[productIdx].units.filter(u=>u.status==="Available").length;
-          }
-        });
-        await saveCatalog(updatedCatalog);
-      }
-      // Legacy phone update (backward compat)
-      let updatedPhones=[...phones];
-      cart.filter(i=>i.type==="phone").forEach(item=>{
-        updatedPhones=updatedPhones.map(p=>p.imei===item.id?{...p,availability:"Sold",date_sold:todayStr(),actual_sell:String(item.price),sold_by:servedBy,history:[...(p.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]}:p);
-      });
-      if(onPhonesUpdate&&cart.some(i=>i.type==="phone"))await onPhonesUpdate(updatedPhones);
-
-      // Update product stock
-      let updatedProducts=[...products];
-      cart.filter(i=>i.type==="product").forEach(item=>{
-        const idx=updatedProducts.findIndex(p=>p.id===item.id);
-        if(idx>=0)updatedProducts[idx]={...updatedProducts[idx],stock:Math.max(0,(updatedProducts[idx].stock||0)-(item.qty||1))};
-      });
-      // Save products
-      try{
-        const meta=await load("tpp-products-meta");
-        if(meta&&meta.chunks){const CHUNK=100,chunks=[];for(let i=0;i<updatedProducts.length;i+=CHUNK)chunks.push(updatedProducts.slice(i,i+CHUNK));await save("tpp-products-meta",{...meta,total:updatedProducts.length});for(let i=0;i<chunks.length;i++)await save(`tpp-products-chunk-${i}`,chunks[i]);}
-        else await save("tpp-products",updatedProducts);
-      }catch{await save("tpp-products",updatedProducts);}
-      setProducts(updatedProducts);
+      // Update inventory — non-blocking, runs after sale is saved
+      try {
+        const catalogPhoneItems = cart.filter(i=>i.type==="catalog_phone");
+        const nonImeiItems = cart.filter(i=>i.type==="product");
+        if (catalogPhoneItems.length>0||nonImeiItems.length>0) {
+          const updatedCatalog = await loadCatalog();
+          // Mark IMEI units as Sold
+          catalogPhoneItems.forEach(item=>{
+            const pidx = updatedCatalog.findIndex(p=>p.id===item.raw?.product?.id);
+            if(pidx>=0){
+              updatedCatalog[pidx].units=(updatedCatalog[pidx].units||[]).map(u=>
+                u.id===item.id?{...u,status:"Sold",soldAt:new Date().toISOString(),saleId,soldBy:servedBy,history:[...(u.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]}:u
+              );
+              updatedCatalog[pidx].stock=updatedCatalog[pidx].units.filter(u=>u.status==="Available").length;
+            }
+          });
+          // Decrement stock for non-IMEI products
+          nonImeiItems.forEach(item=>{
+            const pidx=updatedCatalog.findIndex(p=>p.id===item.id);
+            if(pidx>=0) updatedCatalog[pidx].stock=Math.max(0,(updatedCatalog[pidx].stock||0)-(item.qty||1));
+          });
+          await saveCatalog(updatedCatalog);
+          setProducts(updatedCatalog);
+        }
+      } catch(e){ console.error("Catalog update after sale:", e); }
 
       // Log deposit against ticket
       if(hasTicket){
@@ -6245,22 +6235,36 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 16px",marginBottom:14}},
       E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
         E(ST,{style:{margin:0}},"Customer"),
-        E("button",{onClick:()=>setShowNewCustomer(s=>!s),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},showNewCustomer?"✕ Cancel":"+ New Customer")
+        !customerName&&!customerPhone&&!customerEmail
+          ? E("button",{onClick:()=>setShowNewCustomer(s=>!s),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},showNewCustomer?"✕ Cancel":"+ New Customer")
+          : E("div",{style:{display:"flex",gap:6}},
+              E("button",{onClick:async()=>{await saveCustomer(customerName,customerPhone,customerEmail);setShowNewCustomer(false);alert(`✅ Customer saved: ${customerName}`);},style:{background:T.greenLt,color:T.green,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"💾 Save Customer"),
+              E("button",{onClick:()=>{setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerSuggestions([]);setShowNewCustomer(false);},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✕ Clear")
+            )
       ),
-      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,position:"relative"}},
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
         E("div",{style:{position:"relative"}},
-          E(Field,{label:"Name"},E(Input,{placeholder:"Optional",value:customerName,onChange:e=>setCustomerName(e.target.value)})),
-          customerSuggestions.length>0&&customerName&&E("div",{style:{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,zIndex:100,boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}},
-            customerSuggestions.map((c,i)=>E("div",{key:i,onClick:()=>{setCustomerName(c.name||"");setCustomerPhone(c.phone||"");setCustomerEmail(c.email||"");setCustomerSuggestions([]);},style:{padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:i<customerSuggestions.length-1?`1px solid ${T.border}`:"none"}},
-              c.name,c.phone?" · "+c.phone:"",c.email?" · "+c.email:""
+          E(Field,{label:"Name"},E(Input,{placeholder:"Search or enter name",value:customerName,onChange:e=>{setCustomerName(e.target.value);setShowNewCustomer(false);},onFocus:()=>setShowNewCustomer(false)})),
+          customerSuggestions.length>0&&E("div",{style:{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,zIndex:200,boxShadow:"0 6px 20px rgba(0,0,0,0.15)",overflow:"hidden"}},
+            customerSuggestions.map((c,i)=>E("button",{
+              key:i,
+              type:"button",
+              onMouseDown:e=>{
+                e.preventDefault();
+                setCustomerName(c.name||"");
+                setCustomerPhone(c.phone||"");
+                setCustomerEmail(c.email||"");
+                setCustomerSuggestions([]);
+              },
+              style:{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",cursor:"pointer",fontSize:12,borderBottom:i<customerSuggestions.length-1?`1px solid ${T.border}`:"none",background:"#fff",border:"none",fontFamily:"inherit"}
+            },
+              E("div",{style:{fontWeight:600}},c.name),
+              E("div",{style:{color:T.muted,fontSize:11,marginTop:2}},c.phone||"",c.email?" · "+c.email:"")
             ))
           )
         ),
         E(Field,{label:"Phone"},E(Input,{type:"tel",placeholder:"Optional",value:customerPhone,onChange:e=>setCustomerPhone(e.target.value)})),
         E(Field,{label:"Email"},E(Input,{type:"email",placeholder:"For receipt",value:customerEmail,onChange:e=>setCustomerEmail(e.target.value)}))
-      ),
-      showNewCustomer&&E("div",{style:{marginTop:10,background:"#F0F9FF",borderRadius:8,padding:"10px 12px",fontSize:12,color:T.blue}},
-        "Filling in name, phone, and email above will create a new customer profile when the sale is completed. No duplicates will be created if a match already exists."
       ),
       // Apply store credit
       credits.length>0&&E("div",{style:{marginTop:10}},
@@ -9503,60 +9507,96 @@ function PurchasesTab() {
     E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},"💾 Save Purchase Order")
   );
 
-  // ── Main PO List ────────────────────────────────────────────────────────────
-  return E("div",{style:{maxWidth:680,margin:"0 auto"}},
+  // ── Main PO List ──────────────────────────────────────────────────────────────
+  const [poTab, setPoTab] = useState("pending");
+  const poGroups = {
+    pending: pos.filter(p=>p.status!=="Received"&&p.status!=="Voided"),
+    received: pos.filter(p=>p.status==="Received"),
+    voided: pos.filter(p=>p.status==="Voided"),
+  };
+  const poTotal = (group) => group.reduce((s,p)=>s+(p.invoiceTotal||0),0);
+
+  return E("div",{style:{maxWidth:720,margin:"0 auto"}},
     E(PODetail,null),
+    // AI Invoice modal
+    view==="ai"&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:680,width:"100%"}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},"🤖 AI Invoice Scanner"),
+          E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")
+        ),
+        E(InvoiceImporter,{onDone:()=>setView("pos")})
+      )
+    ),
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💸 Purchases"),
       E("div",{style:{display:"flex",gap:8}},
-        E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("history")},"📋 Spend History"),
+        E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("ai")},"🤖 AI Invoice"),
         E(Btn,{onClick:()=>setView("new")},"+ New PO")
       )
     ),
-    E(ST,null,`Purchase Orders (${openPos.length} open)`),
-    pos.length===0
-      ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchase orders yet.")
+    E("div",{style:{display:"flex",gap:0,background:"#F3F4F6",borderRadius:10,padding:4,marginBottom:16}},
+      [["pending","⏳ Pending"],["received","✅ Received"],["voided","🚫 Voided"]].map(([key,label])=>
+        E("button",{key,onClick:()=>setPoTab(key),style:{flex:1,background:poTab===key?"#fff":"transparent",border:"none",borderRadius:8,padding:"10px 6px",cursor:"pointer",fontFamily:"inherit",fontWeight:poTab===key?700:500,fontSize:12,color:poTab===key?"#111":"#6B7280",boxShadow:poTab===key?"0 1px 4px rgba(0,0,0,0.1)":"none"}},
+          label," (",poGroups[key].length,")"
+        )
+      )
+    ),
+    E("div",{style:{background:poTab==="voided"?T.redLt:poTab==="received"?T.greenLt:T.blueLt,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+      E("span",{style:{fontSize:12,color:T.muted}},`${poGroups[poTab].length} order${poGroups[poTab].length!==1?"s":""}`),
+      E("span",{style:{fontWeight:800,fontSize:18,color:poTab==="voided"?T.red:poTab==="received"?T.green:T.blue}},fmtMoney(poTotal(poGroups[poTab])))
+    ),
+    poGroups[poTab].length===0
+      ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No ",poTab," purchase orders.")
       :E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-          pos.map((p,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${p.status==="Voided"?"#FECACA":T.border}`,borderRadius:12,padding:"14px 16px",opacity:p.status==="Voided"?0.6:1,borderLeft:`3px solid ${p.status==="Voided"?T.red:p.status==="Received"?T.green:T.blue}`}},
+          poGroups[poTab].map((p,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${p.status==="Voided"?"#FECACA":p.status==="Received"?"#A7F3D0":T.border}`,borderRadius:12,padding:"14px 16px",borderLeft:`3px solid ${p.status==="Voided"?T.red:p.status==="Received"?T.green:T.blue}`}},
             E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
               E("div",null,
                 E("div",{style:{fontWeight:700,fontSize:14}},p.supplier,p.poRef?` — ${p.poRef}`:""),
-                E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},p.date,` · ${(p.lines||[]).length} items · `,p.currency),
-                p.status==="Voided"&&E("div",{style:{fontSize:11,color:T.red,marginTop:2}},"Voided: ",p.voidReason)
+                E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},p.date,` · ${(p.lines||[]).length} line items · `,p.currency||"JMD"),
+                p.status==="Voided"&&E("div",{style:{fontSize:11,color:T.red,marginTop:2}},"Reason: ",p.voidReason),
+                p.receivedAt&&E("div",{style:{fontSize:11,color:T.green,marginTop:2}},"Received: ",fmtDate(p.receivedAt))
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)),
-                E("span",{style:{background:p.status==="Voided"?T.redLt:p.status==="Received"?T.greenLt:T.blueLt,color:p.status==="Voided"?T.red:p.status==="Received"?T.green:T.blue,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}},p.status),
+                E("div",{style:{fontWeight:700,color:p.status==="Voided"?T.red:T.blue}},fmtMoney(p.invoiceTotal||0)," ",p.currency||"JMD"),
                 E("button",{onClick:()=>setViewingPO(p),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"View")
               )
             )
           ))
         ),
-    view==="history"&&E("div",{style:{marginTop:24}},
+    E("div",{style:{marginTop:28}},
       E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
         E(ST,{style:{margin:0}},"Stock Receive History"),
-        E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.muted,fontSize:12,cursor:"pointer"}},"✕")
-      ),
-      E("div",{style:{display:"flex",gap:8,marginBottom:12}},
-        E("input",{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{...iS,width:"auto"}}),
-        E(Sel,{value:filter,onChange:e=>setFilter(e.target.value),style:{width:"auto"}},
-          E("option",{value:"all"},"All Categories"),
-          LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c))
+        E("div",{style:{display:"flex",gap:8}},
+          E("input",{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{...iS,width:"auto"}}),
+          E(Sel,{value:filter,onChange:e=>setFilter(e.target.value),style:{width:"auto"}},
+            E("option",{value:"all"},"All Categories"),
+            LOYVERSE_ALL_CATS.map(c=>E("option",{key:c,value:c},c))
+          )
         )
       ),
-      history.filter(h=>(filter==="all"||(h.category||"")===(filter))&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter))).length===0
-        ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No receive history found.")
-        :E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
-            history.filter(h=>(filter==="all"||(h.category||"")===(filter))&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter))).map((h,i)=>E(Card,{key:i},
+      (()=>{
+        const hf=history.filter(h=>(filter==="all"||(h.category||"")===filter)&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter)));
+        const ht=hf.reduce((s,h)=>s+(parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1)),0);
+        return E("div",null,
+          hf.length>0&&E("div",{style:{background:T.greenLt,borderRadius:8,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between"}},
+            E("span",{style:{fontSize:12,color:T.muted}},hf.length," entries"),
+            E("span",{style:{fontWeight:800,color:T.green}},fmtMoney(ht))
+          ),
+          hf.length===0?E("div",{style:{textAlign:"center",padding:"20px",color:T.muted}},"No receive history found."):
+          E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            hf.map((h,i)=>E(Card,{key:i},
               E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
                 E("div",null,
                   E("div",{style:{fontWeight:600,fontSize:13}},h.productName||h.name),
                   E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},h.category,` · qty ${h.qty||1} · ${h.receivedDate||fmtDate(h.createdAt)}`,h.supplier?` · ${h.supplier}`:"",h.poRef?` · PO: ${h.poRef}`:"")
                 ),
-                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney((h.unitCost||h.costPerUnit||0)*(h.qty||1)))
+                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney((parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1))))
               )
             ))
           )
+        );
+      })()
     )
   );
 }
@@ -9748,43 +9788,25 @@ function ReceiveStockTab({ onCatalogUpdate }) {
   // ── Choose receive method ───────────────────────────────────────────────────
   return E("div",{style:{maxWidth:600,margin:"0 auto"}},
     E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,marginBottom:8}},"📥 Receive Stock"),
-    E("div",{style:{fontSize:13,color:T.muted,marginBottom:24}},"How are you receiving this stock?"),
-    E("div",{style:{display:"flex",flexDirection:"column",gap:12}},
-      E("button",{onClick:()=>setView("existing"),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"📄 Receive from Existing PO"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${pos.length} open PO${pos.length!==1?"s":""}  available`)),
-        E("div",{style:{fontSize:20}},"→")
-      ),
-      E("button",{onClick:()=>{setSelectedPO(null);setReceiveLines([{name:"",category:"Like New Samsung",qty:"1",unitCost:"",sellPrice:"",units:[{tempId:0,imei:"",status:"Available"}],receivedQty:"1"}]);setView("imei_entry");},style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"✏️ Manual Entry"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Enter stock details manually")),
-        E("div",{style:{fontSize:20}},"→")
-      ),
-      E("button",{onClick:()=>setView("ai"),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"18px 20px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        E("div",null,E("div",{style:{fontWeight:700,fontSize:15}},"🤖 Scan AI Invoice"),E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Upload a photo of your invoice")),
-        E("div",{style:{fontSize:20}},"→")
-      )
-    ),
-    view==="existing"&&E("div",{style:{marginTop:24}},
-      E(ST,null,"Select a Purchase Order"),
-      pos.length===0
-        ?E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No open POs. Create one in the Purchases tab.")
-        :E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-            pos.map((p,i)=>E("div",{key:i,onClick:()=>loadPOForReceiving(p),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-              E("div",null,
-                E("div",{style:{fontWeight:700,fontSize:13}},p.supplier,p.poRef?` — ${p.poRef}`:""),
-                E("div",{style:{fontSize:11,color:T.muted}},p.date,` · ${(p.lines||[]).length} line items`)
-              ),
-              E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)," ",p.currency)
-            ))
-          )
-    ),
-    view==="ai"&&E("div",{style:{marginTop:24}},
-      E(ST,null,"AI Invoice Scanner"),
-      E("div",{style:{textAlign:"center",padding:"30px",background:"#F9FAFB",borderRadius:12,color:T.muted}},
-        E("div",{style:{fontSize:32,marginBottom:8}},"🤖"),
-        E("div",{style:{fontWeight:600,marginBottom:4}},"AI Invoice Scanning"),
-        E("div",{style:{fontSize:13}},"Use the AI invoice scanner in the Products tab to scan and import invoice data. Once imported, return here to enter IMEIs and confirm receipt.")
-      )
-    )
+    E("div",{style:{fontSize:13,color:T.muted,marginBottom:20}},"Select an open purchase order to receive stock against."),
+    pos.length===0
+      ?E("div",{style:{textAlign:"center",padding:"40px 20px",background:"#F9FAFB",borderRadius:12,color:T.muted}},
+          E("div",{style:{fontSize:32,marginBottom:12}},"📄"),
+          E("div",{style:{fontWeight:600,marginBottom:6}},"No open purchase orders"),
+          E("div",{style:{fontSize:13}},"Create a PO in the Purchases tab first, then come back here to receive the stock.")
+        )
+      :E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+          pos.map((p,i)=>E("div",{key:i,onClick:()=>loadPOForReceiving(p),style:{background:T.card,border:`2px solid ${T.border}`,borderRadius:12,padding:"16px 20px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"},onMouseEnter:e=>e.currentTarget.style.borderColor=T.blue,onMouseLeave:e=>e.currentTarget.style.borderColor=T.border},
+            E("div",null,
+              E("div",{style:{fontWeight:700,fontSize:14}},p.supplier,p.poRef?` — ${p.poRef}`:""),
+              E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},p.date,` · ${(p.lines||[]).length} line items · `,p.currency||"JMD")
+            ),
+            E("div",{style:{display:"flex",alignItems:"center",gap:10}},
+              E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)),
+              E("div",{style:{fontSize:20,color:T.muted}},"→")
+            )
+          ))
+        )
   );
 }
 
@@ -9924,7 +9946,6 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
   const subTabs=[
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
-    {id:"ai",label:"🤖 AI Invoice"},
   ];
 
   const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12}},
@@ -9935,7 +9956,6 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
 
   if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
-  if (subTab==="ai") return E("div",null,tabBar,E(InvoiceImporter,{user,allPhones:data?.phones||[],onDone:()=>{loadCatalog().then(c=>setCatalogState(c||[]));fetchAll&&fetchAll();setSubTab("catalog");}}));
 
   return null;
 }
