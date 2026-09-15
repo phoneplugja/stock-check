@@ -6720,6 +6720,7 @@ const sendReceiptEmail = async (sale) => {
   const itemLines = sale.items.map(i => `${i.name} x${i.qty} — ${fmtMoney(i.price * i.qty)}`).join("\n");
   const params = {
     to_email: sale.customerEmail,
+    served_by: sale.servedBy ? (sale.servedBy.split(" ")[0] + (sale.servedBy.split(" ")[1] ? " " + sale.servedBy.split(" ")[1][0] + "." : "")) : "Staff",
     customer_name: sale.customerName || "Valued Customer",
     receipt_id: sale.id,
     date: sale.createdAt ? `${fmtDate(sale.createdAt)} ${new Date(sale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}` : "",
@@ -6794,6 +6795,7 @@ const printReceipt = (sale) => {
   <hr>
   <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)} ${new Date(sale.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
   ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}${sale.customerPhone ? " · " + sale.customerPhone : ""}</p>` : ""}
+  ${sale.servedBy ? `<p class="ref" style="font-size:10px;color:#999;">Served by: ${sale.servedBy.split(" ")[0]}${sale.servedBy.split(" ")[1] ? " " + sale.servedBy.split(" ")[1][0] + "." : ""}</p>` : ""}
   <hr>
   <table>${allItemLines}</table>
   <hr>
@@ -6999,6 +7001,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
   const [historySearch, setHistorySearch] = useState("");
   const [historyDate, setHistoryDate] = useState("");
   const [selectedSale, setSelectedSale] = useState(null);
+  const [showVoided, setShowVoided] = useState(false);
   const [drafts, setDrafts] = useState([]);
   const [showDrafts, setShowDrafts] = useState(false);
 
@@ -7208,6 +7211,8 @@ function POSSystem({ phones, onPhonesUpdate }) {
         id: saleId, customerName, customerPhone, customerEmail,
         isExchange: exchangeMode,
         originalSaleId: returnedItem?.sale?.id || null,
+        servedBy: user?.name || "",
+        servedByRole: user?.role || "",
         items: cart, subtotal, discount: discountAmt, total,
         cash: parseFloat(cash)||0, debitCard: parseFloat(debitCard)||0, creditCard: parseFloat(creditCard)||0,
         ncbTransfer: parseFloat(ncbTransfer)||0, scotiaTransfer: parseFloat(scotiaTransfer)||0, otherPayment: parseFloat(otherPayment)||0, change,
@@ -7327,6 +7332,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
         )
       ),
       selectedSale.customerName && E("div", { style:{ marginBottom:12, fontSize:13 } }, "👤 ", selectedSale.customerName, selectedSale.customerPhone?" · "+selectedSale.customerPhone:"", selectedSale.customerEmail?" · "+selectedSale.customerEmail:""),
+      selectedSale.servedBy && E("div", { style:{ fontSize:12, color:T.muted, marginBottom:8 } }, "Served by: ", selectedSale.servedBy.split(" ")[0] + (selectedSale.servedBy.split(" ")[1] ? " " + selectedSale.servedBy.split(" ")[1][0] + "." : "")),
       E(ST, null, "Items"),
       selectedSale.items?.map((item,i)=>E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px dashed ${T.border}`, fontSize:13 } },
         E("div", null, item.name, item.deliveryAddress&&E("div",{style:{fontSize:11,color:T.muted}},"📍 "+item.deliveryAddress)),
@@ -7346,7 +7352,12 @@ function POSSystem({ phones, onPhonesUpdate }) {
   if (view === "history") return E("div", { style:{ maxWidth:640, margin:"0 auto" } },
     E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
       E("button", { onClick:()=>setView("pos"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", padding:0 } }, "← Back to POS"),
-      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Sales History")
+      E("div", { style:{ display:"flex", alignItems:"center", gap:12 } },
+        E("label", { style:{ fontSize:12, color:T.muted, display:"flex", alignItems:"center", gap:4, cursor:"pointer" } },
+          E("input", { type:"checkbox", checked:showVoided||false, onChange:e=>setShowVoided(e.target.checked) }), "Show voided"
+        ),
+        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "Sales History")
+      )
     ),
     E("div", { style:{ display:"flex", gap:8, marginBottom:16 } },
       E(Input, { placeholder:"🔍 Search by receipt #, customer name, or phone...", value:historySearch, onChange:e=>setHistorySearch(e.target.value) })
@@ -7362,7 +7373,7 @@ function POSSystem({ phones, onPhonesUpdate }) {
         const matchSearch = !q || s.id?.toLowerCase().includes(q) || s.customerName?.toLowerCase().includes(q) || s.customerPhone?.includes(q);
         const matchDate = !historyDate || s.date === historyDate;
         return matchSearch && matchDate;
-      }).slice(0,50).map((s,i) => E("div", { key:i, onClick:()=>setSelectedSale(s), style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:16, boxShadow:"0 1px 3px rgba(0,0,0,0.06)", opacity: s.voided ? 0.5 : 1, borderLeft:`3px solid ${s.type==="refund"?T.amber:s.voided?T.red:T.green}`, cursor:"pointer", marginBottom:8 } },
+      }).filter(s => showVoided ? true : !s.voided).slice(0,50).map((s,i) => E("div", { key:i, onClick:()=>setSelectedSale(s), style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:16, boxShadow:"0 1px 3px rgba(0,0,0,0.06)", opacity: s.voided ? 0.5 : 1, borderLeft:`3px solid ${s.type==="refund"?T.amber:s.voided?T.red:T.green}`, cursor:"pointer", marginBottom:8 } },
         E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" } },
           E("div", null,
             E("div", { style:{ fontWeight:700, fontSize:13 } },
@@ -8686,206 +8697,202 @@ function ToDoTab({ isOwner }) {
 }
 
 // ── Debt Ledger (dynamic) ─────────────────────────────────────────────────────
-const DEBT_CATEGORIES = ["Credit Card", "Loan", "Creditor", "Interest-Free Credit Line"];
+const DEBT_CATEGORIES = ["Credit Card", "Loan", "Pay-in-4", "Other"];
 const DEBT_TYPES = ["Personal", "Business"];
 
 function DebtLedger() {
   const E = React.createElement;
-  const [debts, setDebts] = useState(null);
-  const [payments, setPayments] = useState([]);
-  const [checkins, setCheckins] = useState([]);
-  const [expanded, setExpanded] = useState(null);
-  const [editing, setEditing] = useState(null);
-  const [editVal, setEditVal] = useState("");
-  const [payAmt, setPayAmt] = useState({});
-  const [showAdd, setShowAdd] = useState(false);
-  const [groupBy, setGroupBy] = useState("type"); // "type" | "category"
-  const [newDebt, setNewDebt] = useState({ name:"", type:"Personal", category:"Credit Card", balance:"", apr:"", minPayment:"", due:"", notes:"" });
-  const setND = (k,v) => setNewDebt(p=>({...p,[k]:v}));
+  const [debts, setDebts] = useState([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingDebt, setEditingDebt] = useState(null);
+  const [groupBy, setGroupBy] = useState("category");
+  const [filterType, setFilterType] = useState("all");
+  const emptyForm = () => ({
+    name:"", type:"Personal", category:"Loan", balance:"", apr:"", minPayment:"",
+    due:"", openDate:"", closeDate:"", remainingPayments:"", lastPaymentDate:"",
+    lastPaymentAmount:"", notes:""
+  });
+  const [form, setFormS] = useState(emptyForm());
+  const setF = (k,v) => setFormS(p=>({...p,[k]:v}));
 
-  const fetchAll = async () => {
-    let d = await loadArr("tpp-debts");
-    const p = await loadArr("tpp-debt-payments");
-    const c = await loadArr("tpp-debt-checkins");
-    setDebts(d); setPayments(p); setCheckins(c);
-  };
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(()=>{
+    (async()=>{
+      let d = await loadArr("tpp-debts");
+      if (!d.length) d = [];
+      setDebts(d);
+    })();
+  },[]);
 
-  if (debts === null) return E("div", { style: { textAlign:"center", padding:"60px 20px", color:T.muted } }, "Loading...");
-
-  const totalRemaining = debts.filter(d=>!d.voided).reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
-  const now = new Date();
-  const paidThisMonth = payments.filter(p => { const dt=new Date(p.date); return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear(); }).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
-  const checkedInToday = checkins.includes(todayStr());
-  const streak = computeStreak(checkins);
-
-  const checkIn = async () => {
-    if (checkedInToday) return;
-    const updated = [todayStr(), ...checkins];
-    await save("tpp-debt-checkins", updated); setCheckins(updated);
-  };
-
-  const addDebt = async () => {
-    if (!newDebt.name.trim()||!newDebt.balance) { alert("Name and balance required."); return; }
-    const debt = { id: Date.now().toString(), ...newDebt, balance: parseFloat(newDebt.balance)||0, apr: parseFloat(newDebt.apr)||0, minPayment: parseFloat(newDebt.minPayment)||0, due: parseInt(newDebt.due)||1, createdAt: new Date().toISOString(), voided: false };
-    const updated = [...debts, debt];
-    await save("tpp-debts", updated); setDebts(updated);
-    setNewDebt({ name:"", type:"Personal", category:"Credit Card", balance:"", apr:"", minPayment:"", due:"", notes:"" });
-    setShowAdd(false);
-  };
-
-  const logPayment = async debt => {
-    const amt = parseFloat(payAmt[debt.id]);
-    if (!amt||amt<=0) { alert("Enter an amount greater than 0."); return; }
-    const updatedDebts = debts.map(d=>d.id===debt.id?{...d,balance:Math.max(0,(parseFloat(d.balance)||0)-amt)}:d);
-    const newPayment = { debtId:debt.id, name:debt.name, amount:amt, date:new Date().toISOString() };
-    const updatedPayments = [newPayment,...payments];
-    await save("tpp-debts",updatedDebts); await save("tpp-debt-payments",updatedPayments);
-    setDebts(updatedDebts); setPayments(updatedPayments);
-    setPayAmt(p=>({...p,[debt.id]:""})); setExpanded(null);
+  const saveDebt = async () => {
+    if (!form.name.trim()) { alert("Name required."); return; }
+    const debt = {
+      id: editingDebt ? editingDebt.id : Date.now().toString(),
+      name: form.name.trim(),
+      type: form.type,
+      category: form.category,
+      balance: parseFloat(form.balance)||0,
+      apr: parseFloat(form.apr)||0,
+      minPayment: parseFloat(form.minPayment)||0,
+      due: parseInt(form.due)||1,
+      openDate: form.openDate,
+      closeDate: form.closeDate,
+      remainingPayments: parseInt(form.remainingPayments)||0,
+      lastPaymentDate: form.lastPaymentDate,
+      lastPaymentAmount: parseFloat(form.lastPaymentAmount)||0,
+      notes: form.notes,
+      createdAt: editingDebt ? editingDebt.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const updated = editingDebt
+      ? debts.map(d=>d.id===editingDebt.id?debt:d)
+      : [debt,...debts];
+    await save("tpp-debts", updated);
+    setDebts(updated);
+    setFormS(emptyForm());
+    setShowAddForm(false);
+    setEditingDebt(null);
   };
 
-  const saveEdit = async debt => {
-    const newBal = parseFloat(editVal);
-    if (isNaN(newBal)||newBal<0) { alert("Enter a valid balance."); return; }
-    const updated = debts.map(d=>d.id===debt.id?{...d,balance:newBal}:d);
-    await save("tpp-debts",updated); setDebts(updated); setEditing(null); setEditVal("");
+  const deleteDebt = async (id) => {
+    if (!confirm("Permanently delete this debt?")) return;
+    const updated = debts.filter(d=>d.id!==id);
+    await save("tpp-debts", updated);
+    setDebts(updated);
   };
 
-  const voidDebt = async debt => {
-    const reason = prompt("Reason for voiding this debt?");
-    if (reason===null) return;
-    const updated = debts.map(d=>d.id===debt.id?{...d,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:d);
-    await save("tpp-debts",updated); setDebts(updated);
+  const openEdit = (debt) => {
+    setEditingDebt(debt);
+    setFormS({
+      name: debt.name||"", type: debt.type||"Personal", category: debt.category||"Loan",
+      balance: String(debt.balance||""), apr: String(debt.apr||""), minPayment: String(debt.minPayment||""),
+      due: String(debt.due||""), openDate: debt.openDate||"", closeDate: debt.closeDate||"",
+      remainingPayments: String(debt.remainingPayments||""), lastPaymentDate: debt.lastPaymentDate||"",
+      lastPaymentAmount: String(debt.lastPaymentAmount||""), notes: debt.notes||""
+    });
+    setShowAddForm(true);
   };
 
-  // Group debts
-  const activeDebts = debts.filter(d=>!d.voided);
-  const groups = groupBy === "type"
-    ? { Personal: activeDebts.filter(d=>d.type==="Personal"), Business: activeDebts.filter(d=>d.type==="Business") }
-    : DEBT_CATEGORIES.reduce((acc,cat)=>({ ...acc, [cat]: activeDebts.filter(d=>d.category===cat) }), {});
+  const exportDebts = () => {
+    const headers = ["Name","Type","Category","Balance","APR %","Min Payment","Due Day","Open Date","Close Date","Remaining Payments","Last Payment Date","Last Payment Amount","Notes"];
+    const rows = debts.map(d=>[d.name,d.type,d.category,d.balance,d.apr,d.minPayment,d.due,d.openDate,d.closeDate,d.remainingPayments,d.lastPaymentDate,d.lastPaymentAmount,d.notes].map(v=>JSON.stringify(v??"")));
+    const csv = [headers.join(","),...rows.map(r=>r.join(","))].join("\n");
+    const blob = new Blob([csv],{type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `phone-plug-debts-${todayStr()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
-  const renderDebtCard = (debt) => {
-    const isPaid = debt.balance<=0;
-    const days = daysUntilDue(parseInt(debt.due)||1);
-    let statusColor, statusLabel;
-    if (isPaid) { statusColor=T.green; statusLabel="Paid off ✅"; }
-    else if (days===0) { statusColor=T.red; statusLabel="Due today!"; }
-    else if (days<=3) { statusColor=T.amber; statusLabel=`Due in ${days}d`; }
-    else { statusColor=T.muted; statusLabel=`Due in ${days}d`; }
-    const isExpanded=expanded===debt.id, isEditing=editing===debt.id;
+  const filtered = debts.filter(d => filterType==="all" || d.type===filterType);
+  const grouped = groupBy==="type"
+    ? {Personal: filtered.filter(d=>d.type==="Personal"), Business: filtered.filter(d=>d.type==="Business")}
+    : DEBT_CATEGORIES.reduce((acc,cat)=>({...acc,[cat]:filtered.filter(d=>d.category===cat)}),{});
+  const totalBalance = filtered.reduce((s,d)=>s+(parseFloat(d.balance)||0),0);
+  const totalMin = filtered.reduce((s,d)=>s+(parseFloat(d.minPayment)||0),0);
 
-    return E(Card, { key:debt.id, style:{ marginBottom:8, opacity:isPaid?0.55:1, borderLeft:`3px solid ${debt.category==="Credit Card"?T.blue:debt.category==="Loan"?T.amber:debt.category==="Creditor"?T.red:"#7C3AED"}` } },
-      E("div", { onClick:()=>{ if(!isPaid&&!isEditing){ setExpanded(isExpanded?null:debt.id); } }, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:isPaid?"default":"pointer" } },
-        E("div", null,
-          E("div", { style:{ fontWeight:700, fontSize:14 } }, debt.name),
-          E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, debt.category, debt.apr ? ` · ${debt.apr}% APR` : " · 0% APR", ` · ${debt.type}`)
+  const DebtForm = () => E("div", { style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:20,marginBottom:16} },
+    E(ST, null, editingDebt ? "Edit Debt" : "Add Debt"),
+    E("div", { style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12} },
+      E(Field,{label:"Name",required:true}, E(Input,{value:form.name,onChange:e=>setF("name",e.target.value),placeholder:"e.g. Chase Freedom"})),
+      E(Field,{label:"Type"}, E(Sel,{value:form.type,onChange:e=>setF("type",e.target.value)}, DEBT_TYPES.map(t=>E("option",{key:t},t)))),
+      E(Field,{label:"Category"}, E(Sel,{value:form.category,onChange:e=>setF("category",e.target.value)}, DEBT_CATEGORIES.map(c=>E("option",{key:c},c)))),
+      E(Field,{label:"Current Balance"}, E(Input,{type:"number",value:form.balance,onChange:e=>setF("balance",e.target.value),placeholder:"0.00"})),
+      E(Field,{label:"APR %",hint:"0 if interest-free"}, E(Input,{type:"number",value:form.apr,onChange:e=>setF("apr",e.target.value),placeholder:"0"})),
+      E(Field,{label:"Min. Payment"}, E(Input,{type:"number",value:form.minPayment,onChange:e=>setF("minPayment",e.target.value),placeholder:"0"})),
+      E(Field,{label:"Due Day of Month"}, E(Input,{type:"number",value:form.due,onChange:e=>setF("due",e.target.value),placeholder:"e.g. 15",min:1,max:31})),
+      E(Field,{label:"Remaining Payments"}, E(Input,{type:"number",value:form.remainingPayments,onChange:e=>setF("remainingPayments",e.target.value),placeholder:"e.g. 30"})),
+      E(Field,{label:"Open Date"}, E(Input,{type:"date",value:form.openDate,onChange:e=>setF("openDate",e.target.value)})),
+      E(Field,{label:"Close / Final Payment Date"}, E(Input,{type:"date",value:form.closeDate,onChange:e=>setF("closeDate",e.target.value)})),
+      E(Field,{label:"Last Payment Date"}, E(Input,{type:"date",value:form.lastPaymentDate,onChange:e=>setF("lastPaymentDate",e.target.value)})),
+      E(Field,{label:"Last Payment Amount"}, E(Input,{type:"number",value:form.lastPaymentAmount,onChange:e=>setF("lastPaymentAmount",e.target.value),placeholder:"0"}))
+    ),
+    E(Field,{label:"Notes"}, E(Input,{value:form.notes,onChange:e=>setF("notes",e.target.value),placeholder:"Optional notes"})),
+    E("div",{style:{display:"flex",gap:8,marginTop:16}},
+      E(Btn,{variant:"ghost",onClick:()=>{setShowAddForm(false);setEditingDebt(null);setFormS(emptyForm());}}, "Cancel"),
+      E(Btn,{onClick:saveDebt}, editingDebt?"Save Changes":"Add Debt")
+    )
+  );
+
+  const DebtCard = ({debt}) => {
+    const isPaid = (debt.balance||0)<=0;
+    const daysUntil = debt.due ? (() => {
+      const now = new Date(); const due = new Date(now.getFullYear(),now.getMonth(),parseInt(debt.due));
+      if (due < now) due.setMonth(due.getMonth()+1);
+      return Math.ceil((due-now)/(1000*60*60*24));
+    })() : null;
+    const catColor = {
+      "Credit Card": T.blue, "Loan": T.amber, "Pay-in-4": "#7C3AED", "Other": T.muted
+    }[debt.category]||T.muted;
+
+    return E("div", {style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:16,marginBottom:8,borderLeft:`3px solid ${catColor}`,opacity:isPaid?0.6:1}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}},
+        E("div",null,
+          E("div",{style:{fontWeight:700,fontSize:14}}, debt.name),
+          E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},
+            debt.category, " · ", debt.type,
+            debt.apr>0 ? ` · ${debt.apr}% APR` : " · 0% APR",
+            debt.minPayment ? ` · Min: ${fmtMoney(debt.minPayment)}/mo` : ""
+          )
         ),
-        E("div", { style:{ display:"flex", alignItems:"center", gap:8 } },
-          E("div", { style:{ textAlign:"right" } },
-            E("div", { style:{ fontWeight:700, fontSize:14 } }, fmtUSD(debt.balance)),
-            E("div", { style:{ fontSize:11, color:statusColor, marginTop:2, fontWeight:600 } }, statusLabel)
+        E("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+          E("div",{style:{textAlign:"right"}},
+            E("div",{style:{fontWeight:700,fontSize:16,color:isPaid?T.green:T.text}}, fmtMoney(debt.balance||0)),
+            daysUntil!==null && !isPaid && E("div",{style:{fontSize:10,color:daysUntil<=3?T.red:daysUntil<=7?T.amber:T.muted,fontWeight:600}},
+              daysUntil===0?"Due today!":daysUntil<0?"Overdue!":`Due in ${daysUntil}d`
+            )
           ),
-          E("button", { onClick:e=>{ e.stopPropagation(); setEditing(isEditing?null:debt.id); setEditVal(String(debt.balance)); setExpanded(null); }, style:{ background:T.blueLt, color:T.blue, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, isEditing?"Cancel":"Edit"),
-          !isPaid && E("button", { onClick:e=>{ e.stopPropagation(); voidDebt(debt); }, style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "Void")
+          E("button",{onClick:()=>openEdit(debt),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}}, "✏️"),
+          E("button",{onClick:()=>deleteDebt(debt.id),style:{background:"#FEF2F2",color:"#DC2626",border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}}, "🗑️")
         )
       ),
-      isEditing && E("div", { style:{ marginTop:12, paddingTop:12, borderTop:`1px solid ${T.border}` } },
-        E("div", { style:{ fontSize:12, color:T.muted, marginBottom:6 } }, "Enter exact current balance from your statement (USD):"),
-        E("div", { style:{ display:"flex", gap:8 } },
-          E("div", { style:{ flex:1 } }, E(Input, { type:"number", placeholder:"e.g. 1234.56", value:editVal, onChange:e=>setEditVal(e.target.value) })),
-          E(Btn, { onClick:()=>saveEdit(debt) }, "Save"),
-          E(Btn, { variant:"ghost", onClick:()=>{ setEditing(null); setEditVal(""); } }, "Cancel")
-        )
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,fontSize:11,color:T.muted}},
+        debt.remainingPayments>0 && E("div",null,E("span",{style:{display:"block",fontSize:10,color:T.muted}},"Payments left"),E("span",{style:{fontWeight:600,color:T.text}},debt.remainingPayments)),
+        debt.closeDate && E("div",null,E("span",{style:{display:"block",fontSize:10,color:T.muted}},"Closes"),E("span",{style:{fontWeight:600,color:T.text}},fmtDate(debt.closeDate))),
+        debt.lastPaymentDate && E("div",null,E("span",{style:{display:"block",fontSize:10,color:T.muted}},"Last paid"),E("span",{style:{fontWeight:600,color:T.text}},fmtDate(debt.lastPaymentDate)+(debt.lastPaymentAmount?` · ${fmtMoney(debt.lastPaymentAmount)}`:""))),
+        isPaid && E("div",{style:{gridColumn:"1/-1",color:T.green,fontWeight:700,fontSize:12}},"✅ Paid off")
       ),
-      isExpanded&&!isPaid&&!isEditing&&E("div", { style:{ marginTop:12, paddingTop:12, borderTop:`1px solid ${T.border}`, display:"flex", gap:8 } },
-        E("div", { style:{ flex:1 } }, E(Input, { type:"number", placeholder:"Amount paid (USD)", value:payAmt[debt.id]||"", onChange:e=>setPayAmt(p=>({...p,[debt.id]:e.target.value})) })),
-        E(Btn, { onClick:()=>logPayment(debt) }, "💰 Confirm Payment")
-      )
+      debt.notes && E("div",{style:{fontSize:11,color:T.muted,marginTop:8,fontStyle:"italic"}},debt.notes)
     );
   };
 
-  return E("div", { style:{ maxWidth:560, margin:"0 auto" } },
-    // Header
-    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
-      E("div", null,
-        E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, color:T.text, margin:0 } }, "Debt Ledger"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Log payments, track due dates, build the streak.")
+  return E("div",{style:{maxWidth:600,margin:"0 auto"}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("div",null,
+        E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💳 Debt Ledger"),
+        E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${filtered.length} obligations · Total: ${fmtMoney(totalBalance)} · Monthly min: ${fmtMoney(totalMin)}`)
       ),
-      E(Btn, { onClick:()=>setShowAdd(s=>!s) }, showAdd?"✕ Cancel":"+ Add Debt")
-    ),
-
-    // Add debt form
-    showAdd && E(Card, { style:{ marginBottom:20, borderLeft:`3px solid ${T.blue}` } },
-      E(ST, null, "New Debt"),
-      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-        E(Field, { label:"Lender / Name", required:true }, E(Input, { placeholder:"e.g. NCB Business Edge", value:newDebt.name, onChange:e=>setND("name",e.target.value) })),
-        E(Field, { label:"Type" }, E(Sel, { value:newDebt.type, onChange:e=>setND("type",e.target.value) }, DEBT_TYPES.map(t=>E("option",{key:t},t)))),
-        E(Field, { label:"Category" }, E(Sel, { value:newDebt.category, onChange:e=>setND("category",e.target.value) }, DEBT_CATEGORIES.map(c=>E("option",{key:c},c)))),
-        E(Field, { label:"Current Balance (USD)", required:true }, E(Input, { type:"number", placeholder:"0.00", value:newDebt.balance, onChange:e=>setND("balance",e.target.value) })),
-        E(Field, { label:"APR (%)", hint:"0 if interest-free" }, E(Input, { type:"number", placeholder:"0", value:newDebt.apr, onChange:e=>setND("apr",e.target.value) })),
-        E(Field, { label:"Min. Payment (USD)" }, E(Input, { type:"number", placeholder:"0", value:newDebt.minPayment, onChange:e=>setND("minPayment",e.target.value) })),
-        E(Field, { label:"Due Day of Month" }, E(Input, { type:"number", placeholder:"e.g. 15", min:1, max:31, value:newDebt.due, onChange:e=>setND("due",e.target.value) }))
-      ),
-      E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:newDebt.notes, onChange:e=>setND("notes",e.target.value) })),
-      E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:addDebt }, "Save Debt"))
-    ),
-
-    // Check-in
-    E("div", { style:{ background:checkedInToday?T.greenLt:T.card, border:`1px solid ${checkedInToday?"#A7F3D0":T.border}`, borderRadius:12, padding:16, marginBottom:14, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, boxShadow:"0 1px 3px rgba(0,0,0,0.06)" } },
-      E("div", null,
-        E("div", { style:{ fontWeight:700, fontSize:14 } }, checkedInToday?"Checked in for today":"Did you stick to plan today?"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, "No impulse spending — money went where it should")
-      ),
-      E(Btn, { variant:checkedInToday?"green":"primary", onClick:checkIn, disabled:checkedInToday }, checkedInToday?"✅ Logged":"Yes, log it")
-    ),
-    E("div", { style:{ display:"flex", alignItems:"center", gap:8, marginBottom:18, fontSize:13, color:T.muted } }, "🔥 ", E("b", { style:{ color:T.text } }, streak), " day streak of sticking to the plan"),
-
-    // Summary
-    E(R2, null,
-      E(StatCard, { label:"Total remaining (USD)", value:fmtUSD(totalRemaining), color:T.blue }),
-      E(StatCard, { label:"Paid this month", value:fmtUSD(paidThisMonth), color:T.green })
-    ),
-    E("div", { style:{ height:20 } }),
-
-    // Group toggle
-    E("div", { style:{ display:"flex", gap:8, marginBottom:16, alignItems:"center" } },
-      E("span", { style:{ fontSize:12, color:T.muted } }, "Group by:"),
-      E("button", { onClick:()=>setGroupBy("type"), style:{ background:groupBy==="type"?T.blue:"#F3F4F6", color:groupBy==="type"?"#fff":T.muted, border:"none", borderRadius:7, padding:"6px 12px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "Personal / Business"),
-      E("button", { onClick:()=>setGroupBy("category"), style:{ background:groupBy==="category"?T.blue:"#F3F4F6", color:groupBy==="category"?"#fff":T.muted, border:"none", borderRadius:7, padding:"6px 12px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "Category")
-    ),
-
-    // Grouped debts
-    Object.entries(groups).map(([group, groupDebts]) =>
-      groupDebts.length === 0 ? null :
-      E("div", { key:group, style:{ marginBottom:20 } },
-        E(ST, null, group, ` (${groupDebts.length})`),
-        groupDebts.map(renderDebtCard)
+      E("div",{style:{display:"flex",gap:8}},
+        E(Btn,{variant:"ghost",style:{fontSize:12},onClick:exportDebts},"📥 Export CSV"),
+        E(Btn,{onClick:()=>{setShowAddForm(s=>!s);setEditingDebt(null);setFormS(emptyForm());}},showAddForm?"✕ Cancel":"+ Add")
       )
     ),
 
-    debts.filter(d=>!d.voided).length === 0 && E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } },
-      E("div", { style:{ fontSize:36, marginBottom:12 } }, "💳"),
-      "No debts added yet. Tap + Add Debt to get started."
+    showAddForm && E(DebtForm,null),
+
+    E("div",{style:{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}},
+      E(Sel,{value:filterType,onChange:e=>setFilterType(e.target.value),style:{width:"auto"}},
+        E("option",{value:"all"},"All"),
+        DEBT_TYPES.map(t=>E("option",{key:t,value:t},t))
+      ),
+      E(Sel,{value:groupBy,onChange:e=>setGroupBy(e.target.value),style:{width:"auto"}},
+        E("option",{value:"category"},"Group by Category"),
+        E("option",{value:"type"},"Group by Type")
+      )
     ),
 
-    // Payment history
-    E(ST, null, "Payment History"),
-    E(Card, null,
-      payments.length===0
-        ? E("div", { style:{ textAlign:"center", color:T.muted, fontSize:13, padding:"20px 0" } }, "No payments logged yet.")
-        : payments.map((p,i)=>E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", padding:"10px 0", borderBottom:i<payments.length-1?`1px dashed ${T.border}`:"none" } },
-            E("div", null,
-              E("div", { style:{ fontSize:13, fontWeight:600 } }, p.name),
-              E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, new Date(p.date).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}))
-            ),
-            E("div", { style:{ fontWeight:700, color:T.green, fontFamily:"monospace" } }, "-"+fmtUSD(p.amount))
-          ))
+    Object.entries(grouped).filter(([,items])=>items.length>0).map(([group,items])=>E("div",{key:group,style:{marginBottom:20}},
+      E(ST,null,group,` (${items.length})`),
+      items.map(d=>E(DebtCard,{key:d.id,debt:d}))
+    )),
+
+    filtered.length===0 && E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},
+      E("div",{style:{fontSize:32,marginBottom:8}},"💳"),
+      E("div",null,"No debts added yet. Tap + Add to get started.")
     )
   );
 }
 
-// ── Stock Receiving ───────────────────────────────────────────────────────────
+
 function StockReceiving({ products, onProductsUpdate, invoiceType, allPhones = [], onPhonesDone }) {
   const E = React.createElement;
   const [drafts, setDrafts] = useState([]);
