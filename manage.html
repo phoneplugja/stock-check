@@ -5825,7 +5825,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const total=Math.max(0,subtotal-totalDiscount-(appliedCredit?.amount||0));
   const totalPaid=(parseFloat(cash)||0)+(parseFloat(debitCard)||0)+(parseFloat(creditCard)||0)+(parseFloat(ncbTransfer)||0)+(parseFloat(scotiaTransfer)||0)+(parseFloat(otherPayment)||0);
   const change=Math.max(0,(parseFloat(cash)||0)-(total-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
-  const canCheckout=cart.length>0&&totalPaid>=total;
+  const canCheckout=cart.length>0&&(total<=0||totalPaid>=total);
 
   const saveCustomer=async(name,phone,email)=>{
     if(!name&&!phone&&!email)return;
@@ -5871,6 +5871,21 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   const checkout=async()=>{
     if(!canCheckout)return;
+    // If exchange and store owes customer, confirm refund/credit method
+    let exchangeRefundMethod = null;
+    if(isExchange && exchDiff < 0){
+      const diff = Math.abs(exchDiff);
+      const choice = confirm(`Store owes customer ${fmtMoney(diff)}.
+
+OK = Issue as Store Credit
+Cancel = Cash/Bank Transfer Refund`);
+      exchangeRefundMethod = choice ? "store_credit" : "cash_bank";
+      if(exchangeRefundMethod==="store_credit"){
+        const credit={id:Date.now().toString(),customerName,customerPhone,amount:diff,issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+365*24*60*60*1000).toISOString(),sourceSaleId:"exchange",used:false};
+        const allCredits=await loadArr("tpp-store-credits");
+        await save("tpp-store-credits",[credit,...allCredits]);
+      }
+    }
     setProcessing(true);
     try{
       const existing=await loadArr("tpp-sales");
@@ -6368,7 +6383,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       E(Field,{label:"Note"},E(Input,{placeholder:"Optional note",value:note,onChange:e=>setNote(e.target.value)})),
       E("div",{style:{display:"flex",gap:8,marginTop:14}},
         E(Btn,{variant:"ghost",onClick:parkSale,style:{fontSize:13,padding:"11px 16px"}},"⏸️ Park"),
-        E(Btn,{full:true,disabled:!canCheckout||processing,onClick:checkout,style:{fontSize:15,padding:"13px",flex:1}},
+        E(Btn,{full:true,disabled:processing,onClick:()=>{
+          if(!cart.length){alert("Cart is empty.");return;}
+          if(total>0&&totalPaid<total){alert(`Payment needed: ${fmtMoney(total-totalPaid)} still owed.\n\nEnter payment amount in one of the fields above.`);return;}
+          checkout();
+        },style:{fontSize:15,padding:"13px",flex:1}},
           processing?"Processing…":`✓ Complete — ${fmtMoney(total)}`
         )
       )
@@ -9076,8 +9095,9 @@ function PurchasesTab() {
   const [showAddPO, setShowAddPO] = useState(false);
   const [newPO, setNewPOS] = useState({ supplier:"", poRef:"", date:todayStr(), total:"", shipping:"", tax:"", type:"accessories", notes:"" });
   const setNPO=(k,v)=>setNewPOS(p=>({...p,[k]:v}));
-  const [view, setView] = useState("history");
+  const [view, setView] = useState("pos");
   const [viewingPO, setViewingPO] = useState(null);
+  const [poTab, setPoTab] = useState("pending");
   useEffect(()=>{
     loadArr("tpp-stock-receives").then(setHistory);
     loadArr("tpp-purchase-orders").then(setPos);
@@ -9508,10 +9528,9 @@ function PurchasesTab() {
   );
 
   // ── Main PO List ──────────────────────────────────────────────────────────────
-  const [poTab, setPoTab] = useState("pending");
   const poGroups = {
     pending: pos.filter(p=>p.status!=="Received"&&p.status!=="Voided"),
-    received: pos.filter(p=>p.status==="Received"),
+    received: pos.filter(p=>p.status==="Received"&&p.status!=="Voided"),
     voided: pos.filter(p=>p.status==="Voided"),
   };
   const poTotal = (group) => group.reduce((s,p)=>s+(p.invoiceTotal||0),0);
