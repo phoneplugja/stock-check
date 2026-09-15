@@ -5555,83 +5555,100 @@ const genSaleId = (existing=[]) => {
   return id;
 };
 
+const DISCOUNT_TYPES = ["General","Case","Tempered Glass","Returning Client","Customer Satisfaction","Staff","Bundle"];
+const DELIVERY_ZONES = ["None","Kingston","Portmore","Spanish Town","Old Harbour","Zip Mail","Knutsford Drop Off","Knutsford Fee","Tara Courier"];
+const SERVICES_CATALOG = [
+  { name:"Screen Replacement", price:0, note:"Variable by model" },
+  { name:"Battery Replacement", price:0, note:"Variable by model" },
+  { name:"Charging Port Repair", price:0, note:"Variable by model" },
+  { name:"Speaker/Mic Repair", price:0, note:"Variable by model" },
+  { name:"Back Glass Replacement", price:0, note:"Variable by model" },
+  { name:"Water Damage Assessment", price:3000, note:"Non-refundable diagnostic" },
+  { name:"Software/IMEI Unlock", price:0, note:"Variable by carrier" },
+  { name:"Data Transfer", price:2500, note:"Per device" },
+  { name:"Screen Protector Fitting", price:500, note:"" },
+  { name:"Phone Cleaning", price:1000, note:"" },
+];
+
 const sendReceiptEmail = async (sale) => {
   if (!sale.customerEmail) return false;
-  const itemLines = sale.items.map(i => `${i.name} x${i.qty} — ${fmtMoney(i.price * i.qty)}`).join("\n");
+  const itemLines = (sale.items||[]).map(i => `${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
+  const servedName = sale.servedBy ? (sale.servedBy.split(" ")[0] + (sale.servedBy.split(" ")[1] ? " " + sale.servedBy.split(" ")[1][0] + "." : "")) : "Staff";
   const params = {
     to_email: sale.customerEmail,
     customer_name: sale.customerName || "Valued Customer",
     receipt_id: sale.id,
     date: fmtDate(sale.createdAt),
     items: itemLines,
-    subtotal: fmtMoney(sale.subtotal),
-    discount: sale.discount ? fmtMoney(sale.discount) : "—",
-    total: fmtMoney(sale.total),
+    total: fmtMoney(sale.total||0),
     cash: sale.cash ? fmtMoney(sale.cash) : "—",
-    card: sale.card ? fmtMoney(sale.card) : "—",
-    transfer: sale.transfer ? fmtMoney(sale.transfer) : "—",
-    change: sale.change ? fmtMoney(sale.change) : "—",
+    debit_card: sale.debit_card ? fmtMoney(sale.debit_card) : "—",
+    credit_card: sale.credit_card ? fmtMoney(sale.credit_card) : "—",
+    ncb_transfer: sale.ncb_transfer ? fmtMoney(sale.ncb_transfer) : "—",
+    scotia_transfer: sale.scotia_transfer ? fmtMoney(sale.scotia_transfer) : "—",
+    other_payment: sale.other_payment ? fmtMoney(sale.other_payment) : "—",
+    change: sale.change && sale.change > 0 ? fmtMoney(sale.change) : "—",
     warranty: WARRANTY_FOOTER,
-    store_name: "The Phone Plug",
-    store_address: ADDRESS,
-    store_phone: PHONE_1,
+    served_by: servedName,
   };
   try {
-    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TPL_RECEIPT, params);
+    await emailjs.send("service_3znf9oq", "template_viixtmu", params);
     return true;
-  } catch(e) {
-    console.error("Receipt email error:", e);
-    return false;
-  }
+  } catch(e) { console.error("Email error:", e); return false; }
 };
 
 const printReceipt = (sale) => {
-  const itemLines = sale.items.map(i =>
-    `<tr><td>${i.name}</td><td style="text-align:right">${fmtMoney(i.price)}</td></tr>`
-    + (i.qty > 1 ? `<tr><td style="font-size:10px;color:#666">  x${i.qty}</td><td style="text-align:right;font-size:10px;color:#666">${fmtMoney(i.price * i.qty)}</td></tr>` : "")
+  const servedName = sale.servedBy ? (sale.servedBy.split(" ")[0] + (sale.servedBy.split(" ")[1] ? " " + sale.servedBy.split(" ")[1][0] + "." : "")) : "";
+  const itemLines = (sale.items||[]).map(i =>
+    `<tr><td>${i.name}${i.note?`<br><span style="font-size:9px;color:#666">${i.note}</span>`:""}${i.imei?`<br><span style="font-size:9px;color:#666">IMEI:${i.imei}</span>`:""}</td><td style="text-align:right;white-space:nowrap">${fmtMoney(i.price*(i.qty||1))}</td></tr>`
+    + (i.qty>1?`<tr><td style="font-size:10px;color:#666">  x${i.qty} @ ${fmtMoney(i.price)}</td><td></td></tr>`:"")
   ).join("");
   const payLines = [
-    sale.cash   ? `<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>` : "",
-    sale.card   ? `<tr><td>Card</td><td style="text-align:right">${fmtMoney(sale.card)}</td></tr>` : "",
-    sale.transfer ? `<tr><td>Transfer</td><td style="text-align:right">${fmtMoney(sale.transfer)}</td></tr>` : "",
-    sale.change && sale.change > 0 ? `<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>` : "",
+    sale.cash>0?`<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>`:"",
+    sale.debit_card>0?`<tr><td>Debit Card</td><td style="text-align:right">${fmtMoney(sale.debit_card)}</td></tr>`:"",
+    sale.credit_card>0?`<tr><td>Credit Card</td><td style="text-align:right">${fmtMoney(sale.credit_card)}</td></tr>`:"",
+    sale.ncb_transfer>0?`<tr><td>NCB Transfer</td><td style="text-align:right">${fmtMoney(sale.ncb_transfer)}</td></tr>`:"",
+    sale.scotia_transfer>0?`<tr><td>Scotia Transfer</td><td style="text-align:right">${fmtMoney(sale.scotia_transfer)}</td></tr>`:"",
+    sale.other_payment>0?`<tr><td>Other</td><td style="text-align:right">${fmtMoney(sale.other_payment)}</td></tr>`:"",
+    sale.change>0?`<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>`:"",
   ].join("");
-  const depositNote = sale.items.some(i=>i.type==="deposit") ? `<p style="font-size:10px;text-align:center;color:#333">DEPOSIT RECEIPT — Balance due on collection.</p>` : "";
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
   <style>
     @media print { @page { margin:2mm; size:80mm auto; } }
-    body { font-family:'Courier New',monospace; font-size:12px; width:76mm; margin:0 auto; padding:4px; }
-    h1 { font-size:14px; text-align:center; margin:4px 0 2px; }
-    .sub { font-size:10px; text-align:center; color:#444; margin:0; }
-    hr { border:none; border-top:1px dashed #000; margin:6px 0; }
-    table { width:100%; border-collapse:collapse; }
-    td { padding:2px 0; vertical-align:top; }
-    .total td { font-weight:bold; font-size:13px; border-top:1px solid #000; padding-top:4px; }
-    .warranty { font-size:8px; color:#444; margin-top:6px; white-space:pre-wrap; }
-    .ref { font-size:10px; text-align:center; color:#444; }
+    body{font-family:'Courier New',monospace;font-size:12px;width:76mm;margin:0 auto;padding:4px}
+    h1{font-size:14px;text-align:center;margin:4px 0 2px}
+    .sub{font-size:10px;text-align:center;color:#444;margin:0}
+    hr{border:none;border-top:1px dashed #000;margin:6px 0}
+    table{width:100%;border-collapse:collapse}
+    td{padding:2px 0;vertical-align:top}
+    .total td{font-weight:bold;font-size:13px;border-top:1px solid #000;padding-top:4px}
+    .warranty{font-size:8px;color:#444;margin-top:6px;white-space:pre-wrap}
+    .ref{font-size:10px;text-align:center;color:#444}
   </style></head><body>
   <h1>THE PHONE PLUG</h1>
-  <p class="sub">${ADDRESS}</p>
-  <p class="sub">📞 ${PHONE_1} | 📷 ${INSTAGRAM}</p>
+  <p class="sub">Shop 5D Hagley Park Plaza, Half Way Tree</p>
+  <p class="sub">📞 876-490-5515 | 📷 @phoneplug_ja</p>
   <hr>
   <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)}</p>
-  ${sale.customerName ? `<p class="ref">Customer: ${sale.customerName}</p>` : ""}
+  ${sale.customerName?`<p class="ref">Customer: ${sale.customerName}${sale.customerPhone?" · "+sale.customerPhone:""}</p>`:""}
+  ${servedName?`<p class="ref">Served by: ${servedName}</p>`:""}
+  ${sale.deliveryZone&&sale.deliveryZone!=="None"?`<p class="ref">Delivery: ${sale.deliveryZone}</p>`:""}
+  ${sale.isExchange?`<p class="ref">⟳ EXCHANGE</p>`:""}
+  ${sale.isReturn?`<p class="ref">↩ RETURN/REFUND</p>`:""}
   <hr>
   <table>${itemLines}</table>
   <hr>
-  ${sale.discount ? `<table><tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(sale.subtotal)}</td></tr><tr><td>Discount</td><td style="text-align:right">-${fmtMoney(sale.discount)}</td></tr></table>` : ""}
+  ${sale.discount>0?`<table><tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(sale.subtotal)}</td></tr><tr><td>Discount${sale.discountType?" ("+sale.discountType+")":""}</td><td style="text-align:right">-${fmtMoney(sale.discount)}</td></tr></table>`:""}
   <table class="total"><tr><td>TOTAL</td><td style="text-align:right">${fmtMoney(sale.total)}</td></tr></table>
   <hr>
   <table>${payLines}</table>
   <hr>
-  ${depositNote}
   <div class="warranty">${WARRANTY_FOOTER}</div>
-  <hr>
-  <p style="text-align:center;font-size:10px;">Thank you — see you again soon!</p>
+  <p style="text-align:center;font-size:10px">Thank you — see you again soon!</p>
   <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
   </body></html>`;
   const w = window.open("","_blank","width=400,height=600");
-  if (w) { w.document.write(html); w.document.close(); }
+  if(w){w.document.write(html);w.document.close();}
 };
 
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
@@ -5639,358 +5656,549 @@ function BarcodeScanner({ onDetected, onClose }) {
   const E = React.createElement;
   const videoRef = React.useRef(null);
   const [error, setError] = useState("");
-  const [scanning, setScanning] = useState(true);
-
-  useEffect(() => {
-    let stream = null;
-    let interval = null;
-    (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        // Use BarcodeDetector if available, else show manual entry
-        if ("BarcodeDetector" in window) {
-          const detector = new BarcodeDetector({ formats: ["ean_13","ean_8","code_128","code_39","upc_a","upc_e","qr_code"] });
-          interval = setInterval(async () => {
-            if (videoRef.current && scanning) {
-              try {
-                const codes = await detector.detect(videoRef.current);
-                if (codes.length > 0) {
-                  clearInterval(interval);
-                  onDetected(codes[0].rawValue);
-                }
-              } catch {}
-            }
-          }, 300);
-        } else {
-          setError("Camera scanning not supported on this browser. Use manual entry below.");
-        }
-      } catch(e) {
-        setError("Camera access denied. Please allow camera access or enter barcode manually.");
-      }
-    })();
-    return () => {
-      clearInterval(interval);
-      if (stream) stream.getTracks().forEach(t => t.stop());
-    };
-  }, []);
-
   const [manualCode, setManualCode] = useState("");
-
-  return E("div", { style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:2000, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:20 } },
-    E("div", { style: { color:"#fff", fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18, marginBottom:4 } }, "📷 Scan Barcode"),
-    !error && E("video", { ref: videoRef, autoPlay: true, playsInline: true, style: { width:"100%", maxWidth:360, borderRadius:12, border:"3px solid "+T.blue } }),
-    error && E("div", { style: { color:T.amber, fontSize:13, textAlign:"center", maxWidth:320 } }, error),
-    E("div", { style: { display:"flex", gap:8, width:"100%", maxWidth:360 } },
-      E(Input, { placeholder:"Or type barcode manually...", value:manualCode, onChange:e=>setManualCode(e.target.value), onKeyDown:e=>e.key==="Enter"&&manualCode.trim()&&onDetected(manualCode.trim()), style:{ flex:1, background:"#fff" } }),
-      E(Btn, { onClick:()=>manualCode.trim()&&onDetected(manualCode.trim()) }, "→")
+  useEffect(() => {
+    let stream=null, interval=null;
+    (async()=>{
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        if(videoRef.current) videoRef.current.srcObject = stream;
+        if("BarcodeDetector" in window) {
+          const detector = new BarcodeDetector({formats:["ean_13","ean_8","code_128","code_39","upc_a","upc_e","qr_code"]});
+          interval = setInterval(async()=>{
+            if(videoRef.current){
+              try { const codes=await detector.detect(videoRef.current); if(codes.length>0){clearInterval(interval);onDetected(codes[0].rawValue);} } catch{}
+            }
+          },300);
+        } else { setError("Camera scanning not supported. Use manual entry below."); }
+      } catch { setError("Camera access denied. Enter barcode manually."); }
+    })();
+    return()=>{clearInterval(interval);if(stream)stream.getTracks().forEach(t=>t.stop());};
+  },[]);
+  return E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:2000,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}},
+    E("div",{style:{color:"#fff",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},"📷 Scan Barcode"),
+    !error&&E("video",{ref:videoRef,autoPlay:true,playsInline:true,style:{width:"100%",maxWidth:360,borderRadius:12,border:"3px solid "+T.blue}}),
+    error&&E("div",{style:{color:T.amber,fontSize:13,textAlign:"center",maxWidth:320}},error),
+    E("div",{style:{display:"flex",gap:8,width:"100%",maxWidth:360}},
+      E(Input,{placeholder:"Or type barcode manually...",value:manualCode,onChange:e=>setManualCode(e.target.value),onKeyDown:e=>e.key==="Enter"&&manualCode.trim()&&onDetected(manualCode.trim()),style:{flex:1,background:"#fff"}}),
+      E(Btn,{onClick:()=>manualCode.trim()&&onDetected(manualCode.trim())},"→")
     ),
-    E(Btn, { variant:"ghost", onClick:onClose, style:{ color:"#fff", border:"1px solid rgba(255,255,255,0.3)" } }, "✕ Cancel")
+    E(Btn,{variant:"ghost",onClick:onClose,style:{color:"#fff",border:"1px solid rgba(255,255,255,0.3)"}},"✕ Cancel")
   );
 }
 
-// ── Product Catalog Manager ───────────────────────────────────────────────────
-function ProductCatalog({ onBack }) {
+// ── POS System ────────────────────────────────────────────────────────────────
+function POSSystem({ phones=[], onPhonesUpdate, user }) {
   const E = React.createElement;
-  const [products, setProducts] = useState([]);
-  const [form, setFormS] = useState({ name:"", category:"Accessory", price:"", barcode:"", stock:"" });
-  const [adding, setAdding] = useState(false);
-  const [search, setSearch] = useState("");
-  const set = (k,v) => setFormS(p=>({...p,[k]:v}));
-
-  useEffect(() => { loadArr("tpp-products").then(setProducts); }, []);
-
-  const saveProduct = async () => {
-    if (!form.name.trim() || !form.price) { alert("Name and price required."); return; }
-    const newP = { id: genId(products.map(p=>p.id)), ...form, price: parseFloat(form.price), stock: parseInt(form.stock)||0, createdAt: new Date().toISOString() };
-    const updated = [newP, ...products];
-    await save("tpp-products", updated);
-    setProducts(updated);
-    setFormS({ name:"", category:"Accessory", price:"", barcode:"", stock:"" });
-    setAdding(false);
-  };
-
-  const removeProduct = async (id) => {
-    if (!confirm("Remove this product?")) return;
-    const updated = products.filter(p=>p.id!==id);
-    await save("tpp-products", updated);
-    setProducts(updated);
-  };
-
-  const filtered = products.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search));
-
-  return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
-    E("button", { onClick:onBack, style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back to POS"),
-    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
-      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20 } }, "Product Catalog"),
-      E(Btn, { onClick:()=>setAdding(a=>!a) }, adding ? "✕ Cancel" : "+ Add Product")
-    ),
-    adding && E(Card, { style:{ marginBottom:16 } },
-      E(ST, null, "New Product"),
-      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-        E(Field, { label:"Name", required:true }, E(Input, { placeholder:"e.g. iPhone 15 Case", value:form.name, onChange:e=>set("name",e.target.value) })),
-        E(Field, { label:"Category" }, E(Sel, { value:form.category, onChange:e=>set("category",e.target.value) },
-          ["Accessory","Case","Charger","Screen Protector","Cable","Headphones","Repair Service","Other"].map(c=>E("option",{key:c},c))
-        )),
-        E(Field, { label:"Price (JMD)", required:true }, E(Input, { type:"number", placeholder:"0.00", value:form.price, onChange:e=>set("price",e.target.value) })),
-        E(Field, { label:"Stock Qty" }, E(Input, { type:"number", placeholder:"0", value:form.stock, onChange:e=>set("stock",e.target.value) }))
-      ),
-      E(Field, { label:"Barcode", hint:"optional — for scanner" }, E(Input, { placeholder:"Scan or type barcode", value:form.barcode, onChange:e=>set("barcode",e.target.value) })),
-      E("div", { style:{ marginTop:12 } }, E(Btn, { onClick:saveProduct }, "Save Product"))
-    ),
-    E(Input, { placeholder:"🔍 Search products or barcode...", value:search, onChange:e=>setSearch(e.target.value), style:{ marginBottom:14 } }),
-    filtered.length === 0 ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No products yet. Add your accessories and services above.") :
-    E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-      filtered.map((p,i) => E(Card, { key:i },
-        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
-          E("div", null,
-            E("div", { style:{ fontWeight:700, fontSize:14 } }, p.name),
-            E("div", { style:{ fontSize:12, color:T.muted, marginTop:2 } }, p.category, p.barcode ? ` · ${p.barcode}` : "", ` · Stock: ${p.stock}`)
-          ),
-          E("div", { style:{ display:"flex", alignItems:"center", gap:10 } },
-            E("div", { style:{ fontWeight:700, color:T.blue, fontSize:15 } }, fmtMoney(p.price)),
-            E("button", { onClick:()=>removeProduct(p.id), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontSize:11, fontWeight:700, cursor:"pointer" } }, "✕")
-          )
-        )
-      ))
-    )
-  );
-}
-
-// ── POS Main ─────────────────────────────────────────────────────────────────
-function POSSystem({ phones, onPhonesUpdate }) {
-  const E = React.createElement;
-  const [view, setView] = useState("pos"); // "pos" | "catalog" | "history"
+  const [view, setView] = useState("pos"); // pos | history | services | exchange | return
   const [cart, setCart] = useState([]);
   const [products, setProducts] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [sales, setSales] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+  const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [discount, setDiscount] = useState("");
+  const [discountType, setDiscountType] = useState("General");
+  const [deliveryZone, setDeliveryZone] = useState("None");
   const [cash, setCash] = useState("");
-  const [card, setCard] = useState("");
-  const [transfer, setTransfer] = useState("");
+  const [debitCard, setDebitCard] = useState("");
+  const [creditCard, setCreditCard] = useState("");
+  const [ncbTransfer, setNcbTransfer] = useState("");
+  const [scotiaTransfer, setScotiaTransfer] = useState("");
+  const [otherPayment, setOtherPayment] = useState("");
   const [note, setNote] = useState("");
-  const [processing, setSaving_] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [lastSale, setLastSale] = useState(null);
   const [emailSending, setEmailSending] = useState(false);
+  const [selectedSale, setSelectedSale] = useState(null);
+  const [showVoided, setShowVoided] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  // Exchange/Return
+  const [isExchange, setIsExchange] = useState(false);
+  const [isReturn, setIsReturn] = useState(false);
+  const [exchangeOrigSale, setExchangeOrigSale] = useState(null);
+  const [returnOrigSale, setReturnOrigSale] = useState(null);
+  const [returnItems, setReturnItems] = useState([]);
+  const [returnCredit, setReturnCredit] = useState("refund"); // refund | store_credit
+  const [creditAmount, setCreditAmount] = useState(0);
 
-  useEffect(() => {
-    (async () => {
-      const [p, t, s] = await Promise.all([
+  useEffect(()=>{
+    (async()=>{
+      const [p,t,s,c] = await Promise.all([
         loadArr("tpp-products"),
-        loadArr("tpp-tickets-v1", false),
-        loadArr("tpp-sales")
+        loadArr("tpp-tickets-v1"),
+        loadArr("tpp-sales"),
+        loadArr("tpp-customers"),
       ]);
       setProducts(p);
-      setTickets(t.filter(tk => ["received","diagnosing","awaiting_parts","in_repair","ready"].includes(tk.status)));
-      setSales(s);
+      setTickets((t||[]).filter(tk=>["received","diagnosing","awaiting_parts","in_repair","ready"].includes(tk.status)));
+      setSales(s||[]);
+      setCustomers(c||[]);
     })();
-  }, []);
+  },[]);
 
-  // ── Search across phones, products, and repair tickets ──────────────────
-  useEffect(() => {
-    if (!search.trim()) { setSearchResults([]); return; }
-    const q = search.toLowerCase();
-    const phoneResults = phones
-      .filter(p => !p.voided && p.availability === "Available" && [p.make,p.model,p.color,p.imei,p.storage].some(v=>v?.toLowerCase().includes(q)))
-      .slice(0,5)
-      .map(p => ({ type:"phone", id:p.imei||p.order_number, name:`${p.make} ${p.model} ${p.color} ${p.storage}`, price: parseFloat(p.expected_sell)||0, imei:p.imei, raw:p }));
-    const productResults = products
-      .filter(p => p.name.toLowerCase().includes(q) || (p.barcode||"").includes(search))
-      .slice(0,5)
-      .map(p => ({ type:"product", id:p.id, name:p.name, price:p.price, raw:p }));
-    const ticketResults = tickets
-      .filter(t => t.id.toLowerCase().includes(q) || t.customerName?.toLowerCase().includes(q) || t.customerPhone?.includes(q))
-      .slice(0,3)
-      .map(t => ({ type:"ticket", id:t.id, name:`Deposit — ${t.customerName} (${t.id})`, price:0, subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`, raw:t }));
-    setSearchResults([...phoneResults, ...productResults, ...ticketResults]);
-  }, [search, phones, products, tickets]);
+  // Customer autocomplete
+  useEffect(()=>{
+    if(!customerName.trim()&&!customerPhone.trim()&&!customerEmail.trim()){setCustomerSuggestions([]);return;}
+    const q=(customerName+customerPhone+customerEmail).toLowerCase();
+    const suggestions=customers.filter(c=>
+      c.name?.toLowerCase().includes(q)||
+      c.phone?.includes(customerPhone)||
+      c.email?.toLowerCase().includes(customerEmail.toLowerCase())
+    ).slice(0,4);
+    setCustomerSuggestions(suggestions);
+  },[customerName,customerPhone,customerEmail,customers]);
+
+  // Duplicate customer check
+  const isDuplicateCustomer = (name,phone,email) => {
+    return customers.some(c=>{
+      const samePhone = phone && c.phone && c.phone===phone;
+      const sameEmail = email && c.email && c.email.toLowerCase()===email.toLowerCase();
+      const sameName = name && c.name && (() => {
+        const a=name.trim().split(" "), b=c.name.trim().split(" ");
+        return a[0]?.toLowerCase()===b[0]?.toLowerCase() && a[1]?.[0]?.toLowerCase()===b[1]?.[0]?.toLowerCase();
+      })();
+      return samePhone||sameEmail||sameName;
+    });
+  };
+
+  const saveCustomer = async (name,phone,email) => {
+    if(!name&&!phone&&!email) return;
+    if(isDuplicateCustomer(name,phone,email)) return; // don't duplicate
+    const customer = {id:Date.now().toString(),name,phone,email,createdAt:new Date().toISOString()};
+    const updated=[customer,...customers];
+    await save("tpp-customers",updated);
+    setCustomers(updated);
+  };
+
+  // Search
+  useEffect(()=>{
+    if(!search.trim()){setSearchResults([]);return;}
+    const q=search.toLowerCase();
+    const phoneResults=(phones||[])
+      .filter(p=>!p.voided&&p.availability==="Available"&&[p.make,p.model,p.color,p.imei,p.storage].some(v=>v?.toLowerCase().includes(q)))
+      .slice(0,5).map(p=>({type:"phone",id:p.imei||p.id,name:`${p.make} ${p.model} ${p.storage} ${p.color}`.trim(),price:parseFloat(p.expected_sell)||0,imei:p.imei,raw:p}));
+    const productResults=products
+      .filter(p=>p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search))
+      .slice(0,5).map(p=>({type:"product",id:p.id,name:p.name,price:p.price,raw:p}));
+    const ticketResults=tickets
+      .filter(t=>t.id?.toLowerCase().includes(q)||t.customerName?.toLowerCase().includes(q)||t.customerPhone?.includes(q))
+      .slice(0,3).map(t=>({type:"ticket",id:t.id,name:`Deposit — ${t.customerName} (${t.id})`,price:0,subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`,raw:t}));
+    setSearchResults([...phoneResults,...productResults,...ticketResults]);
+  },[search,phones,products,tickets]);
 
   const addToCart = (item) => {
-    if (item.type === "ticket") {
-      const existing = cart.find(c=>c.id===item.id&&c.type==="deposit");
-      if (existing) { alert("This ticket is already in the cart."); return; }
-      setCart(c=>[...c, { type:"deposit", id:item.id, name:item.name, price:0, qty:1, ticketId:item.id, raw:item.raw }]);
+    if(item.type==="ticket"){
+      if(cart.find(c=>c.id===item.id&&c.type==="deposit")){alert("Already in cart.");return;}
+      setCart(c=>[...c,{type:"deposit",id:item.id,name:item.name,price:0,qty:1,ticketId:item.id,raw:item.raw}]);
     } else {
-      const existing = cart.find(c=>c.id===item.id&&c.type!=="deposit");
-      if (existing) {
-        setCart(c=>c.map(ci=>ci.id===item.id ? {...ci, qty:ci.qty+1} : ci));
-      } else {
-        setCart(c=>[...c, { type:item.type, id:item.id, name:item.name, price:item.price, qty:1, raw:item.raw }]);
-      }
+      const existing=cart.find(c=>c.id===item.id&&c.type!=="deposit");
+      if(existing) setCart(c=>c.map(ci=>ci.id===item.id?{...ci,qty:ci.qty+1}:ci));
+      else setCart(c=>[...c,{type:item.type,id:item.id,name:item.name,price:item.price,qty:1,imei:item.imei||"",note:"",raw:item.raw}]);
     }
     setSearch(""); setSearchResults([]);
   };
 
-  const removeFromCart = (idx) => setCart(c=>c.filter((_,i)=>i!==idx));
-  const updateCartPrice = (idx, val) => setCart(c=>c.map((ci,i)=>i===idx?{...ci,price:parseFloat(val)||0}:ci));
-  const updateCartQty = (idx, val) => setCart(c=>c.map((ci,i)=>i===idx?{...ci,qty:Math.max(1,parseInt(val)||1)}:ci));
+  const removeFromCart=(idx)=>setCart(c=>c.filter((_,i)=>i!==idx));
+  const updateCartField=(idx,k,v)=>setCart(c=>c.map((ci,i)=>i===idx?{...ci,[k]:k==="price"?parseFloat(v)||0:k==="qty"?Math.max(1,parseInt(v)||1):v}:ci));
 
-  const subtotal = cart.reduce((s,i)=>s+(i.price*i.qty),0);
-  const discountAmt = parseFloat(discount)||0;
-  const total = Math.max(0, subtotal - discountAmt);
-  const totalPaid = (parseFloat(cash)||0) + (parseFloat(card)||0) + (parseFloat(transfer)||0);
-  const change = Math.max(0, (parseFloat(cash)||0) - (total - (parseFloat(card)||0) - (parseFloat(transfer)||0)));
-  const canCheckout = cart.length > 0 && totalPaid >= total;
+  const subtotal=cart.reduce((s,i)=>s+(i.price*(i.qty||1)),0);
+  const discountAmt=parseFloat(discount)||0;
+  const total=Math.max(0,subtotal-discountAmt);
+  const totalPaid=(parseFloat(cash)||0)+(parseFloat(debitCard)||0)+(parseFloat(creditCard)||0)+(parseFloat(ncbTransfer)||0)+(parseFloat(scotiaTransfer)||0)+(parseFloat(otherPayment)||0);
+  const change=Math.max(0,(parseFloat(cash)||0)-(total-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
+  const canCheckout=cart.length>0&&totalPaid>=total;
 
-  const handleBarcodeDetected = (code) => {
-    setShowScanner(false);
-    const product = products.find(p=>p.barcode===code);
-    if (product) {
-      addToCart({ type:"product", id:product.id, name:product.name, price:product.price, raw:product });
-    } else {
-      const phone = phones.find(p=>p.imei===code);
-      if (phone && phone.availability==="Available") {
-        addToCart({ type:"phone", id:phone.imei, name:`${phone.make} ${phone.model} ${phone.color} ${phone.storage}`, price:parseFloat(phone.expected_sell)||0, raw:phone });
-      } else {
-        setSearch(code);
-        alert(`No item found for barcode: ${code}. Showing search results.`);
-      }
-    }
+  const resetForm=()=>{
+    setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");
+    setDiscount("");setDiscountType("General");setDeliveryZone("None");
+    setCash("");setDebitCard("");setCreditCard("");setNcbTransfer("");setScotiaTransfer("");setOtherPayment("");
+    setNote("");setIsExchange(false);setIsReturn(false);setExchangeOrigSale(null);setReturnOrigSale(null);setReturnItems([]);
   };
 
   const checkout = async () => {
-    if (!canCheckout) return;
-    setSaving_(true);
+    if(!canCheckout) return;
+    setProcessing(true);
     try {
       const existing = await loadArr("tpp-sales");
       const saleId = genSaleId(existing.map(s=>s.id));
+      const servedBy = user?.name || "";
       const sale = {
-        id: saleId, customerName, customerEmail,
-        items: cart, subtotal, discount: discountAmt, total,
-        cash: parseFloat(cash)||0, card: parseFloat(card)||0,
-        transfer: parseFloat(transfer)||0, change,
-        note, createdAt: new Date().toISOString(),
-        date: todayStr()
+        id:saleId, customerName, customerPhone, customerEmail,
+        items:cart, subtotal, discount:discountAmt, discountType, total,
+        cash:parseFloat(cash)||0, debit_card:parseFloat(debitCard)||0,
+        credit_card:parseFloat(creditCard)||0, ncb_transfer:parseFloat(ncbTransfer)||0,
+        scotia_transfer:parseFloat(scotiaTransfer)||0, other_payment:parseFloat(otherPayment)||0,
+        change, note, deliveryZone, servedBy,
+        isExchange, isReturn,
+        exchangeOrigSaleId:exchangeOrigSale?.id||null,
+        returnOrigSaleId:returnOrigSale?.id||null,
+        createdAt:new Date().toISOString(), date:todayStr()
       };
-      // Save sale
-      const updatedSales = [sale, ...existing];
-      await save("tpp-sales", updatedSales);
-      setSales(updatedSales);
-      // Update phone availability for any phones sold
-      let updatedPhones = [...phones];
-      cart.filter(i=>i.type==="phone").forEach(item => {
-        updatedPhones = updatedPhones.map(p =>
-          p.imei === item.id ? { ...p, availability:"Sold", date_sold:todayStr(), actual_sell:String(item.price), sold_by:"POS", actual_profit:String(item.price-(parseFloat(p.total_invoice)||0)) } : p
-        );
+      await save("tpp-sales",[sale,...existing]);
+      setSales(prev=>[sale,...prev]);
+
+      // Update phone availability
+      let updatedPhones=[...phones];
+      cart.filter(i=>i.type==="phone").forEach(item=>{
+        updatedPhones=updatedPhones.map(p=>p.imei===item.id?{...p,availability:"Sold",date_sold:todayStr(),actual_sell:String(item.price),sold_by:servedBy,actual_profit:String(item.price-(parseFloat(p.total_invoice)||0)),history:[...(p.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]}:p);
       });
-      if (updatedPhones !== phones) await onPhonesUpdate(updatedPhones);
+      if(onPhonesUpdate) await onPhonesUpdate(updatedPhones);
+
       // Update product stock
-      const updatedProducts = [...products];
-      cart.filter(i=>i.type==="product").forEach(item => {
-        const idx = updatedProducts.findIndex(p=>p.id===item.id);
-        if (idx>=0) updatedProducts[idx] = { ...updatedProducts[idx], stock: Math.max(0,(updatedProducts[idx].stock||0)-item.qty) };
+      const updatedProducts=[...products];
+      cart.filter(i=>i.type==="product").forEach(item=>{
+        const idx=updatedProducts.findIndex(p=>p.id===item.id);
+        if(idx>=0) updatedProducts[idx]={...updatedProducts[idx],stock:Math.max(0,(updatedProducts[idx].stock||0)-(item.qty||1))};
       });
-      await save("tpp-products", updatedProducts);
+      await save("tpp-products",updatedProducts);
       setProducts(updatedProducts);
-      // Show success
+
+      // Save customer
+      await saveCustomer(customerName,customerPhone,customerEmail);
+
       setLastSale(sale);
-      setCart([]); setCustomerName(""); setCustomerEmail(""); setDiscount(""); setCash(""); setCard(""); setTransfer(""); setNote("");
-    } finally { setSaving_(false); }
+      resetForm();
+    } finally { setProcessing(false); }
   };
 
-  if (view === "catalog") return E(ProductCatalog, { onBack:()=>setView("pos") });
+  const voidSale = async (sale) => {
+    const reason = prompt("Reason for voiding this sale?");
+    if(!reason) return;
+    const allSales = await loadArr("tpp-sales");
+    const updated = allSales.map(s=>s.id===sale.id?{...s,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:s);
+    await save("tpp-sales",updated);
+    setSales(updated);
+    if(selectedSale?.id===sale.id) setSelectedSale({...sale,voided:true,voidReason:reason});
+  };
 
-  if (lastSale) return E("div", { style:{ maxWidth:560, margin:"0 auto" } },
-    E(Card, { style:{ textAlign:"center", padding:"28px 24px" } },
-      E("div", { style:{ fontSize:48, marginBottom:8 } }, "✅"),
-      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, marginBottom:4 } }, "Sale Complete!"),
-      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:4 } }, `Receipt: ${lastSale.id}`),
-      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontSize:28, fontWeight:800, color:T.blue, margin:"8px 0 20px" } }, fmtMoney(lastSale.total)),
-      lastSale.change > 0 && E("div", { style:{ background:T.greenLt, border:"1px solid #A7F3D0", borderRadius:10, padding:"10px 16px", fontSize:14, fontWeight:700, color:T.green, marginBottom:20 } }, `💵 Change: ${fmtMoney(lastSale.change)}`),
-      E("div", { style:{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap", marginBottom:20 } },
-        E(Btn, { onClick:()=>printReceipt(lastSale) }, "🖨️ Print Receipt"),
-        lastSale.customerEmail && E(Btn, { variant:"ghost", disabled:emailSending, onClick:async()=>{ setEmailSending(true); const ok=await sendReceiptEmail(lastSale); setEmailSending(false); if(ok) alert("✅ Receipt emailed!"); } }, emailSending?"Sending…":"📧 Email Receipt"),
+  // Exchange flow — select original sale, then add new items to cart
+  const startExchange = (origSale) => {
+    setExchangeOrigSale(origSale);
+    setIsExchange(true);
+    setIsReturn(false);
+    setCustomerName(origSale.customerName||"");
+    setCustomerPhone(origSale.customerPhone||"");
+    setCustomerEmail(origSale.customerEmail||"");
+    setView("pos");
+    setSelectedSale(null);
+    alert(`Exchange started from receipt ${origSale.id}.\nAdd the new item(s) to the cart, then complete the sale.\nPrice difference will be calculated automatically.`);
+  };
+
+  // Return flow
+  const startReturn = (origSale) => {
+    setReturnOrigSale(origSale);
+    setIsReturn(true);
+    setIsExchange(false);
+    setCustomerName(origSale.customerName||"");
+    setCustomerPhone(origSale.customerPhone||"");
+    setReturnItems(origSale.items.map(i=>({...i,returnQty:i.qty||1,selected:true})));
+    setView("return");
+    setSelectedSale(null);
+  };
+
+  const processReturn = async () => {
+    const selected = returnItems.filter(i=>i.selected);
+    if(!selected.length){alert("Select at least one item to return.");return;}
+    const refundTotal = selected.reduce((s,i)=>s+(i.price*(i.returnQty||1)),0);
+    setCreditAmount(refundTotal);
+
+    // Return phones to Under Testing status
+    let updatedPhones=[...phones];
+    selected.filter(i=>i.type==="phone"&&i.imei).forEach(item=>{
+      updatedPhones=updatedPhones.map(p=>p.imei===item.imei?{...p,availability:"Under Testing",history:[...(p.history||[]),{status:"Under Testing",ts:new Date().toISOString(),note:`Returned from sale ${returnOrigSale.id} — pending test before resale`}]}:p);
+    });
+    if(onPhonesUpdate&&updatedPhones!==phones) await onPhonesUpdate(updatedPhones);
+
+    // Log return sale
+    const existing = await loadArr("tpp-sales");
+    const returnSale = {
+      id:genSaleId(existing.map(s=>s.id)),
+      customerName,customerPhone,customerEmail,
+      items:selected.map(i=>({...i,price:-i.price,qty:i.returnQty||1})),
+      subtotal:-refundTotal, discount:0, total:-refundTotal,
+      refundType:returnCredit, refundAmount:refundTotal,
+      returnOrigSaleId:returnOrigSale.id,
+      isReturn:true, servedBy:user?.name||"",
+      createdAt:new Date().toISOString(), date:todayStr()
+    };
+    await save("tpp-sales",[returnSale,...existing]);
+    setSales(prev=>[returnSale,...prev]);
+
+    alert(`↩ Return processed.\n${returnCredit==="store_credit"?`Store credit of ${fmtMoney(refundTotal)} issued.`:`Refund of ${fmtMoney(refundTotal)} to be processed.`}\n${selected.filter(i=>i.type==="phone").length>0?"📱 Returned phones sent to testing queue before resale.":""}`);
+    resetForm();
+    setView("pos");
+  };
+
+  // ── History view ────────────────────────────────────────────────────────────
+  if(view==="history") {
+    const filtered = sales
+      .filter(s=>showVoided?true:!s.voided)
+      .filter(s=>!historySearch||s.id?.toLowerCase().includes(historySearch.toLowerCase())||s.customerName?.toLowerCase().includes(historySearch.toLowerCase())||s.customerPhone?.includes(historySearch))
+      .slice(0,60);
+
+    if(selectedSale) return E("div",{style:{maxWidth:600,margin:"0 auto"}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+        E("button",{onClick:()=>setSelectedSale(null),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back to History"),
+        E("div",{style:{display:"flex",gap:8}},
+          !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>printReceipt(selectedSale)},"🖨️ Print"),
+          !selectedSale.voided&&selectedSale.customerEmail&&E(Btn,{variant:"ghost",style:{fontSize:12},disabled:emailSending,onClick:async()=>{setEmailSending(true);await sendReceiptEmail(selectedSale);setEmailSending(false);alert("✅ Email sent!");}},emailSending?"Sending…":"📧 Email"),
+          !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:12,color:T.amber},onClick:()=>startExchange(selectedSale)},"⟳ Exchange"),
+          !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:12,color:T.blue},onClick:()=>startReturn(selectedSale)},"↩ Return"),
+          !selectedSale.voided&&E(Btn,{variant:"danger",style:{fontSize:12},onClick:()=>voidSale(selectedSale)},"🚫 Void")
+        )
       ),
-      E(Btn, { variant:"ghost", full:true, onClick:()=>setLastSale(null) }, "+ New Sale")
+      selectedSale.voided&&E("div",{style:{background:T.redLt,border:`1px solid ${T.red}33`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:T.red,fontWeight:600}},`🚫 VOIDED${selectedSale.voidReason?" — "+selectedSale.voidReason:""}`),
+      E(Card,null,
+        E("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:12}},
+          E("div",null,E("div",{style:{fontWeight:800,fontSize:16}},selectedSale.id),E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},fmtDate(selectedSale.createdAt))),
+          E("div",{style:{fontWeight:800,fontSize:20,color:T.blue}},fmtMoney(Math.abs(selectedSale.total)))
+        ),
+        selectedSale.customerName&&E("div",{style:{fontSize:13,marginBottom:4}},"👤 ",selectedSale.customerName,selectedSale.customerPhone?" · "+selectedSale.customerPhone:"",selectedSale.customerEmail?" · "+selectedSale.customerEmail:""),
+        selectedSale.servedBy&&E("div",{style:{fontSize:12,color:T.muted,marginBottom:8}},"Served by: ",selectedSale.servedBy.split(" ")[0]+(selectedSale.servedBy.split(" ")[1]?" "+selectedSale.servedBy.split(" ")[1][0]+".":"")),
+        selectedSale.isExchange&&E("div",{style:{fontSize:12,color:T.amber,marginBottom:4}},"⟳ Exchange from: ",selectedSale.exchangeOrigSaleId),
+        selectedSale.isReturn&&E("div",{style:{fontSize:12,color:T.blue,marginBottom:4}},"↩ Return from: ",selectedSale.returnOrigSaleId),
+        selectedSale.deliveryZone&&selectedSale.deliveryZone!=="None"&&E("div",{style:{fontSize:12,color:T.muted,marginBottom:8}},"📦 Delivery: ",selectedSale.deliveryZone),
+        E("div",{style:{borderTop:`1px solid ${T.border}`,paddingTop:12,marginBottom:12}},
+          (selectedSale.items||[]).map((item,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:13,padding:"5px 0",borderBottom:`1px dashed ${T.border}`}},
+            E("div",null,E("div",null,item.name,item.qty>1?` x${item.qty}`:""),item.imei&&E("div",{style:{fontSize:10,color:T.muted}},"IMEI: ",item.imei),item.note&&E("div",{style:{fontSize:10,color:T.muted}},item.note)),
+            E("div",{style:{fontWeight:600}},fmtMoney(item.price*(item.qty||1)))
+          ))
+        ),
+        selectedSale.discount>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13,color:T.muted,marginBottom:4}},E("span",null,"Discount"+(selectedSale.discountType?" ("+selectedSale.discountType+")":"")),E("span",null,"-"+fmtMoney(selectedSale.discount))),
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:700,borderTop:`1px solid ${T.border}`,paddingTop:8,marginBottom:12}},E("span",null,"TOTAL"),E("span",{style:{color:T.blue}},fmtMoney(Math.abs(selectedSale.total)))),
+        E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:12}},
+          selectedSale.cash>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Cash"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.cash))),
+          selectedSale.debit_card>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Debit Card"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.debit_card))),
+          selectedSale.credit_card>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Credit Card"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.credit_card))),
+          selectedSale.ncb_transfer>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"NCB Transfer"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.ncb_transfer))),
+          selectedSale.scotia_transfer>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Scotia Transfer"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.scotia_transfer))),
+          selectedSale.other_payment>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Other"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.other_payment))),
+          selectedSale.change>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Change"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.change)))
+        ),
+        selectedSale.note&&E("div",{style:{marginTop:10,fontSize:12,color:T.muted,fontStyle:"italic"}},"Note: ",selectedSale.note)
+      )
+    );
+
+    return E("div",{style:{maxWidth:640,margin:"0 auto"}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+        E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📋 Sales History"),
+        E("div",{style:{display:"flex",alignItems:"center",gap:10}},
+          E("label",{style:{fontSize:12,color:T.muted,display:"flex",alignItems:"center",gap:4,cursor:"pointer"}},
+            E("input",{type:"checkbox",checked:showVoided,onChange:e=>setShowVoided(e.target.checked)})," Show voided"
+          ),
+          E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← POS")
+        )
+      ),
+      E(Input,{placeholder:"🔍 Search by receipt ID, customer name or phone...",value:historySearch,onChange:e=>setHistorySearch(e.target.value),style:{marginBottom:12}}),
+      filtered.length===0?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No sales found."):
+      E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+        filtered.map((s,i)=>E("div",{key:i,onClick:()=>setSelectedSale(s),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 16px",cursor:"pointer",opacity:s.voided?0.55:1,borderLeft:`3px solid ${s.isReturn?T.blue:s.isExchange?T.amber:s.voided?T.red:T.green}`}},
+          E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
+            E("div",null,
+              E("div",{style:{fontWeight:700,fontSize:13}},s.id,s.voided?" — VOIDED":"",s.isExchange?" ⟳":"",s.isReturn?" ↩":""),
+              E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},fmtDate(s.createdAt),s.customerName?" · "+s.customerName:"",s.servedBy?" · by "+s.servedBy.split(" ")[0]:""),
+              E("div",{style:{fontSize:11,color:T.muted}},s.items?.length||0," item(s)")
+            ),
+            E("div",{style:{fontWeight:700,fontSize:15,color:s.isReturn?T.red:T.blue}},fmtMoney(Math.abs(s.total)))
+          )
+        ))
+      )
+    );
+  }
+
+  // ── Services view ───────────────────────────────────────────────────────────
+  if(view==="services") return E("div",{style:{maxWidth:600,margin:"0 auto"}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔧 Services"),
+      E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back to POS")
+    ),
+    E("div",{style:{fontSize:13,color:T.muted,marginBottom:16}},"Tap any service to add it to the cart. Edit the price on the cart screen."),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+      SERVICES_CATALOG.map((svc,i)=>E("div",{key:i,onClick:()=>{addToCart({type:"product",id:`svc-${i}`,name:svc.name,price:svc.price,raw:svc});setView("pos");},style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        E("div",null,
+          E("div",{style:{fontWeight:600,fontSize:13}},svc.name),
+          svc.note&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},svc.note)
+        ),
+        E("div",{style:{fontWeight:700,color:svc.price>0?T.blue:T.muted}},svc.price>0?fmtMoney(svc.price):"Variable")
+      ))
     )
   );
 
-  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
-    showScanner && E(BarcodeScanner, { onDetected:handleBarcodeDetected, onClose:()=>setShowScanner(false) }),
+  // ── Return view ─────────────────────────────────────────────────────────────
+  if(view==="return"&&returnOrigSale) return E("div",{style:{maxWidth:580,margin:"0 auto"}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"↩ Process Return"),
+      E("button",{onClick:()=>{resetForm();setView("history");},style:{background:"none",border:"none",color:T.muted,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"✕ Cancel")
+    ),
+    E("div",{style:{background:T.blueLt,border:`1px solid ${T.blue}33`,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13}},
+      E("div",{style:{fontWeight:700}},"Original Sale: ",returnOrigSale.id),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},fmtDate(returnOrigSale.createdAt)," · ",fmtMoney(returnOrigSale.total))
+    ),
+    E(ST,null,"Select items to return:"),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:16}},
+      returnItems.map((item,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 14px",opacity:item.selected?1:0.5}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+          E("label",{style:{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1}},
+            E("input",{type:"checkbox",checked:item.selected,onChange:e=>setReturnItems(prev=>prev.map((x,j)=>j===i?{...x,selected:e.target.checked}:x))}),
+            E("div",null,
+              E("div",{style:{fontSize:13,fontWeight:500}},item.name),
+              item.imei&&E("div",{style:{fontSize:10,color:T.muted}},"IMEI: ",item.imei)
+            )
+          ),
+          E("div",{style:{display:"flex",alignItems:"center",gap:8}},
+            item.selected&&item.qty>1&&E("div",{style:{display:"flex",alignItems:"center",gap:4,fontSize:12}},
+              "Qty:",
+              E("input",{type:"number",min:1,max:item.qty,value:item.returnQty||1,onChange:e=>setReturnItems(prev=>prev.map((x,j)=>j===i?{...x,returnQty:Math.min(item.qty,Math.max(1,parseInt(e.target.value)||1))}:x)),style:{...iS,width:50,padding:"4px 6px",textAlign:"center"}})
+            ),
+            E("div",{style:{fontWeight:600,fontSize:13}},fmtMoney(item.price*(item.returnQty||1)))
+          )
+        )
+      ))
+    ),
+    E(ST,null,"Refund method:"),
+    E("div",{style:{display:"flex",gap:8,marginBottom:16}},
+      E("button",{onClick:()=>setReturnCredit("refund"),style:{flex:1,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="refund"?T.blue:T.border}`,background:returnCredit==="refund"?T.blueLt:"transparent",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="refund"?T.blue:T.muted}},"💳 Refund to Customer"),
+      E("button",{onClick:()=>setReturnCredit("store_credit"),style:{flex:1,padding:"10px",borderRadius:8,border:`2px solid ${returnCredit==="store_credit"?T.green:T.border}`,background:returnCredit==="store_credit"?T.greenLt:"transparent",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",color:returnCredit==="store_credit"?T.green:T.muted}},"🏪 Store Credit")
+    ),
+    E("div",{style:{background:T.amberLt,border:`1px solid #FDE68A`,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#92400E"}},
+      "📱 Any returned phones will be sent to Under Testing before being made available for resale."
+    ),
+    E(Btn,{full:true,onClick:processReturn},`↩ Process Return — ${fmtMoney(returnItems.filter(i=>i.selected).reduce((s,i)=>s+(i.price*(i.returnQty||1)),0))}`)
+  );
 
-    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
-      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "💰 Point of Sale"),
-      E("div", { style:{ display:"flex", gap:8 } },
-        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("catalog") }, "📦 Products"),
-        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:()=>setView("history") }, "📋 Sales History")
+  // ── Success screen ──────────────────────────────────────────────────────────
+  if(lastSale) return E("div",{style:{maxWidth:480,margin:"0 auto"}},
+    E(Card,{style:{textAlign:"center",padding:"28px 24px"}},
+      E("div",{style:{fontSize:48,marginBottom:8}},lastSale.isReturn?"↩":"✅"),
+      E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,marginBottom:4}},lastSale.isReturn?"Return Processed!":lastSale.isExchange?"Exchange Complete!":"Sale Complete!"),
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},"Receipt: ",lastSale.id),
+      E("div",{style:{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:800,color:T.blue,margin:"8px 0 20px"}},fmtMoney(Math.abs(lastSale.total))),
+      lastSale.change>0&&E("div",{style:{background:T.greenLt,border:"1px solid #A7F3D0",borderRadius:10,padding:"10px 16px",fontSize:14,fontWeight:700,color:T.green,marginBottom:16}},`💵 Change: ${fmtMoney(lastSale.change)}`),
+      E("div",{style:{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap",marginBottom:20}},
+        E(Btn,{onClick:()=>printReceipt(lastSale)},"🖨️ Print Receipt"),
+        lastSale.customerEmail&&E(Btn,{variant:"ghost",disabled:emailSending,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(lastSale);setEmailSending(false);if(ok)alert("✅ Receipt emailed!");}},emailSending?"Sending…":"📧 Email Receipt")
+      ),
+      E(Btn,{variant:"ghost",full:true,onClick:()=>setLastSale(null)},"+ New Sale")
+    )
+  );
+
+  // ── Main POS view ───────────────────────────────────────────────────────────
+  return E("div",{style:{maxWidth:680,margin:"0 auto"}},
+    showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:prod.price,raw:prod});}else{const ph=phones.find(p=>p.imei===code);if(ph&&ph.availability==="Available"){addToCart({type:"phone",id:ph.imei,name:`${ph.make} ${ph.model} ${ph.storage} ${ph.color}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}},onClose:()=>setShowScanner(false)}),
+
+    // Header
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("div",null,
+        E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💰 Point of Sale"),
+        isExchange&&E("div",{style:{fontSize:12,color:T.amber,fontWeight:700,marginTop:2}},"⟳ Exchange mode — from ",exchangeOrigSale?.id)
+      ),
+      E("div",{style:{display:"flex",gap:6}},
+        E(Btn,{variant:"ghost",style:{fontSize:12,padding:"7px 12px"},onClick:()=>setView("services")},"🔧 Services"),
+        E(Btn,{variant:"ghost",style:{fontSize:12,padding:"7px 12px"},onClick:()=>setView("history")},"📋 History")
       )
     ),
 
-    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 } },
-      E(Field, { label:"Customer Name" }, E(Input, { placeholder:"Optional", value:customerName, onChange:e=>setCustomerName(e.target.value) })),
-      E(Field, { label:"Customer Email" }, E(Input, { type:"email", placeholder:"For email receipt", value:customerEmail, onChange:e=>setCustomerEmail(e.target.value) }))
+    // Customer fields
+    E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16,position:"relative"}},
+      E("div",{style:{position:"relative"}},
+        E(Field,{label:"Customer Name"},E(Input,{placeholder:"Optional",value:customerName,onChange:e=>setCustomerName(e.target.value)})),
+        customerSuggestions.length>0&&customerName&&E("div",{style:{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,zIndex:100,boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}},
+          customerSuggestions.map((c,i)=>E("div",{key:i,onClick:()=>{setCustomerName(c.name||"");setCustomerPhone(c.phone||"");setCustomerEmail(c.email||"");setCustomerSuggestions([]);},style:{padding:"8px 12px",cursor:"pointer",fontSize:12,borderBottom:`1px solid ${T.border}`}},
+            c.name,c.phone?" · "+c.phone:"",c.email?" · "+c.email:""
+          ))
+        )
+      ),
+      E(Field,{label:"Phone"},E(Input,{type:"tel",placeholder:"Optional",value:customerPhone,onChange:e=>setCustomerPhone(e.target.value)})),
+      E(Field,{label:"Email"},E(Input,{type:"email",placeholder:"For receipt",value:customerEmail,onChange:e=>setCustomerEmail(e.target.value)}))
     ),
 
-    E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
-      E(Input, {
-        placeholder:"🔍 Search phone, accessory, repair ticket, or service...",
-        value:search,
-        onChange:e=>setSearch(e.target.value),
-        onKeyDown:e=>{ if(e.key==="Enter"&&searchResults.length===1) addToCart(searchResults[0]); },
-        style:{ flex:1 }
-      }),
-      E(Btn, { variant:"ghost", onClick:()=>setShowScanner(true), style:{ padding:"10px 14px", fontSize:16 } }, "📷")
-    ),
-
-    searchResults.length > 0 && E("div", { style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, marginBottom:12, overflow:"hidden", boxShadow:"0 4px 16px rgba(0,0,0,0.1)" } },
-      searchResults.map((r,i) => E("div", { key:i, onClick:()=>addToCart(r), style:{ padding:"10px 14px", cursor:"pointer", borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", alignItems:"center" } },
-        E("div", null,
-          E("div", { style:{ fontWeight:600, fontSize:13 } }, r.type==="ticket"?"🎫":r.type==="phone"?"📱":"📦", " ", r.name),
-          r.subLabel && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, r.subLabel)
-        ),
-        r.type!=="ticket" && E("div", { style:{ fontWeight:700, color:T.blue, fontSize:13 } }, fmtMoney(r.price))
+    // Delivery zone
+    E("div",{style:{marginBottom:12}},
+      E(Field,{label:"Delivery Zone"},E(Sel,{value:deliveryZone,onChange:e=>setDeliveryZone(e.target.value),style:{width:"auto"}},
+        DELIVERY_ZONES.map(z=>E("option",{key:z,value:z},z))
       ))
     ),
 
-    cart.length === 0 ? E("div", { style:{ background:T.card, border:`1px dashed ${T.border}`, borderRadius:12, padding:"32px 20px", textAlign:"center", color:T.muted, marginBottom:16 } },
-      E("div", { style:{ fontSize:32, marginBottom:8 } }, "🛒"),
-      E("div", null, "Cart is empty. Search for a phone, accessory, or repair ticket above.")
-    ) :
-    E("div", { style:{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, overflow:"hidden", marginBottom:16 } },
-      E(ST, { style:{ padding:"14px 16px 0", margin:0 } }, "Cart"),
-      cart.map((item, idx) => E("div", { key:idx, style:{ padding:"10px 16px", borderTop:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 } },
-        E("div", { style:{ flex:1, fontSize:13, fontWeight:500 } },
-          item.type==="deposit" ? "🎫" : item.type==="phone" ? "📱" : "📦", " ", item.name,
-          item.type==="deposit" && E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "Repair deposit — enter amount below")
+    // Search bar
+    E("div",{style:{display:"flex",gap:8,marginBottom:8}},
+      E(Input,{placeholder:"🔍 Search phone (IMEI/model), accessory, service, or repair ticket...",value:search,onChange:e=>setSearch(e.target.value),onKeyDown:e=>{if(e.key==="Enter"&&searchResults.length===1)addToCart(searchResults[0]);},style:{flex:1}}),
+      E(Btn,{variant:"ghost",onClick:()=>setShowScanner(true),style:{padding:"10px 14px",fontSize:16}},"📷")
+    ),
+
+    // Search results
+    searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
+      searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        E("div",null,
+          E("div",{style:{fontWeight:600,fontSize:13}},r.type==="ticket"?"🎫":r.type==="phone"?"📱":"📦"," ",r.name),
+          r.raw?.imei&&E("div",{style:{fontSize:10,color:T.muted}},"IMEI: ",r.raw.imei),
+          r.subLabel&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},r.subLabel)
         ),
-        item.type!=="deposit" && E("input", { type:"number", value:item.qty, onChange:e=>updateCartQty(idx,e.target.value), style:{ ...iS, width:48, textAlign:"center", padding:"6px" }, min:1 }),
-        E("input", { type:"number", value:item.price, onChange:e=>updateCartPrice(idx,e.target.value), style:{ ...iS, width:100, textAlign:"right", padding:"6px" }, placeholder:"Price" }),
-        E("button", { onClick:()=>removeFromCart(idx), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"4px 8px", fontWeight:700, cursor:"pointer", fontSize:12 } }, "✕")
+        r.type!=="ticket"&&E("div",{style:{fontWeight:700,color:T.blue,fontSize:13}},fmtMoney(r.price))
+      ))
+    ),
+
+    // Cart
+    cart.length===0?E("div",{style:{background:T.card,border:`1px dashed ${T.border}`,borderRadius:12,padding:"32px 20px",textAlign:"center",color:T.muted,marginBottom:16}},
+      E("div",{style:{fontSize:32,marginBottom:8}},"🛒"),
+      E("div",null,"Cart is empty. Search for a phone, product, or tap 🔧 Services above.")
+    ):E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden",marginBottom:16}},
+      E(ST,{style:{padding:"14px 16px 0",margin:0}},`Cart (${cart.length} item${cart.length!==1?"s":""})`),
+      cart.map((item,idx)=>E("div",{key:idx,style:{padding:"10px 16px",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",gap:10}},
+        E("div",{style:{flex:1,minWidth:0}},
+          E("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},
+            item.type==="deposit"?"🎫":item.type==="phone"?"📱":"📦"," ",item.name
+          ),
+          item.type==="phone"&&E(Input,{placeholder:"IMEI (optional)",value:item.imei||"",onChange:e=>updateCartField(idx,"imei",e.target.value),style:{fontSize:11,padding:"4px 8px",marginBottom:4}}),
+          E(Input,{placeholder:"Note (optional)",value:item.note||"",onChange:e=>updateCartField(idx,"note",e.target.value),style:{fontSize:11,padding:"4px 8px"}})
+        ),
+        E("div",{style:{display:"flex",alignItems:"center",gap:6,flexShrink:0}},
+          item.type!=="deposit"&&E("input",{type:"number",min:1,value:item.qty||1,onChange:e=>updateCartField(idx,"qty",e.target.value),style:{...iS,width:48,textAlign:"center",padding:"6px"},title:"Quantity"}),
+          E("input",{type:"number",value:item.price,onChange:e=>updateCartField(idx,"price",e.target.value),style:{...iS,width:100,textAlign:"right",padding:"6px"},placeholder:"Price"}),
+          E("button",{onClick:()=>removeFromCart(idx),style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontWeight:700,cursor:"pointer",fontSize:12}},"✕")
+        )
       )),
-      E("div", { style:{ padding:"12px 16px", borderTop:`1px solid ${T.border}` } },
-        E(Field, { label:"Discount (JMD)" }, E(Input, { type:"number", placeholder:"0", value:discount, onChange:e=>setDiscount(e.target.value), style:{ width:140 } }))
+      E("div",{style:{padding:"12px 16px",borderTop:`1px solid ${T.border}`,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+        E(Field,{label:"Discount (JMD)"},E(Input,{type:"number",placeholder:"0",value:discount,onChange:e=>setDiscount(e.target.value)})),
+        E(Field,{label:"Discount Type"},E(Sel,{value:discountType,onChange:e=>setDiscountType(e.target.value)},DISCOUNT_TYPES.map(d=>E("option",{key:d,value:d},d))))
       )
     ),
 
-    cart.length > 0 && E(Card, { style:{ marginBottom:16 } },
-      E(ST, null, "Payment"),
-      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:12 } },
-        E(Field, { label:"💵 Cash (JMD)" }, E(Input, { type:"number", placeholder:"0", value:cash, onChange:e=>setCash(e.target.value) })),
-        E(Field, { label:"💳 Card (JMD)" }, E(Input, { type:"number", placeholder:"0", value:card, onChange:e=>setCard(e.target.value) })),
-        E(Field, { label:"🏦 Transfer (JMD)" }, E(Input, { type:"number", placeholder:"0", value:transfer, onChange:e=>setTransfer(e.target.value) }))
+    // Payment
+    cart.length>0&&E(Card,{style:{marginBottom:16}},
+      E(ST,null,"Payment"),
+      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},
+        E(Field,{label:"💵 Cash (JMD)"},E(Input,{type:"number",placeholder:"0",value:cash,onChange:e=>setCash(e.target.value)})),
+        E(Field,{label:"💳 Debit Card"},E(Input,{type:"number",placeholder:"0",value:debitCard,onChange:e=>setDebitCard(e.target.value)})),
+        E(Field,{label:"💳 Credit Card"},E(Input,{type:"number",placeholder:"0",value:creditCard,onChange:e=>setCreditCard(e.target.value)})),
+        E(Field,{label:"🏦 NCB Transfer"},E(Input,{type:"number",placeholder:"0",value:ncbTransfer,onChange:e=>setNcbTransfer(e.target.value)})),
+        E(Field,{label:"🏦 Scotia Transfer"},E(Input,{type:"number",placeholder:"0",value:scotiaTransfer,onChange:e=>setScotiaTransfer(e.target.value)})),
+        E(Field,{label:"📱 Other"},E(Input,{type:"number",placeholder:"0",value:otherPayment,onChange:e=>setOtherPayment(e.target.value)}))
       ),
-      E("div", { style:{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, fontSize:14 } },
-        discountAmt > 0 && E("div", { style:{ color:T.muted } }, "Subtotal: ", E("strong", null, fmtMoney(subtotal))),
-        discountAmt > 0 && E("div", { style:{ color:T.green } }, "Discount: -", E("strong", null, fmtMoney(discountAmt))),
-        E("div", { style:{ fontWeight:700, fontSize:18 } }, "Total: ", E("span", { style:{ color:T.blue } }, fmtMoney(total))),
-        totalPaid >= total && change > 0 && E("div", { style:{ color:T.green, fontWeight:700 } }, "💵 Change: ", fmtMoney(change)),
-        totalPaid > 0 && totalPaid < total && E("div", { style:{ color:T.red, fontWeight:700 } }, "⚠️ Still owed: ", fmtMoney(total - totalPaid))
+      E("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:14,marginBottom:10}},
+        discountAmt>0&&E("div",{style:{color:T.muted}},"Subtotal: ",E("strong",null,fmtMoney(subtotal))),
+        discountAmt>0&&E("div",{style:{color:T.green}},"Discount: ",E("strong",null,"-"+fmtMoney(discountAmt))),
+        E("div",{style:{fontWeight:700,fontSize:18}},"Total: ",E("span",{style:{color:T.blue}},fmtMoney(total))),
+        totalPaid>=total&&change>0&&E("div",{style:{color:T.green,fontWeight:700}},"💵 Change: ",fmtMoney(change)),
+        totalPaid>0&&totalPaid<total&&E("div",{style:{color:T.red,fontWeight:700}},"⚠️ Still owed: ",fmtMoney(total-totalPaid))
       ),
-      E(Field, { label:"Note", style:{ marginTop:12 } }, E(Input, { placeholder:"Optional note for receipt", value:note, onChange:e=>setNote(e.target.value) })),
-      E("div", { style:{ marginTop:14 } },
-        E(Btn, { full:true, disabled:!canCheckout||processing, onClick:checkout, style:{ fontSize:15, padding:"13px" } },
-          processing ? "Processing…" : `✓ Complete Sale — ${fmtMoney(total)}`
+      E(Field,{label:"Note"},E(Input,{placeholder:"Optional note for receipt",value:note,onChange:e=>setNote(e.target.value)})),
+      E("div",{style:{marginTop:14}},
+        E(Btn,{full:true,disabled:!canCheckout||processing,onClick:checkout,style:{fontSize:15,padding:"13px"}},
+          processing?"Processing…":`✓ Complete Sale — ${fmtMoney(total)}`
         )
       )
     )
   );
 }
+
+
 
 function StaffPOS({ user }) {
   const E = React.createElement;
