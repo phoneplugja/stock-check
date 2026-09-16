@@ -5689,6 +5689,47 @@ function BarcodeScanner({onDetected,onClose}){
 }
 
 // ── POS System ────────────────────────────────────────────────────────────────
+// ── Catalog Helper Functions ──────────────────────────────────────────────────
+const IMEI_CATEGORIES = ["Like New Samsung","Like New iPhones","New in box","HOTWAV","Tablets"];
+
+const isImeiCategory = (cat) => IMEI_CATEGORIES.includes(cat);
+
+const getAvailableStock = (product) => {
+  if (!product) return 0;
+  if (isImeiCategory(product.category)) {
+    return (product.units||[]).filter(u=>u.status==="Available").length;
+  }
+  return product.stock || 0;
+};
+
+const saveCatalog = async (products) => {
+  if (!products) return;
+  if (products.length > 80) {
+    const CHUNK = 80, chunks = [];
+    for (let i = 0; i < products.length; i += CHUNK) chunks.push(products.slice(i, i+CHUNK));
+    await save("tpp-products-meta", { total:products.length, chunks:chunks.length, updated:new Date().toISOString() });
+    for (let i = 0; i < chunks.length; i++) await save(`tpp-products-chunk-${i}`, chunks[i]);
+  } else {
+    await save("tpp-products", products);
+  }
+};
+
+const loadCatalog = async () => {
+  try {
+    const meta = await load("tpp-products-meta");
+    if (meta && meta.chunks) {
+      const all = [];
+      for (let i = 0; i < meta.chunks; i++) {
+        const c = await load(`tpp-products-chunk-${i}`);
+        if (Array.isArray(c)) all.push(...c);
+      }
+      return all;
+    }
+  } catch {}
+  return await loadArr("tpp-products");
+};
+
+
 function POSSystem({phones=[],onPhonesUpdate,user}){
   const E=React.createElement;
   const [view,setView]=useState("pos");
