@@ -5777,23 +5777,24 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     // Search unified catalog — IMEI products show available units, others show stock count
     const catalogRes=products
       .filter(p=>{
-        const avail=getAvailableStock(p);
-        if(avail<=0)return false;
-        return p.name?.toLowerCase().includes(q)||(p.barcode||"").includes(search);
+        if(!p.name) return false;
+        return p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search);
       })
-      .slice(0,8).map(p=>{
+      .slice(0,10).map(p=>{
         const isImei=isImeiCategory(p.category);
+        const avail=getAvailableStock(p);
         const availUnits=isImei?(p.units||[]).filter(u=>u.status==="Available"):[];
         return {
           type:isImei?"imei_product":"product",
-          id:p.id,name:p.name,
+          id:p.id, name:p.name,
           price:parseFloat(p.price)||0,
-          stock:getAvailableStock(p),
+          stock:avail,
           availUnits,
-          raw:p
+          raw:p,
+          outOfStock: avail<=0 && !isImei
         };
       });
-    const phoneRes=[]; // phones now in unified catalog
+    const phoneRes=[];
     const prodRes=catalogRes;
     const tickRes=tickets
       .filter(t=>t.id?.toLowerCase().includes(q)||t.customerName?.toLowerCase().includes(q)||t.customerPhone?.includes(q))
@@ -6317,11 +6318,12 @@ Cancel = Cash/Bank Transfer Refund`);
     searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
       searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center"}},
         E("div",null,
-          E("div",{style:{fontWeight:600,fontSize:13}},
-            r.type==="ticket"?"🎫":isImeiCategory(r.raw?.category)?"📱":"📦"," ",r.name
+          E("div",{style:{fontWeight:600,fontSize:13,color:r.outOfStock?"#9CA3AF":"inherit"}},
+            r.type==="ticket"?"🎫":isImeiCategory(r.raw?.category)?"📱":"📦"," ",r.name,
+            r.outOfStock&&E("span",{style:{fontSize:10,color:"#DC2626",marginLeft:6}},"Out of stock")
           ),
           r.subLabel&&E("div",{style:{fontSize:11,color:T.muted}},r.subLabel),
-          r.stock!==undefined&&E("div",{style:{fontSize:11,color:T.muted}},`${r.stock} available`,r.type==="imei_product"?" — tap to select unit":"")
+          r.stock!==undefined&&!r.outOfStock&&E("div",{style:{fontSize:11,color:T.muted}},`${r.stock} available`,r.type==="imei_product"?" — tap to select unit":"")
         ),
         r.type!=="ticket"&&E("div",{style:{fontWeight:700,color:T.blue,fontSize:13}},fmtMoney(r.price))
       ))
@@ -9149,8 +9151,9 @@ function PurchasesTab() {
   const E = React.createElement;
   const [pos, setPos] = useState([]);
   const [history, setHistory] = useState([]);
-  const [view, setView] = useState("pos"); // pos | new | receive | history
+  const [view, setView] = useState("pos");
   const [viewingPO, setViewingPO] = useState(null);
+  const [poTab, setPoTab] = useState("pending");
   const [filter, setFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
 
