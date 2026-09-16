@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -5714,6 +5713,14 @@ const saveCatalog = async (products) => {
     await save("tpp-products", products);
   }
 };
+
+const LOYVERSE_ALL_CATS = [
+  "Like New Samsung","Like New iPhones","New in box","HOTWAV",
+  "Tablets","Gadgets",
+  "Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other",
+  "Accessories - Samsung","Accessories - Apple","Tablet Cases",
+  "Parts & Components","Other"
+];
 
 const loadCatalog = async () => {
   try {
