@@ -5757,6 +5757,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [customerEmail,setCustomerEmail]=useState("");
   const [customerSuggestions,setCustomerSuggestions]=useState([]);
   const [showNewCustomer,setShowNewCustomer]=useState(false);
+  const [isExistingCustomer,setIsExistingCustomer]=useState(false);
+  const suppressSuggestRef=useRef(false);
   // Discounts — multiple per bill
   const [discounts,setDiscounts]=useState([]); // [{type,amount}]
   const [newDiscType,setNewDiscType]=useState("General");
@@ -5810,6 +5812,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   // Customer autocomplete
   useEffect(()=>{
+    if(suppressSuggestRef.current){suppressSuggestRef.current=false;setCustomerSuggestions([]);return;}
     const q=(customerName+customerPhone+customerEmail).toLowerCase().trim();
     if(!q){setCustomerSuggestions([]);return;}
     setCustomerSuggestions(customers.filter(c=>
@@ -5880,9 +5883,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const deliveryCostNum=deliveryZone!=="None"?parseFloat(deliveryCost)||0:0;
   const subtotal=cart.reduce((s,i)=>s+(i.price*(i.qty||1)),0)+deliveryCostNum;
   const total=Math.max(0,subtotal-totalDiscount-(appliedCredit?.amount||0));
+  // Exchange diff calculated live — moved up so payment logic below can use it
+  const exchOrigTotal=exchangeOrigSale?.total||0;
+  const exchDiff=isExchange?total-exchOrigTotal:0;
+  const exchangeOwesCustomer=isExchange&&exchDiff<0;
+  // For exchanges, the amount actually collectable at the register is only the
+  // positive difference (customer owes more). If the store owes the customer,
+  // no payment method should be required — that's handled as a refund/credit instead.
+  const amountDue=isExchange?Math.max(0,exchDiff):total;
   const totalPaid=(parseFloat(cash)||0)+(parseFloat(debitCard)||0)+(parseFloat(creditCard)||0)+(parseFloat(ncbTransfer)||0)+(parseFloat(scotiaTransfer)||0)+(parseFloat(otherPayment)||0);
-  const change=Math.max(0,(parseFloat(cash)||0)-(total-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
-  const canCheckout=cart.length>0&&(total<=0||totalPaid>=total);
+  const change=Math.max(0,(parseFloat(cash)||0)-(amountDue-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
+  const canCheckout=cart.length>0&&(amountDue<=0||totalPaid>=amountDue);
 
   const saveCustomer=async(name,phone,email)=>{
     if(!name&&!phone&&!email)return;
@@ -5900,7 +5911,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   };
 
   const resetForm=()=>{
-    setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");
+    setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setIsExistingCustomer(false);
     setDiscounts([]);setNewDiscType("General");setNewDiscAmt("");
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
     setCash("");setDebitCard("");setCreditCard("");setNcbTransfer("");setScotiaTransfer("");setOtherPayment("");
@@ -6031,10 +6042,6 @@ Cancel = Cash/Bank Transfer Refund`);
     setCustomerName(origSale.customerName||"");setCustomerPhone(origSale.customerPhone||"");setCustomerEmail(origSale.customerEmail||"");
     setView("pos");setSelectedSale(null);
   };
-
-  // Exchange diff calculated live
-  const exchOrigTotal=exchangeOrigSale?.total||0;
-  const exchDiff=isExchange?total-exchOrigTotal:0;
 
   // Return
   const startReturn=(origSale)=>{
@@ -6310,23 +6317,25 @@ Cancel = Cash/Bank Transfer Refund`);
         !customerName&&!customerPhone&&!customerEmail
           ? E("button",{onClick:()=>setShowNewCustomer(s=>!s),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},showNewCustomer?"✕ Cancel":"+ New Customer")
           : E("div",{style:{display:"flex",gap:6}},
-              E("button",{onClick:async()=>{await saveCustomer(customerName,customerPhone,customerEmail);setShowNewCustomer(false);alert(`✅ Customer saved: ${customerName}`);},style:{background:T.greenLt,color:T.green,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"💾 Save Customer"),
-              E("button",{onClick:()=>{setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerSuggestions([]);setShowNewCustomer(false);},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✕ Clear")
+              !isExistingCustomer&&E("button",{onClick:async()=>{await saveCustomer(customerName,customerPhone,customerEmail);setShowNewCustomer(false);setIsExistingCustomer(true);alert(`✅ Customer saved: ${customerName}`);},style:{background:T.greenLt,color:T.green,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"💾 Save Customer"),
+              E("button",{onClick:()=>{setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerSuggestions([]);setShowNewCustomer(false);setIsExistingCustomer(false);},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✕ Clear")
             )
       ),
       E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
         E("div",{style:{position:"relative"}},
-          E(Field,{label:"Name"},E(Input,{placeholder:"Search or enter name",value:customerName,onChange:e=>{setCustomerName(e.target.value);setShowNewCustomer(false);},onFocus:()=>setShowNewCustomer(false)})),
+          E(Field,{label:"Name"},E(Input,{placeholder:"Search or enter name",value:customerName,onChange:e=>{setCustomerName(e.target.value);setShowNewCustomer(false);setIsExistingCustomer(false);},onFocus:()=>setShowNewCustomer(false)})),
           customerSuggestions.length>0&&E("div",{style:{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,zIndex:200,boxShadow:"0 6px 20px rgba(0,0,0,0.15)",overflow:"hidden"}},
             customerSuggestions.map((c,i)=>E("button",{
               key:i,
               type:"button",
               onMouseDown:e=>{
                 e.preventDefault();
+                suppressSuggestRef.current=true;
                 setCustomerName(c.name||"");
                 setCustomerPhone(c.phone||"");
                 setCustomerEmail(c.email||"");
                 setCustomerSuggestions([]);
+                setIsExistingCustomer(true);
               },
               style:{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",cursor:"pointer",fontSize:12,borderBottom:i<customerSuggestions.length-1?`1px solid ${T.border}`:"none",background:"#fff",border:"none",fontFamily:"inherit"}
             },
@@ -6335,8 +6344,8 @@ Cancel = Cash/Bank Transfer Refund`);
             ))
           )
         ),
-        E(Field,{label:"Phone"},E(Input,{type:"tel",placeholder:"Optional",value:customerPhone,onChange:e=>setCustomerPhone(e.target.value)})),
-        E(Field,{label:"Email"},E(Input,{type:"email",placeholder:"For receipt",value:customerEmail,onChange:e=>setCustomerEmail(e.target.value)}))
+        E(Field,{label:"Phone"},E(Input,{type:"tel",placeholder:"Optional",value:customerPhone,onChange:e=>{setCustomerPhone(e.target.value);setIsExistingCustomer(false);}})),
+        E(Field,{label:"Email"},E(Input,{type:"email",placeholder:"For receipt",value:customerEmail,onChange:e=>{setCustomerEmail(e.target.value);setIsExistingCustomer(false);}}))
       ),
       // Apply store credit
       credits.length>0&&E("div",{style:{marginTop:10}},
@@ -6422,31 +6431,35 @@ Cancel = Cash/Bank Transfer Refund`);
     // Payment
     cart.length>0&&E(Card,{style:{marginBottom:16}},
       E(ST,null,"Payment"),
-      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},
-        E(Field,{label:"💵 Cash"},E(Input,{type:"number",placeholder:"0",value:cash,onChange:e=>setCash(e.target.value)})),
-        E(Field,{label:"💳 Debit Card"},E(Input,{type:"number",placeholder:"0",value:debitCard,onChange:e=>setDebitCard(e.target.value)})),
-        E(Field,{label:"💳 Credit Card"},E(Input,{type:"number",placeholder:"0",value:creditCard,onChange:e=>setCreditCard(e.target.value)})),
-        E(Field,{label:"🏦 NCB Transfer"},E(Input,{type:"number",placeholder:"0",value:ncbTransfer,onChange:e=>setNcbTransfer(e.target.value)})),
-        E(Field,{label:"🏦 Scotia Transfer"},E(Input,{type:"number",placeholder:"0",value:scotiaTransfer,onChange:e=>setScotiaTransfer(e.target.value)})),
-        E(Field,{label:"📱 Other"},E(Input,{type:"number",placeholder:"0",value:otherPayment,onChange:e=>setOtherPayment(e.target.value)}))
-      ),
-      appliedCredit&&E("div",{style:{background:"#F0FDF4",borderRadius:6,padding:"6px 10px",fontSize:12,color:T.green,marginBottom:8,fontWeight:600}},"🏪 Store credit applied: -",fmtMoney(appliedCredit.amount)),
+      exchangeOwesCustomer
+        ? E("div",{style:{background:"#EFF6FF",border:`1px solid #BFDBFE`,borderRadius:8,padding:"10px 14px",marginBottom:10,fontSize:13,color:"#1D4ED8",fontWeight:600}},
+            `No payment needed — store owes customer ${fmtMoney(Math.abs(exchDiff))}. You'll choose store credit or a cash/bank refund when you complete this exchange.`
+          )
+        : E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}},
+            E(Field,{label:"💵 Cash"},E(Input,{type:"number",placeholder:"0",value:cash,onChange:e=>setCash(e.target.value)})),
+            E(Field,{label:"💳 Debit Card"},E(Input,{type:"number",placeholder:"0",value:debitCard,onChange:e=>setDebitCard(e.target.value)})),
+            E(Field,{label:"💳 Credit Card"},E(Input,{type:"number",placeholder:"0",value:creditCard,onChange:e=>setCreditCard(e.target.value)})),
+            E(Field,{label:"🏦 NCB Transfer"},E(Input,{type:"number",placeholder:"0",value:ncbTransfer,onChange:e=>setNcbTransfer(e.target.value)})),
+            E(Field,{label:"🏦 Scotia Transfer"},E(Input,{type:"number",placeholder:"0",value:scotiaTransfer,onChange:e=>setScotiaTransfer(e.target.value)})),
+            E(Field,{label:"📱 Other"},E(Input,{type:"number",placeholder:"0",value:otherPayment,onChange:e=>setOtherPayment(e.target.value)}))
+          ),
+      !exchangeOwesCustomer&&appliedCredit&&E("div",{style:{background:"#F0FDF4",borderRadius:6,padding:"6px 10px",fontSize:12,color:T.green,marginBottom:8,fontWeight:600}},"🏪 Store credit applied: -",fmtMoney(appliedCredit.amount)),
       E("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:14,marginBottom:10}},
         totalDiscount>0&&E("div",{style:{color:T.muted}},"Subtotal: ",E("strong",null,fmtMoney(subtotal))),
         totalDiscount>0&&E("div",{style:{color:T.green}},"Discounts: ",E("strong",null,"-"+fmtMoney(totalDiscount))),
-        E("div",{style:{fontWeight:700,fontSize:18}},"Total: ",E("span",{style:{color:T.blue}},fmtMoney(total))),
-        totalPaid>=total&&change>0&&E("div",{style:{color:T.green,fontWeight:700}},"💵 Change: ",fmtMoney(change)),
-        totalPaid>0&&totalPaid<total&&E("div",{style:{color:T.red,fontWeight:700}},"⚠️ Still owed: ",fmtMoney(total-totalPaid))
+        E("div",{style:{fontWeight:700,fontSize:18}},isExchange?"Amount Due: ":"Total: ",E("span",{style:{color:T.blue}},fmtMoney(amountDue))),
+        !exchangeOwesCustomer&&totalPaid>=amountDue&&change>0&&E("div",{style:{color:T.green,fontWeight:700}},"💵 Change: ",fmtMoney(change)),
+        !exchangeOwesCustomer&&totalPaid>0&&totalPaid<amountDue&&E("div",{style:{color:T.red,fontWeight:700}},"⚠️ Still owed: ",fmtMoney(amountDue-totalPaid))
       ),
       E(Field,{label:"Note"},E(Input,{placeholder:"Optional note",value:note,onChange:e=>setNote(e.target.value)})),
       E("div",{style:{display:"flex",gap:8,marginTop:14}},
         E(Btn,{variant:"ghost",onClick:parkSale,style:{fontSize:13,padding:"11px 16px"}},"⏸️ Park"),
         E(Btn,{full:true,disabled:processing,onClick:()=>{
           if(!cart.length){alert("Cart is empty.");return;}
-          if(total>0&&totalPaid<total){alert(`Payment needed: ${fmtMoney(total-totalPaid)} still owed.\n\nEnter payment amount in one of the fields above.`);return;}
+          if(amountDue>0&&totalPaid<amountDue){alert(`Payment needed: ${fmtMoney(amountDue-totalPaid)} still owed.\n\nEnter payment amount in one of the fields above.`);return;}
           checkout();
         },style:{fontSize:15,padding:"13px",flex:1}},
-          processing?"Processing…":`✓ Complete — ${fmtMoney(total)}`
+          processing?"Processing…":exchangeOwesCustomer?`✓ Complete Exchange (store owes ${fmtMoney(Math.abs(exchDiff))})`:`✓ Complete — ${fmtMoney(amountDue)}`
         )
       )
     )
@@ -6496,7 +6509,100 @@ function StoreCreditsTab() {
   );
 }
 
+// ── Customers Tab ─────────────────────────────────────────────────────────
+function CustomersTab() {
+  const E = React.createElement;
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState(null); // customer object being added/edited, or null
+  const [saving, setSaving] = useState(false);
 
+  const reload = () => loadArr("tpp-customers").then(c=>{ setCustomers(c||[]); setLoading(false); });
+  useEffect(()=>{ reload(); },[]);
+
+  const filtered = customers.filter(c=>
+    !search ||
+    c.name?.toLowerCase().includes(search.toLowerCase()) ||
+    c.phone?.includes(search) ||
+    c.email?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const emptyForm = { id:null, name:"", phone:"", email:"" };
+  const startNew = () => setEditing(emptyForm);
+  const startEdit = (c) => setEditing({ id:c.id, name:c.name||"", phone:c.phone||"", email:c.email||"" });
+
+  const saveEdit = async () => {
+    if (!editing.name.trim()) { alert("Name is required."); return; }
+    setSaving(true);
+    try {
+      let updated;
+      if (editing.id) {
+        updated = customers.map(c=>c.id===editing.id ? { ...c, name:editing.name.trim(), phone:editing.phone.trim(), email:editing.email.trim() } : c);
+      } else {
+        const newCustomer = { id:Date.now().toString(), name:editing.name.trim(), phone:editing.phone.trim(), email:editing.email.trim(), createdAt:new Date().toISOString() };
+        updated = [newCustomer, ...customers];
+      }
+      await save("tpp-customers", updated);
+      setCustomers(updated);
+      setEditing(null);
+    } finally { setSaving(false); }
+  };
+
+  const deleteCustomer = async (c) => {
+    if (!confirm(`Delete ${c.name}? This can't be undone. Past sales/receipts already recorded for them won't be affected.`)) return;
+    const updated = customers.filter(x=>x.id!==c.id);
+    await save("tpp-customers", updated);
+    setCustomers(updated);
+  };
+
+  if (loading) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading...");
+
+  return E("div",{style:{maxWidth:600,margin:"0 auto"}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("div",null,
+        E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"👤 Customers"),
+        E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${customers.length} saved`)
+      ),
+      E(Btn,{onClick:startNew},"+ Add Customer")
+    ),
+    E(Input,{placeholder:"🔍 Search by name, phone, or email...",value:search,onChange:e=>setSearch(e.target.value),style:{marginBottom:16}}),
+
+    // Add/Edit modal
+    editing&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:420,width:"100%"}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},editing.id?"Edit Customer":"Add Customer"),
+          E("button",{onClick:()=>setEditing(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")
+        ),
+        E(Field,{label:"Name"},E(Input,{value:editing.name,onChange:e=>setEditing(f=>({...f,name:e.target.value}))})),
+        E(Field,{label:"Phone"},E(Input,{type:"tel",value:editing.phone,onChange:e=>setEditing(f=>({...f,phone:e.target.value}))})),
+        E(Field,{label:"Email"},E(Input,{type:"email",value:editing.email,onChange:e=>setEditing(f=>({...f,email:e.target.value}))})),
+        E("div",{style:{display:"flex",gap:8,marginTop:16}},
+          E(Btn,{variant:"ghost",onClick:()=>setEditing(null),style:{flex:1}},"Cancel"),
+          E(Btn,{onClick:saveEdit,disabled:saving,style:{flex:1}},saving?"Saving…":"💾 Save")
+        )
+      )
+    ),
+
+    filtered.length===0&&E("div",{style:{textAlign:"center",padding:"30px 20px",color:T.muted}},customers.length===0?"No customers saved yet.":"No customers match your search."),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+      filtered.map((c,i)=>E(Card,{key:c.id||i},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
+          E("div",{style:{minWidth:0}},
+            E("div",{style:{fontWeight:700,fontSize:14}},c.name),
+            E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},[c.phone,c.email].filter(Boolean).join(" · ")||"—"),
+            c.createdAt&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},"Added: ",fmtDate(c.createdAt))
+          ),
+          E("div",{style:{display:"flex",gap:6,flexShrink:0}},
+            E("button",{onClick:()=>startEdit(c),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✎ Edit"),
+            E("button",{onClick:()=>deleteCustomer(c),style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"🗑 Delete")
+          )
+        )
+      ))
+    )
+  );
+}
 
 function StaffPOS({ user }) {
   const E = React.createElement;
@@ -6829,6 +6935,9 @@ function OwnerShell({
     id: "credits",
     label: "🏪 Credits"
   }, {
+    id: "customers",
+    label: "👤 Customers"
+  }, {
     id: "todo",
     label: "✅ To Do"
   }, {
@@ -7029,7 +7138,7 @@ function OwnerShell({
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
@@ -9195,6 +9304,8 @@ function ImeiScanner({onDetected, onClose}) {
     )
   );
 }
+
+const PO_CURRENCIES = ["JMD", "USD"];
 
 function PurchasesTab() {
   const E = React.createElement;
