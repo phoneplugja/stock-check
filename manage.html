@@ -5551,6 +5551,13 @@ const WARRANTY_FOOTER_TEXT = `WARRANTY & TERMS
 • Devices uncollected after 3 days of notification may incur storage fees.
 Thank you for choosing The Phone Plug!`;
 
+const SALE_ID_PREFIX = "RCP";
+const genSaleId = (existing=[], prefix="RCP") => {
+  let id;
+  do { id = prefix + "-" + Array.from({length:6},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join(""); } while(existing.includes(id));
+  return id;
+};
+
 const DISCOUNT_TYPES = ["General","Case","Tempered Glass","Returning Client","Customer Satisfaction","Staff","Bundle"];
 const DELIVERY_ZONES = ["None","Kingston","Portmore","Spanish Town","Old Harbour","Zip Mail","Knutsford Drop Off","Knutsford Fee","Tara Courier"];
 const SERVICES_CATALOG = [
@@ -9086,285 +9093,57 @@ const PURCHASE_TYPE_CATS = {
   parts:["Parts & Components"],gadgets:["Gadgets"]
 };
 
-function PurchasesTab() {
-  const E = React.createElement;
-  const [history, setHistory] = useState([]);
-  const [pos, setPos] = useState([]);
-  const [filter, setFilter] = useState("all");
-  const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
-  const [showAddPO, setShowAddPO] = useState(false);
-  const [newPO, setNewPOS] = useState({ supplier:"", poRef:"", date:todayStr(), total:"", shipping:"", tax:"", type:"accessories", notes:"" });
-  const setNPO=(k,v)=>setNewPOS(p=>({...p,[k]:v}));
-  const [view, setView] = useState("pos");
-  const [viewingPO, setViewingPO] = useState(null);
-  const [poTab, setPoTab] = useState("pending");
-  useEffect(()=>{
-    loadArr("tpp-stock-receives").then(setHistory);
-    loadArr("tpp-purchase-orders").then(setPos);
-  },[]);
-  const savePO=async()=>{
-    if(!newPO.supplier.trim()){alert("Supplier required.");return;}
-    const po={id:Date.now().toString(),...newPO,total:parseFloat(newPO.total)||0,shipping:parseFloat(newPO.shipping)||0,tax:parseFloat(newPO.tax)||0,createdAt:new Date().toISOString(),status:"open"};
-    const updated=[po,...pos];await save("tpp-purchase-orders",updated);setPos(updated);
-    setNewPOS({supplier:"",poRef:"",date:todayStr(),total:"",shipping:"",tax:"",type:"accessories",notes:""});setShowAddPO(false);
-  };
-  const voidPO=async(id)=>{
-    const reason=prompt("Reason for voiding?");if(!reason)return;
-    const updated=pos.map(p=>p.id===id?{...p,status:"voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
-    await save("tpp-purchase-orders",updated);setPos(updated);
-  };
-  const getType=(entry)=>{
-    // Use explicit type field first (from PO), then fall back to category detection
-    if(entry.type&&entry.type!=="mixture") return entry.type;
-    const cat=(entry.category||"").toLowerCase();
-    if(cat.includes("part")||cat.includes("screen")||cat.includes("battery")||cat.includes("port"))return"parts";
-    if(PURCHASE_TYPE_CATS.phones.some(c=>c.toLowerCase()===cat))return"phones";
-    if(cat.includes("case")||cat.includes("accessory")||cat.includes("accessories"))return"accessories";
-    if(cat.includes("gadget")||cat.includes("tablet"))return"gadgets";
-    return"accessories";
-  };
-  const filtered=history.filter(h=>{
-    if(h.voided) return false; // exclude voided entries from spending
-    const mt=filter==="all"||getType(h)===filter;
-    const mm=!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter);
-    return mt&&mm;
-  });
-  const totalByType={phones:0,accessories:0,parts:0,gadgets:0};
-  filtered.forEach(h=>{const t=getType(h);const a=(parseFloat(h.costPerUnit)||0)*(parseInt(h.qty)||0);totalByType[t]=(totalByType[t]||0)+a;});
-  const grandTotal=Object.values(totalByType).reduce((s,v)=>s+v,0);
-  const TYPE_LABELS={phones:"📱 Phones",accessories:"📦 Accessories",parts:"🔧 Parts",gadgets:"📡 Gadgets"};
-  return E("div",{style:{maxWidth:680,margin:"0 auto"}},
-    viewingPO&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
-      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:500,width:"100%",maxHeight:"85vh",overflowY:"auto"}},
-        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
-          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},"📄 Purchase Order"),
-          E("button",{onClick:()=>setViewingPO(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#888"}},"✕")
-        ),
-        E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13}},
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Supplier"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.supplier||"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Reference"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.poRef||"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Date"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.date||"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Type"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.type||"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Total"),E("div",{style:{fontWeight:700,color:T.blue,marginTop:2}},fmtMoney(viewingPO.total||0))),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Shipping"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.shipping>0?`$${viewingPO.shipping}`:"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Tax"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.tax>0?`$${viewingPO.tax}`:"—")),
-          E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Status"),E("div",{style:{fontWeight:700,color:viewingPO.status==="open"?T.blue:viewingPO.status==="voided"?T.red:T.green,marginTop:2}},viewingPO.status))
-        ),
-        viewingPO.notes&&E("div",{style:{marginTop:12,fontSize:13}},E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase",letterSpacing:"0.5px"}},"Notes"),E("div",{style:{marginTop:2}},viewingPO.notes)),
-        viewingPO.status==="voided"&&E("div",{style:{marginTop:12,background:T.redLt,borderRadius:8,padding:"10px 14px",fontSize:12,color:T.red}},`Voided: ${viewingPO.voidReason||"—"}`),
-        E("div",{style:{display:"flex",gap:8,marginTop:20}},
-          E(Btn,{variant:"ghost",onClick:()=>setViewingPO(null)},"Close"),
-          viewingPO.status==="open"&&E(Btn,{variant:"danger",onClick:async()=>{
-            const reason=prompt("Reason for voiding?");if(!reason)return;
-            const updated=pos.map(p=>p.id===viewingPO.id?{...p,status:"voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
-            await save("tpp-purchase-orders",updated);setPos(updated);setViewingPO(null);
-          }},"🚫 Void PO")
-        )
-      )
-    ),
-    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💸 Purchases"),
-      E("div",{style:{display:"flex",gap:8}},
-        E("button",{onClick:()=>setView("history"),style:{background:view==="history"?T.blue:"#F3F4F6",color:view==="history"?"#fff":T.muted,border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"📋 History"),
-        E("button",{onClick:()=>setView("pos"),style:{background:view==="pos"?T.blue:"#F3F4F6",color:view==="pos"?"#fff":T.muted,border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"📄 Purchase Orders"),
-        E(Btn,{onClick:()=>{setShowAddPO(s=>!s);setView("pos");}},showAddPO?"✕ Cancel":"+ New PO")
-      )
-    ),
-    showAddPO&&E(Card,{style:{marginBottom:16}},
-      E(ST,null,"New Purchase Order"),
-      E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
-        E(Field,{label:"Supplier",required:true},E(Input,{placeholder:"e.g. Cell Parts JA",value:newPO.supplier,onChange:e=>setNPO("supplier",e.target.value)})),
-        E(Field,{label:"PO / Invoice Reference"},E(Input,{placeholder:"Invoice # or PO number",value:newPO.poRef,onChange:e=>setNPO("poRef",e.target.value)})),
-        E(Field,{label:"Date"},E(Input,{type:"date",value:newPO.date,onChange:e=>setNPO("date",e.target.value)})),
-        E(Field,{label:"Total Amount (JMD)"},E(Input,{type:"number",placeholder:"0",value:newPO.total,onChange:e=>setNPO("total",e.target.value)})),
-        E(Field,{label:"Shipping (USD)"},E(Input,{type:"number",placeholder:"0",value:newPO.shipping||"",onChange:e=>setNPO("shipping",e.target.value)})),
-        E(Field,{label:"Tax (USD)"},E(Input,{type:"number",placeholder:"0",value:newPO.tax||"",onChange:e=>setNPO("tax",e.target.value)})),
-        E(Field,{label:"Stock Type"},E(Sel,{value:newPO.type,onChange:e=>setNPO("type",e.target.value)},
-          E("option",{value:"accessories"},"📦 Accessories"),E("option",{value:"phones"},"📱 Phones"),
-          E("option",{value:"parts"},"🔧 Parts"),E("option",{value:"gadgets"},"📡 Gadgets"),E("option",{value:"mixture"},"🔀 Mixture")
-        ))
-      ),
-      E(Field,{label:"Notes"},E(Input,{placeholder:"Optional",value:newPO.notes,onChange:e=>setNPO("notes",e.target.value)})),
-      E("div",{style:{marginTop:12}},E(Btn,{onClick:savePO},"Save Purchase Order"))
-    ),
-    view==="pos"&&E("div",null,
-      E(ST,null,`Purchase Orders (${pos.filter(p=>p.status==="open").length} open)`),
-      pos.length===0?E("div",{style:{textAlign:"center",padding:"30px 20px",color:T.muted}},"No purchase orders yet."):
-      E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-        pos.map((po,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${po.status==="voided"?"#FECACA":T.border}`,borderRadius:12,padding:"14px 16px",opacity:po.status==="voided"?0.5:1,borderLeft:`3px solid ${po.status==="voided"?T.red:po.status==="closed"?T.green:T.blue}`}},
-          E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
-            E("div",null,
-              E("div",{style:{fontWeight:700,fontSize:14}},po.supplier,po.poRef?` — ${po.poRef}`:""),
-              E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},po.date,` · ${TYPE_LABELS[po.type]||po.type}`,po.shipping>0?` · Shipping: $${po.shipping}`:"",po.tax>0?` · Tax: $${po.tax}`:"",po.notes?` · ${po.notes}`:""),
-              po.status==="voided"&&E("div",{style:{fontSize:11,color:T.red,marginTop:2}},`Voided: ${po.voidReason}`)
-            ),
-            E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-              po.total>0&&E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(po.total)),
-              E("span",{style:{background:po.status==="open"?T.blueLt:po.status==="closed"?T.greenLt:T.redLt,color:po.status==="open"?T.blue:po.status==="closed"?T.green:T.red,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}},po.status),
-              po.status==="open"&&E("button",{onClick:()=>voidPO(po.id),style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"Void"),
-              E("button",{onClick:()=>setViewingPO(po),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"View")
-            )
-          )
-        ))
-      )
-    ),
-    view==="history"&&E("div",null,
-      E(R2,null,
-        E(StatCard,{label:"Total spent",value:fmtMoney(grandTotal),color:T.blue}),
-        E(StatCard,{label:"Entries",value:String(filtered.length),color:T.green})
-      ),
-      E("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:20,marginTop:12}},
-        Object.entries(TYPE_LABELS).map(([type,label])=>E("div",{key:type,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",textAlign:"center"}},
-          E("div",{style:{fontSize:11,color:T.muted}},label),
-          E("div",{style:{fontWeight:700,fontSize:14,color:T.blue,marginTop:4}},fmtMoney(totalByType[type]||0))
-        ))
-      ),
-      E("div",{style:{display:"flex",gap:8,marginBottom:16}},
-        E("input",{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{...iS,width:"auto"}}),
-        E(Sel,{value:filter,onChange:e=>setFilter(e.target.value),style:{width:"auto"}},
-          E("option",{value:"all"},"All Types"),
-          ...Object.entries(TYPE_LABELS).map(([type,label])=>E("option",{key:type,value:type},label))
-        )
-      ),
-      filtered.length===0?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No purchases found."):
-      E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-        filtered.map((h,i)=>E(Card,{key:i,style:{borderLeft:`3px solid ${T.green}`}},
-          E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
-            E("div",null,
-              E("div",{style:{fontWeight:600,fontSize:13}},h.productName),
-              E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},`${h.qty} units @ ${fmtMoney(h.costPerUnit||0)} · ${h.receivedDate||fmtDate(h.createdAt)}`,h.supplier?` · ${h.supplier}`:"",h.poRef?` · PO: ${h.poRef}`:"")
-            ),
-            E("div",{style:{fontWeight:700,color:T.blue,fontSize:14}},fmtMoney((parseFloat(h.costPerUnit)||0)*(parseInt(h.qty)||0)))
-          )
-        ))
-      )
-    )
-  );
-}
-
-// ── Catalog Sub-Tab Component ─────────────────────────────────────────────────
-// ── Unified Catalog System ─────────────────────────────────────────────────────
-// All inventory lives here. Phones/tablets have individual IMEI-tracked units.
-// Accessories/parts/gadgets use stock counts only.
-
-const LOYVERSE_ALL_CATS = [
-  "Like New Samsung","Like New iPhones","New in box","HOTWAV",
-  "Tablets","Gadgets",
-  "Accessories - Samsung Cases","Accessories - Apple Cases","Accessories - Other",
-  "Accessories - Samsung","Accessories - Apple","Tablet Cases",
-  "Parts & Components","Other"
-];
-
-const IMEI_CATEGORIES = ["Like New Samsung","Like New iPhones","New in box","HOTWAV","Tablets"];
-const isImeiCategory = (cat) => IMEI_CATEGORIES.includes(cat);
-const isTabletCategory = (cat) => cat === "Tablets";
-
-// ── Helper: get available stock for a product ─────────────────────────────────
-const getAvailableStock = (product) => {
-  if (isImeiCategory(product.category)) {
-    return (product.units||[]).filter(u=>u.status==="Available").length;
-  }
-  return product.stock || 0;
-};
-
-// ── Save/load catalog (chunked for large catalogs) ────────────────────────────
-const saveCatalog = async (products) => {
-  if (products.length > 80) {
-    const CHUNK = 80, chunks = [];
-    for (let i = 0; i < products.length; i += CHUNK) chunks.push(products.slice(i, i+CHUNK));
-    await save("tpp-products-meta", { total: products.length, chunks: chunks.length, updated: new Date().toISOString() });
-    for (let i = 0; i < chunks.length; i++) await save(`tpp-products-chunk-${i}`, chunks[i]);
-  } else {
-    await save("tpp-products", products);
-    await save("tpp-products-meta", null);
-  }
-};
-
-const loadCatalog = async () => {
-  try {
-    const meta = await load("tpp-products-meta");
-    if (meta && meta.chunks) {
-      const all = [];
-      for (let i = 0; i < meta.chunks; i++) {
-        const c = await load(`tpp-products-chunk-${i}`);
-        if (Array.isArray(c)) all.push(...c);
-      }
-      return all;
-    }
-  } catch {}
-  return await loadArr("tpp-products");
-};
-
-// ── AI IMEI Scanner ───────────────────────────────────────────────────────────
-function ImeiScanner({ onDetected, onClose }) {
+// ── AI IMEI Scanner ──────────────────────────────────────────────────────────
+function ImeiScanner({onDetected, onClose}) {
   const E = React.createElement;
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const fileRef = React.useRef(null);
-
   const scanImage = async (file) => {
     setLoading(true); setError(""); setResult("");
     try {
-      const b64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result.split(",")[1]);
-        r.onerror = rej;
-        r.readAsDataURL(file);
-      });
+      const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
       setPreview(URL.createObjectURL(file));
-      const apiKey = (() => { try { return localStorage.getItem("tpp_anthropic_key") || ""; } catch { return ""; } })();
-      if (!apiKey) { setError("No API key. Add one in Settings."); setLoading(false); return; }
+      const apiKey = (() => { try { return localStorage.getItem("tpp_anthropic_key")||""; } catch { return ""; } })();
+      if (!apiKey) { setError("No API key set. Add one in Settings."); setLoading(false); return; }
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6", max_tokens: 200,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: file.type, data: b64 } },
-            { type: "text", text: "Extract the IMEI number from this image. Return ONLY the IMEI number (15 digits), nothing else. If multiple IMEIs are visible, return each on a new line. If no IMEI is visible, return 'NOT_FOUND'." }
-          ]}]
-        })
+        method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:file.type,data:b64}},
+          {type:"text",text:"Extract the IMEI number from this image. Return ONLY the 15-digit IMEI, nothing else. Multiple IMEIs: one per line. No IMEI found: return NOT_FOUND."}
+        ]}]})
       });
       const data = await resp.json();
-      const text = data.content?.[0]?.text?.trim() || "";
-      if (text === "NOT_FOUND" || !text) { setError("No IMEI found in image. Please try again or enter manually."); }
-      else { setResult(text); }
-    } catch (e) { setError("Scan failed: " + e.message); }
+      const text = data.content?.[0]?.text?.trim()||"";
+      if (!text||text==="NOT_FOUND") setError("No IMEI found. Try again or enter manually.");
+      else setResult(text);
+    } catch(e) { setError("Scan failed: "+e.message); }
     setLoading(false);
   };
-
-  return E("div", { style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
-    E("div", { style: { background:"#fff", borderRadius:16, padding:24, maxWidth:400, width:"100%", maxHeight:"85vh", overflowY:"auto" } },
-      E("div", { style: { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
-        E("div", { style: { fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "📷 Scan IMEI"),
-        E("button", { onClick: onClose, style: { background:"none", border:"none", fontSize:20, cursor:"pointer" } }, "✕")
+  return E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+    E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%",maxHeight:"85vh",overflowY:"auto"}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+        E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17}},"📷 Scan IMEI"),
+        E("button",{onClick:onClose,style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")
       ),
-      E("div", { style: { fontSize:13, color:T.muted, marginBottom:14 } }, "Take a photo or upload an image of the IMEI barcode/label."),
-      preview && E("img", { src:preview, style:{ width:"100%", borderRadius:8, marginBottom:12, maxHeight:180, objectFit:"contain" } }),
-      loading && E("div", { style:{ textAlign:"center", padding:"20px", color:T.muted } }, "🔍 Scanning..."),
-      error && E("div", { style:{ background:T.redLt, borderRadius:8, padding:"10px 14px", fontSize:13, color:T.red, marginBottom:12 } }, error),
-      result && E("div", { style:{ background:T.greenLt, borderRadius:8, padding:"12px 14px", marginBottom:12 } },
-        E("div", { style:{ fontSize:11, color:T.muted, marginBottom:4 } }, "IMEI detected:"),
-        result.split("\n").filter(Boolean).map((imei, i) =>
-          E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 } },
-            E("div", { style:{ fontFamily:"monospace", fontWeight:700, fontSize:14 } }, imei),
-            E("button", { onClick:()=>onDetected(imei), style:{ background:T.blue, color:"#fff", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer" } }, "Use")
-          )
-        )
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:12}},"Upload a photo of the IMEI label or barcode."),
+      preview&&E("img",{src:preview,style:{width:"100%",borderRadius:8,marginBottom:10,maxHeight:160,objectFit:"contain"}}),
+      loading&&E("div",{style:{textAlign:"center",padding:16,color:T.muted}},"🔍 Scanning..."),
+      error&&E("div",{style:{background:T.redLt,borderRadius:8,padding:"8px 12px",fontSize:13,color:T.red,marginBottom:10}},error),
+      result&&E("div",{style:{background:T.greenLt,borderRadius:8,padding:"10px 12px",marginBottom:10}},
+        E("div",{style:{fontSize:11,color:T.muted,marginBottom:4}},"IMEI detected:"),
+        result.split("\n").filter(Boolean).map((imei,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+          E("div",{style:{fontFamily:"monospace",fontWeight:700,fontSize:14}},imei),
+          E("button",{onClick:()=>onDetected(imei),style:{background:T.blue,color:"#fff",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"Use")
+        ))
       ),
-      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-        E("button", { onClick:()=>fileRef.current?.click(), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.blue}33`, borderRadius:8, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, "📁 Upload Photo"),
-        E("input", { ref:fileRef, type:"file", accept:"image/*", capture:"environment", style:{ display:"none" }, onChange:e=>e.target.files[0]&&scanImage(e.target.files[0]) })
-      )
+      E("button",{onClick:()=>fileRef.current?.click(),style:{background:T.blueLt,color:T.blue,border:`1px solid ${T.blue}33`,borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%"}},"📁 Upload Photo"),
+      E("input",{ref:fileRef,type:"file",accept:"image/*",capture:"environment",style:{display:"none"},onChange:e=>e.target.files[0]&&scanImage(e.target.files[0])})
     )
   );
 }
-
-// ── Purchase Orders Tab ───────────────────────────────────────────────────────
-const PO_CURRENCIES = ["JMD", "USD"];
-const PO_STATUSES = ["Open","Ordered","Partial","Received","Voided"];
 
 function PurchasesTab() {
   const E = React.createElement;
