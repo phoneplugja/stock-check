@@ -44,6 +44,8 @@
   <!-- EmailJS -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <script>emailjs.init('BdjrEVD77D_bpBwT5');</script>
+  <!-- ZXing — barcode/QR scanning that works across phones & laptops (native BarcodeDetector isn't supported on iOS Safari) -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -153,7 +155,28 @@ const DEVICE_TYPES = ["Smartphone", "Tablet", "Laptop", "Smartwatch", "Accessory
 const COMMON_ISSUES = ["Screen Damage","Battery Issue","Charging Port","Camera Fault","Speaker / Mic","Water Damage","Software / Unlock","Back Glass","Button Fault","Overheating","No Power","Other"];
 const DEVICE_COLOURS = ["Black","White","Blue","Gold","Silver","Purple","Green","Red","Pink","Yellow","Graphite","Titanium","Natural","Other"];
 const DEVICE_STORAGE = ["16GB","32GB","64GB","128GB","256GB","512GB","1TB","N/A"];
-const TERMS = `1. DATA RESPONSIBILITY
+// ── Warranty Settings (editable via Settings tab) ───────────────────────────────
+const WARRANTY_KEY = "tpp-warranty-settings";
+let WARRANTY_SETTINGS = {
+  repairDays: 7,
+  repairNote: "Does not cover new or unrelated faults.",
+  phoneDays: 7,
+  phoneNote: "No warranty on water-damaged or physically damaged devices after sale.",
+  accessoryNote: "Non-refundable after 24 hours. Exchange only with original receipt."
+};
+const loadWarrantySettings = async () => {
+  try {
+    const s = await load(WARRANTY_KEY);
+    if (s) WARRANTY_SETTINGS = { ...WARRANTY_SETTINGS, ...s };
+  } catch(e) { console.error("Warranty settings load:", e); }
+  return WARRANTY_SETTINGS;
+};
+const saveWarrantySettings = async (settings) => {
+  WARRANTY_SETTINGS = { ...WARRANTY_SETTINGS, ...settings };
+  await save(WARRANTY_KEY, WARRANTY_SETTINGS);
+  return WARRANTY_SETTINGS;
+};
+const buildTerms = () => `1. DATA RESPONSIBILITY
 The Phone Plug is not responsible for any loss of data during repair. Back up all data prior to submission.
 
 2. PRE-EXISTING DAMAGE
@@ -166,10 +189,17 @@ Devices must be collected within 3 days of notification. Uncollected devices may
 Quoted costs are estimates only. We will contact you if the final cost exceeds the estimate.
 
 5. WARRANTY
-7-day warranty on the specific repair performed only. Does not cover new or unrelated faults.
+${WARRANTY_SETTINGS.repairDays}-day warranty on the specific repair performed only. ${WARRANTY_SETTINGS.repairNote}
 
 6. AUTHORISATION
 By signing, you confirm you are the rightful owner and have read and accept these terms.`;
+const buildWarrantyFooterText = () => `WARRANTY & TERMS
+• Repairs: ${WARRANTY_SETTINGS.repairDays}-day warranty on specific repair only. ${WARRANTY_SETTINGS.repairNote}
+• Accessories: ${WARRANTY_SETTINGS.accessoryNote}
+• Phones: ${WARRANTY_SETTINGS.phoneDays}-day warranty. ${WARRANTY_SETTINGS.phoneNote}
+• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
+• Devices uncollected after 3 days of notification may incur storage fees.
+Thank you for choosing The Phone Plug!`;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -1185,7 +1215,7 @@ function NewTicketForm({
       marginBottom: 24,
       whiteSpace: "pre-line"
     }
-  }, TERMS), /*#__PURE__*/React.createElement("div", {
+  }, buildTerms()), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 18
     }
@@ -1686,7 +1716,7 @@ function TicketDetail({
       + '<div class="small">Not liable for data loss or pre-existing damage.</div>'
       + '<div class="small">Collect within 3 days of pickup notification.</div>'
       + '<div class="small">Storage fees may apply after 3 days.</div>'
-      + '<div class="small">7-day warranty on specific repair only.</div>'
+      + `<div class="small">${WARRANTY_SETTINGS.repairDays}-day warranty on specific repair only.</div>`
       + '<div class="line-dashed"></div>'
       + '<div class="row small"><span>Terms agreed:</span><span class="bold">' + (ticket.termsAgreed ? "YES - Signed digitally" : "Not recorded") + '</span></div>'
       + '<div class="line-solid"></div>'
@@ -5543,14 +5573,6 @@ function RecentEntries({ storeKey, label, formatLine }) {
 
 // ── POS System ────────────────────────────────────────────────────────────────
 
-const WARRANTY_FOOTER_TEXT = `WARRANTY & TERMS
-• Repairs: 7-day warranty on specific repair only. Does not cover new or unrelated faults.
-• Accessories: Non-refundable after 24 hours. Exchange only with original receipt.
-• Phones: 7-day warranty. No warranty on water-damaged or physically damaged devices after sale.
-• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
-• Devices uncollected after 3 days of notification may incur storage fees.
-Thank you for choosing The Phone Plug!`;
-
 const SALE_ID_PREFIX = "RCP";
 const genSaleId = (existing=[], prefix="RCP") => {
   let id;
@@ -5591,7 +5613,7 @@ const sendReceiptEmail = async (sale, overrideEmail) => {
       scotia_transfer:sale.scotia_transfer>0?fmtMoney(sale.scotia_transfer):"—",
       other_payment:sale.other_payment>0?fmtMoney(sale.other_payment):"—",
       change:sale.change>0?fmtMoney(sale.change):"—",
-      warranty:WARRANTY_FOOTER_TEXT, served_by:servedName,
+      warranty:buildWarrantyFooterText(), served_by:servedName,
     });
     return true;
   } catch(e){console.error("Email error:",e);return false;}
@@ -5647,7 +5669,7 @@ const printReceipt = (sale) => {
   <hr>
   <table>${payLines}</table>
   <hr>
-  <div class="warranty">${WARRANTY_FOOTER_TEXT}</div>
+  <div class="warranty">${buildWarrantyFooterText()}</div>
   <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
   </body></html>`;
   const w=window.open("","_blank","width=400,height=600");
@@ -5658,27 +5680,52 @@ const printReceipt = (sale) => {
 function BarcodeScanner({onDetected,onClose}){
   const E=React.createElement;
   const videoRef=React.useRef(null);
+  const readerRef=React.useRef(null);
   const [error,setError]=useState("");
   const [manualCode,setManualCode]=useState("");
   useEffect(()=>{
-    let stream=null,interval=null;
+    let cancelled=false;
     (async()=>{
+      if(typeof ZXing==="undefined"||!ZXing.BrowserMultiFormatReader){
+        setError("Camera scanning unavailable on this device. Use manual entry.");
+        return;
+      }
       try{
-        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-        if(videoRef.current)videoRef.current.srcObject=stream;
-        if("BarcodeDetector" in window){
-          const detector=new BarcodeDetector({formats:["ean_13","ean_8","code_128","code_39","upc_a","upc_e","qr_code"]});
-          interval=setInterval(async()=>{
-            if(videoRef.current){try{const codes=await detector.detect(videoRef.current);if(codes.length>0){clearInterval(interval);onDetected(codes[0].rawValue);}}catch{}}
-          },300);
-        }else{setError("Camera scanning not supported. Use manual entry.");}
-      }catch{setError("Camera access denied. Enter barcode manually.");}
+        const codeReader=new ZXing.BrowserMultiFormatReader();
+        readerRef.current=codeReader;
+        const constraints={video:{facingMode:{ideal:"environment"}}};
+        const onFrame=(result,err)=>{
+          if(cancelled)return;
+          if(result){
+            const text=result.getText?result.getText():result.text;
+            if(text){codeReader.reset();onDetected(text);}
+          }
+          // NotFoundException fires continuously while no barcode is in frame — ignore it
+        };
+        if(typeof codeReader.decodeFromConstraints==="function"){
+          await codeReader.decodeFromConstraints(constraints,videoRef.current,onFrame);
+        }else{
+          // Older ZXing builds don't have decodeFromConstraints — fall back to
+          // requesting the rear camera manually, then decoding from that device.
+          const stream=await navigator.mediaDevices.getUserMedia(constraints);
+          const track=stream.getVideoTracks()[0];
+          const deviceId=track&&track.getSettings?track.getSettings().deviceId:undefined;
+          stream.getTracks().forEach(t=>t.stop());
+          await codeReader.decodeFromVideoDevice(deviceId,videoRef.current,onFrame);
+        }
+      }catch(e){
+        console.error("Barcode scanner error:",e);
+        if(!cancelled)setError("Camera access denied or unavailable. Enter barcode manually.");
+      }
     })();
-    return()=>{clearInterval(interval);if(stream)stream.getTracks().forEach(t=>t.stop());};
+    return()=>{
+      cancelled=true;
+      try{readerRef.current&&readerRef.current.reset();}catch{}
+    };
   },[]);
   return E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:2000,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}},
     E("div",{style:{color:"#fff",fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},"📷 Scan Barcode"),
-    !error&&E("video",{ref:videoRef,autoPlay:true,playsInline:true,style:{width:"100%",maxWidth:360,borderRadius:12,border:"3px solid "+T.blue}}),
+    !error&&E("video",{ref:videoRef,autoPlay:true,playsInline:true,muted:true,style:{width:"100%",maxWidth:360,borderRadius:12,border:"3px solid "+T.blue}}),
     error&&E("div",{style:{color:T.amber,fontSize:13,textAlign:"center",maxWidth:320}},error),
     E("div",{style:{display:"flex",gap:8,width:"100%",maxWidth:360}},
       E(Input,{placeholder:"Or type barcode manually...",value:manualCode,onChange:e=>setManualCode(e.target.value),onKeyDown:e=>e.key==="Enter"&&manualCode.trim()&&onDetected(manualCode.trim()),style:{flex:1,background:"#fff"}}),
@@ -8872,6 +8919,25 @@ function SettingsTab() {
   const [keyInput, setKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [warranty, setWarranty] = useState(WARRANTY_SETTINGS);
+  const [warrantyLoading, setWarrantyLoading] = useState(true);
+  const [warrantySaved, setWarrantySaved] = useState(false);
+  const [warrantySaving, setWarrantySaving] = useState(false);
+  useEffect(()=>{ loadWarrantySettings().then(w=>{ setWarranty(w); setWarrantyLoading(false); }); },[]);
+  const setW = (k,v) => setWarranty(w=>({...w,[k]:v}));
+  const saveWarranty = async () => {
+    setWarrantySaving(true);
+    try {
+      await saveWarrantySettings({
+        repairDays: parseInt(warranty.repairDays)||0,
+        repairNote: warranty.repairNote||"",
+        phoneDays: parseInt(warranty.phoneDays)||0,
+        phoneNote: warranty.phoneNote||"",
+        accessoryNote: warranty.accessoryNote||""
+      });
+      setWarrantySaved(true); setTimeout(()=>setWarrantySaved(false),3000);
+    } finally { setWarrantySaving(false); }
+  };
   const saveKey = () => {
     if (!keyInput.trim().startsWith("sk-ant-")) { alert("Invalid key — must start with sk-ant-"); return; }
     try { localStorage.setItem(API_KEY_STORE, keyInput.trim()); } catch {}
@@ -8886,6 +8952,29 @@ function SettingsTab() {
   return E("div",{style:{maxWidth:520,margin:"0 auto"}},
     E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,marginBottom:4}},"⚙️ Settings"),
     E("div",{style:{fontSize:13,color:T.muted,marginBottom:28}},"Manage API keys and system configuration."),
+    E(Card,{style:{marginBottom:20}},
+      E(ST,null,"🛡️ Warranty & Return Policy"),
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:16,lineHeight:1.7}},
+        "Shown on repair intake terms, sale receipts (print &amp; email), and repair ticket receipts. Changes apply immediately to new receipts."
+      ),
+      warrantyLoading
+        ? E("div",{style:{color:T.muted,fontSize:13}},"Loading…")
+        : E("div",null,
+            E("div",{style:{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:12,alignItems:"start"}},
+              E(Field,{label:"Repair (days)"},E(Input,{type:"number",min:"0",value:warranty.repairDays,onChange:e=>setW("repairDays",e.target.value)})),
+              E(Field,{label:"Repair warranty note"},E(Input,{value:warranty.repairNote,onChange:e=>setW("repairNote",e.target.value)}))
+            ),
+            E("div",{style:{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:12,alignItems:"start"}},
+              E(Field,{label:"Phone (days)"},E(Input,{type:"number",min:"0",value:warranty.phoneDays,onChange:e=>setW("phoneDays",e.target.value)})),
+              E(Field,{label:"Phone warranty note"},E(Input,{value:warranty.phoneNote,onChange:e=>setW("phoneNote",e.target.value)}))
+            ),
+            E(Field,{label:"Accessory policy"},E(Input,{value:warranty.accessoryNote,onChange:e=>setW("accessoryNote",e.target.value)})),
+            E("div",{style:{display:"flex",alignItems:"center",gap:10,marginTop:14}},
+              E(Btn,{onClick:saveWarranty,disabled:warrantySaving},warrantySaving?"Saving…":"💾 Save Warranty Settings"),
+              warrantySaved&&E("span",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Saved!")
+            )
+          )
+    ),
     E(Card,{style:{marginBottom:20}},
       E(ST,null,"Anthropic API Key"),
       E("div",{style:{fontSize:13,color:T.muted,marginBottom:16,lineHeight:1.7}},
@@ -9527,7 +9616,7 @@ function PurchasesTab() {
         ),
     E("div",{style:{marginTop:28}},
       E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
-        E(ST,{style:{margin:0}},"Stock Receive History"),
+        E(ST,{style:{margin:0}},"Stock Receive History",poTab==="voided"?" (voided POs)":""),
         E("div",{style:{display:"flex",gap:8}},
           E("input",{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{...iS,width:"auto"}}),
           E(Sel,{value:filter,onChange:e=>setFilter(e.target.value),style:{width:"auto"}},
@@ -9537,7 +9626,11 @@ function PurchasesTab() {
         )
       ),
       (()=>{
-        const hf=history.filter(h=>(filter==="all"||(h.category||"")===filter)&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter)));
+        // Match receive-history entries to their PO by poRef so voided POs' spend
+        // only ever shows under the Voided tab, never Pending/Received.
+        const voidedRefs = new Set(poGroups.voided.map(p=>p.poRef).filter(Boolean));
+        const hf=history.filter(h=>(filter==="all"||(h.category||"")===filter)&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter)))
+          .filter(h=> poTab==="voided" ? (h.poRef&&voidedRefs.has(h.poRef)) : !(h.poRef&&voidedRefs.has(h.poRef)));
         const ht=hf.reduce((s,h)=>s+(parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1)),0);
         return E("div",null,
           hf.length>0&&E("div",{style:{background:T.greenLt,borderRadius:8,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between"}},
@@ -9994,6 +10087,7 @@ function PhoneTestingQueue({ phones, onUpdate }) {
 
 function App() {
   const [user, setUser] = useState(null);
+  useEffect(()=>{ loadWarrantySettings(); },[]);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("style", null, `
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
