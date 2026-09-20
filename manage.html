@@ -5835,6 +5835,36 @@ const sendReceiptEmail = async (sale, overrideEmail) => {
   } catch(e){console.error("Email error:",e);return false;}
 };
 
+const ORDER_SHIPPING_NOTICE = "Orders to be delivered outside of Kingston and St Andrew, received before 1 PM will be shipped same day. Otherwise, those orders will be shipped the following business day. Orders are shipped at buyer's risk. Buyer is responsible for any storage or return costs should they arise. An email will follow with necessary Tracking and delivery details. Orders will only be disbursed to the person who made payment. Government Issued Picture ID will be needed on collection. Special accommodations regarding this policy must be communicated to us via WhatsApp or phone at 8764905515 or by responding to this email.";
+
+// Same shape/data as the receipt email, but for notifying a customer their order was placed —
+// swaps the warranty footer for the shipping/pickup policy notice. Uses a separate EmailJS
+// template (id set in Settings) so the wording can be edited there without a code change.
+const sendOrderEmail = async (sale, overrideEmail) => {
+  const email = overrideEmail || sale.customerEmail;
+  if (!email) return false;
+  const tplId = getOrderTemplateId();
+  if (!tplId) { alert("Set your Order Notice EmailJS template ID in Settings first."); return false; }
+  const itemLines = (sale.items||[]).map(i=>`${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
+  const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
+  try {
+    await emailjs.send("service_3znf9oq",tplId,{
+      to_email:email, customer_name:sale.customerName||"Valued Customer",
+      receipt_id:sale.id, date:fmtDate(sale.createdAt), items:itemLines,
+      total:fmtMoney(sale.total||0),
+      cash:sale.cash>0?fmtMoney(sale.cash):"—",
+      debit_card:sale.debit_card>0?fmtMoney(sale.debit_card):"—",
+      credit_card:sale.credit_card>0?fmtMoney(sale.credit_card):"—",
+      ncb_transfer:sale.ncb_transfer>0?fmtMoney(sale.ncb_transfer):"—",
+      scotia_transfer:sale.scotia_transfer>0?fmtMoney(sale.scotia_transfer):"—",
+      other_payment:sale.other_payment>0?fmtMoney(sale.other_payment):"—",
+      change:sale.change>0?fmtMoney(sale.change):"—",
+      shipping_notice:ORDER_SHIPPING_NOTICE, served_by:servedName,
+    });
+    return true;
+  } catch(e){console.error("Order email error:",e);return false;}
+};
+
 const printReceipt = (sale) => {
   const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("");
   const itemLines = (sale.items||[]).map(i=>
@@ -5907,6 +5937,15 @@ const getLabelSize = () => {
 };
 const setLabelSize = (w, h) => {
   try { window.localStorage.setItem("tpp_label_w", w); window.localStorage.setItem("tpp_label_h", h); } catch {}
+};
+// EmailJS template ID for the "Order Notice" email (shipping/pickup policy). Set once in
+// Settings after the template is created in the EmailJS dashboard — kept out of code so it
+// never needs another file edit if the template is recreated.
+const getOrderTemplateId = () => {
+  try { return window.localStorage.getItem("tpp_order_tpl_id") || ""; } catch { return ""; }
+};
+const setOrderTemplateId = (id) => {
+  try { window.localStorage.setItem("tpp_order_tpl_id", id || ""); } catch {}
 };
 const printBarcodeLabels = (items) => {
   if (!items || !items.length) return;
@@ -6099,6 +6138,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [historySearch,setHistorySearch]=useState("");
   const [emailModal,setEmailModal]=useState(null); // {sale, email}
   const [emailSending,setEmailSending]=useState(false);
+  const [orderEmailModal,setOrderEmailModal]=useState(null); // {sale, email}
+  const [orderEmailSending,setOrderEmailSending]=useState(false);
   // Exchange/Return
   const [isExchange,setIsExchange]=useState(false);
   const [isReturn,setIsReturn]=useState(false);
@@ -6494,11 +6535,24 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           )
         )
       ),
+      // Order notice email modal
+      orderEmailModal&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+        E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%"}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:12}},"📦 Send Order Notice"),
+          E(Field,{label:"Send to email"},E(Input,{type:"email",value:orderEmailModal.email,onChange:e=>setOrderEmailModal(prev=>({...prev,email:e.target.value})),placeholder:"Email address"})),
+          E("div",{style:{fontSize:12,color:T.muted,marginBottom:12}},"Same order details as the receipt, with shipping/pickup policy instead of warranty."),
+          E("div",{style:{display:"flex",gap:8}},
+            E(Btn,{variant:"ghost",onClick:()=>setOrderEmailModal(null)},"Cancel"),
+            E(Btn,{disabled:orderEmailSending||!orderEmailModal.email,onClick:async()=>{setOrderEmailSending(true);const ok=await sendOrderEmail(orderEmailModal.sale,orderEmailModal.email);setOrderEmailSending(false);setOrderEmailModal(null);alert(ok?"✅ Order notice sent!":"❌ Failed to send. Check EmailJS settings.");}},orderEmailSending?"Sending…":"Send")
+          )
+        )
+      ),
       E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
         E("button",{onClick:()=>setSelectedSale(null),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back"),
         E("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
           !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>printReceipt(selectedSale)},"🖨️ Print"),
           !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setEmailModal({sale:selectedSale,email:selectedSale.customerEmail||""})},"📧 Email"),
+          !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setOrderEmailModal({sale:selectedSale,email:selectedSale.customerEmail||""})},"📦 Order Notice"),
           !selectedSale.voided&&!selectedSale.isReturn&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px",color:T.amber},onClick:()=>startExchange(selectedSale)},"⟳ Exchange"),
           !selectedSale.voided&&!selectedSale.isReturn&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px",color:T.blue},onClick:()=>startReturn(selectedSale)},"↩ Return"),
           !selectedSale.voided&&E(Btn,{variant:"danger",style:{fontSize:11,padding:"6px 10px"},onClick:()=>voidSale(selectedSale)},"🚫 Void")
@@ -9350,11 +9404,17 @@ function SettingsTab() {
   const [warrantySaving, setWarrantySaving] = useState(false);
   const [labelSize, setLabelSizeState] = useState(()=>getLabelSize());
   const [labelSaved, setLabelSaved] = useState(false);
+  const [orderTplId, setOrderTplIdState] = useState(()=>getOrderTemplateId());
+  const [orderTplSaved, setOrderTplSaved] = useState(false);
   useEffect(()=>{ loadWarrantySettings().then(w=>{ setWarranty(w); setWarrantyLoading(false); }); },[]);
   const saveLabelSize = () => {
     const w = parseFloat(labelSize.w)||70, h = parseFloat(labelSize.h)||32;
     setLabelSize(w, h); setLabelSizeState({w,h});
     setLabelSaved(true); setTimeout(()=>setLabelSaved(false),2500);
+  };
+  const saveOrderTplId = () => {
+    setOrderTemplateId(orderTplId.trim());
+    setOrderTplSaved(true); setTimeout(()=>setOrderTplSaved(false),2500);
   };
   const setW = (k,v) => setWarranty(w=>({...w,[k]:v}));
   const saveWarranty = async () => {
@@ -9448,6 +9508,15 @@ function SettingsTab() {
         E(Btn,{onClick:saveLabelSize},"Save")
       ),
       labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!")
+    ),
+    E(Card,{style:{marginBottom:20}},
+      E(ST,null,"📦 EmailJS — Order Notice Template"),
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:12}},"Create a template in EmailJS (Email Templates → Create New), paste in the Order Notice HTML, then paste its Template ID here. Used by the \"📦 Order Notice\" button in Sales History."),
+      E("div",{style:{display:"flex",gap:12,alignItems:"flex-end",marginBottom:10}},
+        E(Field,{label:"Order Notice Template ID"},E(Input,{value:orderTplId,onChange:e=>setOrderTplIdState(e.target.value),placeholder:"template_xxxxxxx"})),
+        E(Btn,{onClick:saveOrderTplId},"Save")
+      ),
+      orderTplSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Template ID saved!")
     ),
     E(Card,null,
       E(ST,null,"EmailJS — Receipt Emails"),
