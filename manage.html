@@ -106,7 +106,7 @@ const sendTicketEmail = async (ticket, type = "auto") => {
 
 // ── Expense categories ────────────────────────────────────────────────────────
 const EXPENSE_CATEGORIES = ["Advertising / IG Ads", "Accounting", "Bank Fees", "Bearer", "Credit Card Bill", "Digicel", "Flow", "Fixtures", "Garbage Disposal", "Informal Labour", "JPS", "Labour", "Loan / Loan Recovery", "Maintenance", "NWC", "Owner's Withdrawal", "Refund / Refund Fees", "Rent", "Repairs", "Security", "Shipping", "Shipping - Nova", "Supplies (cleaning etc)", "Toiletries", "Transportation", "Other"];
-const PAYMENT_METHODS = ["NCB Bank Transfer", "NCB Auto Debit", "Cash", "Scotia", "PayPal", "Other"];
+const PAYMENT_METHODS = ["Cash", "Debit Card", "Credit Card", "NCB Bank Transfer", "NCB Auto Debit", "Scotia Bank Transfer", "Scotia Auto Debit", "PayPal", "Other"];
 const BANKS = ["NCB", "Scotia", "Sagicor", "JN", "Other"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -200,6 +200,29 @@ const buildWarrantyFooterText = () => `WARRANTY & TERMS
 • The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
 • Devices uncollected after 3 days of notification may incur storage fees.
 Thank you for choosing The Phone Plug!`;
+
+// ── Customer field validation ────────────────────────────────────────────────
+// Phone: exactly 11 digits once formatting characters are stripped.
+const validatePhone = (phone) => {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "Phone is required.";
+  if (digits.length !== 11) return `Phone must be 11 digits (currently ${digits.length}).`;
+  return "";
+};
+// Email: standard format check. Optional field — only validated if something was typed.
+const validateEmail = (email) => {
+  const v = String(email || "").trim();
+  if (!v) return "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return "Enter a valid email address.";
+  return "";
+};
+// Name: letters and spaces only, hyphens allowed (e.g. "Mary-Jane"). No other punctuation.
+const validateCustomerName = (name) => {
+  const v = String(name || "").trim();
+  if (!v) return "Name is required.";
+  if (!/^[A-Za-z\s-]+$/.test(v)) return "Name can only contain letters, spaces, and hyphens.";
+  return "";
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -1610,6 +1633,23 @@ function TicketDetail({
       }
     } catch(e) { console.error("Parts deduct error:", e); }
 
+    // Log the total parts cost as an expense (category "Repair Parts") so it actually flows into
+    // Expense History / EOD math — previously this number was only ever shown on the ticket.
+    const partsCostTotal = partsUsed.reduce((s,p)=>s+(parseFloat(p.cost)||0)*(p.qty||1),0);
+    if (partsCostTotal > 0) {
+      try {
+        const allExp = await loadArr("tpp-expenses");
+        const expEntry = {
+          date: todayStr(), category: "Repair Parts", payment_method: "Non-Cash",
+          amount: partsCostTotal,
+          details: `Parts for ticket ${ticket.id}${ticket.customerName?" — "+ticket.customerName:""}: ${partsUsed.map(p=>`${p.name} x${p.qty}`).join(", ")}`,
+          logged_by: ticket.assignedTo||"", source: "repair_parts", ticketId: ticket.id,
+          createdAt: new Date().toISOString()
+        };
+        await save("tpp-expenses", [expEntry, ...allExp]);
+      } catch(e) { console.error("Repair parts expense log error:", e); }
+    }
+
     const partsNote = partsUsed.map(p=>`${p.name} x${p.qty}`).join(", ");
     onUpdateStatus(ticket.id, pendingStatus, `Parts used: ${partsNote || "none logged"}`, partsUsed);
     setShowPartsModal(false); setPendingStatus(null); setStatusMenu(false); setNote("");
@@ -2343,11 +2383,15 @@ function RepairManager() {
   };
 
   const onUpdateStatus = async (id, ns, note, partsUsed) => {
+    // partsCostTotal is stored on the ticket whenever parts are committed, so repair profit
+    // (finalCost − partsCostTotal) can be computed anywhere (Dashboard, Inventory Valuation)
+    // without re-deriving it from the partsUsed array each time.
+    const partsCostTotal = partsUsed ? partsUsed.reduce((s,p)=>s+(parseFloat(p.cost)||0)*(p.qty||1),0) : undefined;
     const next = tickets.map(t => t.id === id ? {
       ...t,
       status: ns,
       updatedAt: new Date().toISOString(),
-      ...(partsUsed ? { partsUsed } : {}),
+      ...(partsUsed ? { partsUsed, partsCostTotal } : {}),
       history: [...(t.history || []), {
         status: ns,
         ts: new Date().toISOString(),
@@ -2488,6 +2532,7 @@ function EodForm({
     other_card: "",
     card_prev_days: "",
     ncb_transfer_in: "",
+    scotia_transfer_in: "",
     other_bank_in: "",
     notes: ""
   };
@@ -2508,7 +2553,7 @@ function EodForm({
   const n = k => parseFloat(f[k]) || 0;
   const totalCashAfter = n("float_start") + n("cash_sales") + n("other_cash_in") - n("cash_out");
   const totalCard = n("debit_card") + n("credit_card") + n("other_card") + n("card_prev_days");
-  const totalTransfer = n("ncb_transfer_in") + n("other_bank_in");
+  const totalTransfer = n("ncb_transfer_in") + n("scotia_transfer_in") + n("other_bank_in");
   const totalRevenue = n("cash_sales") + n("other_cash_in") + totalCard + totalTransfer;
   const eodExpTotal = eodExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const submit = async () => {
@@ -2744,6 +2789,13 @@ function EodForm({
     value: f.ncb_transfer_in,
     onChange: e => set("ncb_transfer_in", e.target.value)
   })), /*#__PURE__*/React.createElement(Field, {
+    label: "Scotia Transfer In"
+  }, /*#__PURE__*/React.createElement(Input, {
+    type: "number",
+    placeholder: "0",
+    value: f.scotia_transfer_in,
+    onChange: e => set("scotia_transfer_in", e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
     label: "Other Bank"
   }, /*#__PURE__*/React.createElement(Input, {
     type: "number",
@@ -2959,6 +3011,56 @@ function ExpenseForm({
     onClick: submit
   }, "\uD83D\uDCBE Save Expense")));
 }
+// ── Rental Income ──────────────────────────────────────────────────────────────
+// Separate revenue stream from tenants — never part of tpp-sales (retail/repair) and previously
+// only ever captured, if at all, blended into EOD "Other Cash In". Logged to its own collection
+// (tpp-rental-income) so it can be reported as its own line in Dashboard/Monthly Summary/export.
+function RentalIncomeForm({ user, onDone }) {
+  const E = React.createElement;
+  const empty = { date: todayStr(), tenantName: "", unit: "", amount: "", paymentMethod: "Cash", notes: "", logged_by: user?.name || "" };
+  const [f, setF] = useState(empty);
+  const [saved, setSaved] = useState(false);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const submit = async () => {
+    if (!f.tenantName.trim()) { alert("Enter the tenant's name."); return; }
+    if (!f.amount || parseFloat(f.amount) <= 0) { alert("Enter a valid amount."); return; }
+    if (!f.paymentMethod) { alert("Select a payment method."); return; }
+    const ex = await loadArr("tpp-rental-income");
+    await save("tpp-rental-income", [{ ...f, amount: parseFloat(f.amount) || 0, createdAt: new Date().toISOString() }, ...ex]);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false); setF(empty);
+      if (onDone) onDone();
+    }, 1800);
+  };
+  if (saved) return E("div", { style: { textAlign: "center", padding: "60px 20px" } },
+    E("div", { style: { fontSize: 56, marginBottom: 16 } }, "🏠"),
+    E("div", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.green } }, "Rental Payment Logged!")
+  );
+  return E("div", { style: { maxWidth: 460, margin: "0 auto" } },
+    E("div", { style: { marginBottom: 20 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: T.text, margin: 0 } }, "🏠 Log Rental Income")
+    ),
+    E(Card, null,
+      E(R2, null,
+        E(Field, { label: "Date", required: true }, E(Input, { type: "date", value: f.date, onChange: e => set("date", e.target.value) })),
+        E(Field, { label: "Logged By" }, E(Input, { placeholder: "Your name", value: f.logged_by, onChange: e => set("logged_by", e.target.value) }))
+      ),
+      E(R2, null,
+        E(Field, { label: "Tenant Name", required: true }, E(Input, { placeholder: "e.g. John Brown", value: f.tenantName, onChange: e => set("tenantName", e.target.value) })),
+        E(Field, { label: "Property / Unit" }, E(Input, { placeholder: "e.g. Unit 2, Main St", value: f.unit, onChange: e => set("unit", e.target.value) }))
+      ),
+      E(R2, null,
+        E(Field, { label: "Amount (JMD)", required: true }, E(Input, { type: "number", placeholder: "0", value: f.amount, onChange: e => set("amount", e.target.value) })),
+        E(Field, { label: "Payment Method" }, E(Sel, { value: f.paymentMethod, onChange: e => set("paymentMethod", e.target.value) }, PAYMENT_METHODS.map(m => E("option", { key: m, value: m }, m))))
+      ),
+      E(Field, { label: "Notes" }, E(Input, { placeholder: "Optional", value: f.notes, onChange: e => set("notes", e.target.value) })),
+      E(Btn, { full: true, onClick: submit }, "💾 Save Rental Payment")
+    ),
+    E(RecentEntries, { storeKey: "tpp-rental-income", label: "Recent Rental Payments", formatLine: r => `${r.tenantName}${r.unit?" — "+r.unit:""} — ${fmtMoney(r.amount)} (${r.paymentMethod})` })
+  );
+}
+
 function DepositForm({
   user,
   onDone
@@ -4405,6 +4507,16 @@ function OwnerDashboard({
   const [eodSearch, setEodSearch] = useState("");
   const [expSearch, setExpSearch] = useState("");
   const [depSearch, setDepSearch] = useState("");
+  // Sales ledger + rental income are loaded here (not passed via `data`) so revenue can be computed
+  // from actual itemized records rather than manually-typed EOD fields.
+  const [sales, setSales] = useState([]);
+  const [rentals, setRentals] = useState([]);
+  useEffect(() => {
+    (async () => {
+      setSales(await loadArr("tpp-sales"));
+      setRentals(await loadArr("tpp-rental-income"));
+    })();
+  }, []);
   const inM = iso => {
     if (!iso) return false;
     const d = new Date(iso);
@@ -4413,10 +4525,27 @@ function OwnerDashboard({
   const mE = eod.filter(r => inM(r.date || r.createdAt) && !r.voided);
   const mX = expenses.filter(e => inM(e.date || e.createdAt) && !e.voided);
   const mD = deposits.filter(d => inM(d.date || d.createdAt) && !d.voided);
-  const tR = mE.reduce((s, r) => s + (parseFloat(r.totalRevenue) || 0), 0);
+  const mSales = sales.filter(s => inM(s.date || s.createdAt) && !s.voided);
+  const mRentals = rentals.filter(r => inM(r.date || r.createdAt) && !r.voided);
+  // Cost of the specific unit/product sold, read from the snapshot of the catalog stored on the
+  // cart item at sale time (item.raw) — so historical COGS stays accurate even if the catalog's
+  // cost later changes.
+  const itemCOGS = item => {
+    if (item.type === "catalog_phone") return parseFloat(item.raw?.unit?.cost) || 0;
+    if (item.type === "product") return parseFloat(item.raw?.cost) || 0;
+    return 0;
+  };
+  // Total Revenue — computed from the actual sales ledger (source of truth), not typed EOD fields.
+  // Returns already carry a negative total, so they net out automatically.
+  const tR = mE.reduce((s, r) => s + (parseFloat(r.totalRevenue) || 0), 0); // EOD-recorded, for reconciliation only
+  const salesRevenue = mSales.reduce((s, sale) => s + (parseFloat(sale.total) || 0), 0);
+  const rentalRevenue = mRentals.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+  const salesCOGS = mSales.filter(s => !s.isReturn).reduce((s, sale) => s + (sale.items || []).reduce((is, item) => is + itemCOGS(item) * (item.qty || 1), 0), 0);
+  const grossProfit = salesRevenue - salesCOGS;
+  const eodVariance = tR - salesRevenue; // EOD entry vs. actual sales — should be near zero
   const tX = mX.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const tD = mD.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
-  const np = tR - tX;
+  const np = salesRevenue + rentalRevenue - tX;
   const bC = {};
   mX.forEach(e => {
     bC[e.category] = (bC[e.category] || 0) + (parseFloat(e.amount) || 0);
@@ -4467,7 +4596,16 @@ function OwnerDashboard({
       const srcEod = scope === "month" ? mE : eod;
       const srcExp = scope === "month" ? mX : expenses;
       const srcDep = scope === "month" ? mD : deposits;
+      const srcSales = scope === "month" ? mSales : sales;
+      const srcRentals = scope === "month" ? mRentals : rentals;
       const srcPh = phones;
+      // Purchase Orders, Store Credits, Debt Ledger — loaded fresh so "Export All Data" always has
+      // the full history even though OwnerDashboard doesn't otherwise hold these in state.
+      const allPOs = await loadArr("tpp-purchase-orders");
+      const srcPOs = scope === "month" ? allPOs.filter(p => inM(p.date || p.receivedDate || p.createdAt) && p.status !== "Voided") : allPOs;
+      const allCredits = await loadArr("tpp-store-credits");
+      const srcCredits = scope === "month" ? allCredits.filter(c => inM(c.issuedAt)) : allCredits;
+      const allDebts = await loadArr("tpp-debts");
 
       // Load repair tickets
       const tickets = await loadArr("tpp-tickets-v1", false);
@@ -4534,7 +4672,7 @@ function OwnerDashboard({
       };
 
       // ── Sheet 1: EOD Reports ──────────────────────────────────────────────
-      addSheet("EOD Reports", ["Date", "Submitted By", "Float Start", "Cash Sales", "Other Cash In", "Cash Out", "Cash Out Details", "Debit Card", "Credit Card", "Other Card", "Prev Days Card", "Card Total", "NCB Transfer In", "Other Bank In", "Transfer Total", "Total Revenue", "Notes"], [...srcEod].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date, r.submitted_by || "", parseFloat(r.float_start) || 0, parseFloat(r.cash_sales) || 0, parseFloat(r.other_cash_in) || 0, parseFloat(r.cash_out) || 0, r.cash_out_details || "", parseFloat(r.debit_card) || 0, parseFloat(r.credit_card) || 0, parseFloat(r.other_card) || 0, parseFloat(r.card_prev_days) || 0, parseFloat(r.totalCard) || 0, parseFloat(r.ncb_transfer_in) || 0, parseFloat(r.other_bank_in) || 0, parseFloat(r.totalTransfer) || 0, parseFloat(r.totalRevenue) || 0, r.notes || ""]));
+      addSheet("EOD Reports", ["Date", "Submitted By", "Float Start", "Cash Sales", "Other Cash In", "Cash Out", "Cash Out Details", "Debit Card", "Credit Card", "Other Card", "Prev Days Card", "Card Total", "NCB Transfer In", "Scotia Transfer In", "Other Bank In", "Transfer Total", "Total Revenue", "Notes"], [...srcEod].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date, r.submitted_by || "", parseFloat(r.float_start) || 0, parseFloat(r.cash_sales) || 0, parseFloat(r.other_cash_in) || 0, parseFloat(r.cash_out) || 0, r.cash_out_details || "", parseFloat(r.debit_card) || 0, parseFloat(r.credit_card) || 0, parseFloat(r.other_card) || 0, parseFloat(r.card_prev_days) || 0, parseFloat(r.totalCard) || 0, parseFloat(r.ncb_transfer_in) || 0, parseFloat(r.scotia_transfer_in) || 0, parseFloat(r.other_bank_in) || 0, parseFloat(r.totalTransfer) || 0, parseFloat(r.totalRevenue) || 0, r.notes || ""]));
 
       // ── Sheet 2: Expenses ─────────────────────────────────────────────────
       addSheet("Expenses", ["Date", "Category", "Payment Method", "Amount (JMD)", "Details", "Logged By"], [...srcExp].sort((a, b) => a.date > b.date ? 1 : -1).map(e => [e.date, e.category, e.payment_method, parseFloat(e.amount) || 0, e.details || "", e.logged_by || ""]));
@@ -4542,17 +4680,44 @@ function OwnerDashboard({
       // ── Sheet 3: Deposits ─────────────────────────────────────────────────
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
+      // ── Sheet: Sales Ledger ────────────────────────────────────────────────
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No"]));
+
+      // ── Sheet: Rental Income ──────────────────────────────────────────────
+      addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
+
+      // ── Sheet: Purchase Orders ──────────────────────────────────────────────
+      addSheet("Purchase Orders", ["PO Ref", "Supplier", "Date", "Status", "Payment Method", "Invoice Total", "Shipping", "Tax", "Notes"], [...srcPOs].sort((a, b) => (a.date || a.receivedDate || "") > (b.date || b.receivedDate || "") ? 1 : -1).map(p => [p.poRef || "", p.supplier || "", p.date || p.receivedDate || "", p.status || "", p.paymentMethod || "", parseFloat(p.invoiceTotal) || 0, parseFloat(p.shipping) || 0, parseFloat(p.tax) || 0, p.notes || ""]));
+
+      // ── Sheet: Store Credits ─────────────────────────────────────────────────
+      addSheet("Store Credits", ["Customer", "Phone", "Amount (JMD)", "Issued", "Expires", "Used", "Source Sale"], [...srcCredits].sort((a, b) => (a.issuedAt || "") > (b.issuedAt || "") ? 1 : -1).map(c => [c.customerName || "", c.customerPhone || "", parseFloat(c.amount) || 0, c.issuedAt ? new Date(c.issuedAt).toLocaleDateString("en-GB") : "", c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("en-GB") : "", c.used ? "Used" : "Outstanding", c.sourceSaleId || ""]));
+
+      // ── Sheet: Debt Ledger ───────────────────────────────────────────────────
+      addSheet("Debt Ledger", ["Name", "Type", "Category", "Original Amount (JMD)", "Current Balance (JMD)", "APR %", "Min Payment (JMD)", "Next Payment Due"], allDebts.map(d => [d.name || "", d.type || "", d.category || "", parseFloat(d.originalAmount) || 0, parseFloat(d.balance) || 0, parseFloat(d.apr) || 0, parseFloat(d.minPayment) || 0, d.nextPaymentDate || ""]));
+
       // ── Sheet 4: Monthly Summary ──────────────────────────────────────────
       if (scope === "month") {
-        const summaryRows = [["Period", `${MONTHS[sm]} ${sy}`], [""], ["REVENUE", ""], ["Total Revenue (JMD)", tR], [""], ["EXPENSES", ""], ["Total Expenses (JMD)", tX], [""], ...cS.map(([cat, amt]) => ["  " + cat, amt]), [""], ["NET PROFIT (JMD)", np], [""], ["CASH DEPOSITS", ""], ["Total Deposited (JMD)", tD], [""], ["OTHER", ""], ["EOD Days Recorded", mE.length], ["Expense Entries", mX.length], ["Deposit Entries", mD.length], ["Repair Tickets (this month)", srcTix.length]];
+        // Liabilities are current point-in-time balances, not month-scoped flows.
+        const outstandingCredits = allCredits.filter(c => !c.used).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+        // Business financials should only carry Business-type debt — personal debts (credit cards,
+        // personal loans, etc.) stay off the store's books entirely, same as their payments do.
+        const totalDebtBalance = allDebts.filter(d => d.type === "Business").reduce((s, d) => s + (parseFloat(d.balance) || 0), 0);
+        const summaryRows = [["Period", `${MONTHS[sm]} ${sy}`], [""],
+          ["REVENUE (from Sales ledger)", ""], ["Retail/Repair Sales Revenue (JMD)", salesRevenue], ["Cost of Goods Sold (JMD)", -salesCOGS], ["Gross Profit (JMD)", grossProfit], ["Rental Income (JMD)", rentalRevenue], [""],
+          ["EOD RECONCILIATION", ""], ["EOD-Recorded Revenue (JMD)", tR], ["Variance vs. Sales Ledger (JMD)", eodVariance], [""],
+          ["EXPENSES", ""], ["Total Expenses (JMD)", tX], [""], ...cS.map(([cat, amt]) => ["  " + cat, amt]), [""],
+          ["NET PROFIT (Sales + Rental − Expenses) (JMD)", np], [""],
+          ["CASH DEPOSITS", ""], ["Total Deposited (JMD)", tD], [""],
+          ["LIABILITIES (as of today)", ""], ["Outstanding Store Credits (JMD)", outstandingCredits], ["Outstanding Debt Balances (JMD)", totalDebtBalance], [""],
+          ["OTHER", ""], ["EOD Days Recorded", mE.length], ["Sales Entries", mSales.length], ["Expense Entries", mX.length], ["Deposit Entries", mD.length], ["Repair Tickets (this month)", srcTix.length]];
         const ws = XLSX.utils.aoa_to_sheet(summaryRows);
         ws["!cols"] = [{
-          wch: 30
+          wch: 34
         }, {
           wch: 20
         }];
-        // Bold key rows
-        [[0, 0], [2, 0], [5, 0], [cS.length + 9, 0], [cS.length + 12, 0], [cS.length + 15, 0]].forEach(([r, c]) => {
+        // Bold key section headers / totals
+        [[0, 0], [2, 0], [8, 0], [12, 0], [16 + cS.length, 0], [18 + cS.length, 0], [21 + cS.length, 0], [25 + cS.length, 0]].forEach(([r, c]) => {
           const cell = ws[XLSX.utils.encode_cell({
             r,
             c
@@ -4660,9 +4825,10 @@ function OwnerDashboard({
       marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
-    label: `Revenue (${mE.length} EOD days)`,
-    value: fmtMoney(tR),
-    color: T.green
+    label: `Revenue (${mSales.length} sales)`,
+    value: fmtMoney(salesRevenue),
+    color: T.green,
+    sub: "From Sales ledger"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "Total Expenses",
     value: fmtMoney(tX),
@@ -4685,6 +4851,23 @@ function OwnerDashboard({
       marginBottom: 16
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
+    label: "Gross Profit (Sales − COGS)",
+    value: fmtMoney(grossProfit),
+    color: grossProfit >= 0 ? T.green : T.red,
+    sub: `COGS: ${fmtMoney(salesCOGS)}`
+  }), /*#__PURE__*/React.createElement(StatCard, {
+    label: "EOD vs. Sales Ledger Variance",
+    value: fmtMoney(eodVariance),
+    color: Math.abs(eodVariance) < 1 ? T.green : T.amber,
+    sub: Math.abs(eodVariance) < 1 ? "EOD matches sales ✓" : `EOD recorded ${fmtMoney(tR)}`
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 12,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement(StatCard, {
     label: "Phones Available",
     value: phones.filter(p => p.availability === "Available").length,
     color: T.amber
@@ -4692,6 +4875,13 @@ function OwnerDashboard({
     label: "Phones Sold (all time)",
     value: phones.filter(p => p.availability === "Sold").length,
     color: T.green
+  })), rentalRevenue > 0 && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 16 }
+  }, /*#__PURE__*/React.createElement(StatCard, {
+    label: `Rental Income (${mRentals.length} payment(s))`,
+    value: fmtMoney(rentalRevenue),
+    color: T.blue,
+    sub: "Tracked separately from retail/repair sales"
   })), cS.length > 0 && /*#__PURE__*/React.createElement(Card, {
     style: {
       marginBottom: 16
@@ -5839,7 +6029,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [returnOrigSale,setReturnOrigSale]=useState(null);
   const [returnItems,setReturnItems]=useState([]);
   const [returnCredit,setReturnCredit]=useState("refund");
+  // Original-sale items being handed back on an exchange — same resellable/damaged reconciliation
+  // as a standalone return, kept separate from `returnItems` since exchanges use their own flow.
+  const [exchangeItems,setExchangeItems]=useState([]);
   const [exchangeDiff,setExchangeDiff]=useState(0);
+  const [showExchangeRefundModal,setShowExchangeRefundModal]=useState(false);
 
   useEffect(()=>{
     (async()=>{
@@ -5942,8 +6136,18 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const change=Math.max(0,(parseFloat(cash)||0)-(amountDue-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
   const canCheckout=cart.length>0&&(amountDue<=0||totalPaid>=amountDue);
 
-  const saveCustomer=async(name,phone,email)=>{
-    if(!name&&!phone&&!email)return;
+  // strict=true (explicit "Save Customer" actions) returns {errors} and refuses to save when
+  // invalid. strict=false (default, used by the automatic post-checkout save) silently skips
+  // saving/updating a customer profile when validation fails, WITHOUT blocking the sale itself —
+  // the receipt/payment already went through by the time this runs.
+  const saveCustomer=async(name,phone,email,opts={})=>{
+    const strict=!!opts.strict;
+    if(!name&&!phone&&!email)return null;
+    const errors={ name:validateCustomerName(name), phone:validatePhone(phone), email:validateEmail(email) };
+    if(errors.name||errors.phone||errors.email){
+      if(strict)return{errors};
+      return null;
+    }
     const dup=customers.find(c=>{
       const samePhone=phone&&c.phone===phone;
       const sameEmail=email&&c.email?.toLowerCase()===email.toLowerCase();
@@ -5963,6 +6167,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
     setCash("");setDebitCard("");setCreditCard("");setNcbTransfer("");setScotiaTransfer("");setOtherPayment("");
     setNote("");setIsExchange(false);setIsReturn(false);setExchangeOrigSale(null);setReturnOrigSale(null);setReturnItems([]);
+    setExchangeItems([]);
     setAppliedCredit(null);setExchangeDiff(0);
   };
 
@@ -5984,21 +6189,82 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setView("pos");
   };
 
-  const checkout=async()=>{
-    if(!canCheckout)return;
-    // If exchange and store owes customer, confirm refund/credit method
-    let exchangeRefundMethod = null;
-    if(isExchange && exchDiff < 0){
-      const diff = Math.abs(exchDiff);
-      const choice = confirm(`Store owes customer ${fmtMoney(diff)}.
+  // Reconcile inventory for items physically handed back to the store — either a standalone return
+  // (returnItems) or the original item(s) traded in on an exchange (exchangeItems). Each item carries
+  // a `condition` of "resellable" or "damaged" (default resellable):
+  //  - Resellable catalog_phone (matched by IMEI/unit id) → unit status flips to "Under Testing" so it
+  //    goes through the normal re-check flow before it can be sold again (mirrors checkout()'s
+  //    Sold-on-sale logic, in reverse).
+  //  - Resellable product (non-IMEI accessory) → stock is incremented back by the returned qty.
+  //  - Damaged (either type) → NOT restocked. Instead its cost is logged as a single "Inventory
+  //    Write-off" expense entry so the loss is visible in Expense History/EOD rather than silently
+  //    vanishing from the books.
+  const reconcileHandedBackItems=async(items,origSaleId)=>{
+    if(!items||!items.length)return;
+    try{
+      const updatedCatalog=await loadCatalog();
+      let writeOffTotal=0;const writeOffDetails=[];
+      items.forEach(item=>{
+        const condition=item.condition||"resellable";
+        const qty=item.returnQty||item.qty||1;
+        if(item.type==="catalog_phone"){
+          const pidx=updatedCatalog.findIndex(p=>p.id===item.raw?.product?.id||(p.units||[]).some(u=>item.imei&&u.imei===item.imei));
+          if(pidx>=0){
+            const unitIdx=(updatedCatalog[pidx].units||[]).findIndex(u=>u.id===item.id||(item.imei&&u.imei===item.imei));
+            if(unitIdx>=0){
+              const unit=updatedCatalog[pidx].units[unitIdx];
+              if(condition==="damaged"){
+                writeOffTotal+=parseFloat(unit.cost)||0;
+                writeOffDetails.push(`${item.name}${item.imei?` (IMEI ${item.imei})`:""}`);
+                updatedCatalog[pidx].units[unitIdx]={...unit,status:"Damaged",history:[...(unit.history||[]),{status:"Damaged",ts:new Date().toISOString(),note:`Handed back damaged from sale ${origSaleId}`}]};
+              }else{
+                updatedCatalog[pidx].units[unitIdx]={...unit,status:"Under Testing",history:[...(unit.history||[]),{status:"Under Testing",ts:new Date().toISOString(),note:`Handed back from sale ${origSaleId}`}]};
+              }
+              updatedCatalog[pidx].stock=updatedCatalog[pidx].units.filter(u=>u.status==="Available").length;
+            }
+          }
+        }else if(item.type==="product"){
+          const pidx=updatedCatalog.findIndex(p=>p.id===item.id);
+          if(pidx>=0){
+            if(condition==="damaged"){
+              writeOffTotal+=(parseFloat(updatedCatalog[pidx].cost)||0)*qty;
+              writeOffDetails.push(`${item.name} x${qty}`);
+            }else{
+              updatedCatalog[pidx].stock=(updatedCatalog[pidx].stock||0)+qty;
+            }
+          }
+        }
+      });
+      await saveCatalog(updatedCatalog);setProducts(updatedCatalog);
+      if(writeOffTotal>0){
+        const allExp=await loadArr("tpp-expenses");
+        const expEntry={date:todayStr(),category:"Inventory Write-off",payment_method:"Non-Cash",amount:writeOffTotal,details:`Damaged item(s) from ${origSaleId}: ${writeOffDetails.join(", ")}`,logged_by:user?.name||"",source:"damaged_handback",origSaleId,createdAt:new Date().toISOString()};
+        await save("tpp-expenses",[expEntry,...allExp]);
+      }
+    }catch(e){console.error("Inventory reconciliation (handed-back items):",e);}
+  };
 
-OK = Issue as Store Credit
-Cancel = Cash/Bank Transfer Refund`);
-      exchangeRefundMethod = choice ? "store_credit" : "cash_bank";
+  // exchangeRefundMethod: "cash" | "ncb" | "store_credit" — required whenever isExchange && exchDiff<0.
+  // Cancelling out of the refund-method modal never calls checkout(), so nothing is saved.
+  const checkout=async(exchangeRefundMethod)=>{
+    if(!canCheckout)return;
+    const diff = Math.abs(exchDiff);
+    if(isExchange && exchDiff < 0){
+      if(!exchangeRefundMethod){alert("Select how the store is refunding the customer.");return;}
       if(exchangeRefundMethod==="store_credit"){
         const credit={id:Date.now().toString(),customerName,customerPhone,amount:diff,issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+365*24*60*60*1000).toISOString(),sourceSaleId:"exchange",used:false};
         const allCredits=await loadArr("tpp-store-credits");
         await save("tpp-store-credits",[credit,...allCredits]);
+      } else if(exchangeRefundMethod==="cash"||exchangeRefundMethod==="ncb"){
+        // Real money leaving the store — log it as an expense so it hits cash/bank reconciliation.
+        const allExp=await loadArr("tpp-expenses");
+        const expEntry={
+          date:todayStr(),category:"Exchange Refund",
+          payment_method:exchangeRefundMethod==="cash"?"Cash":"NCB Bank Transfer",
+          amount:diff,details:`Refund to ${customerName||"customer"} on exchange`,
+          logged_by:user?.name||"",source:"exchange_refund",createdAt:new Date().toISOString()
+        };
+        await save("tpp-expenses",[expEntry,...allExp]);
       }
     }
     setProcessing(true);
@@ -6020,6 +6286,7 @@ Cancel = Cash/Bank Transfer Refund`);
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
         returnOrigSaleId:returnOrigSale?.id||null,
         appliedCreditId:appliedCredit?.id||null,
+        exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
         createdAt:new Date().toISOString(),date:todayStr()
       };
       await save("tpp-sales",[sale,...existing]);setSales(prev=>[sale,...prev]);
@@ -6049,6 +6316,12 @@ Cancel = Cash/Bank Transfer Refund`);
           setProducts(updatedCatalog);
         }
       } catch(e){ console.error("Catalog update after sale:", e); }
+
+      // Reconcile the original item(s) traded in on an exchange (resellable → Under Testing /
+      // restocked, damaged → write-off expense) — separate from the new item(s) just sold above.
+      if(isExchange&&exchangeItems.length>0){
+        await reconcileHandedBackItems(exchangeItems,exchangeOrigSale?.id||saleId);
+      }
 
       // Log deposit against ticket
       if(hasTicket){
@@ -6087,6 +6360,9 @@ Cancel = Cash/Bank Transfer Refund`);
   const startExchange=(origSale)=>{
     setExchangeOrigSale(origSale);setIsExchange(true);
     setCustomerName(origSale.customerName||"");setCustomerPhone(origSale.customerPhone||"");setCustomerEmail(origSale.customerEmail||"");
+    // The whole original sale is being traded in — default every item to resellable; staff can
+    // flip individual items to Damaged in the exchange condition panel before completing checkout.
+    setExchangeItems((origSale.items||[]).map(i=>({...i,condition:"resellable"})));
     setView("pos");setSelectedSale(null);
   };
 
@@ -6094,7 +6370,7 @@ Cancel = Cash/Bank Transfer Refund`);
   const startReturn=(origSale)=>{
     setReturnOrigSale(origSale);setIsReturn(true);
     setCustomerName(origSale.customerName||"");setCustomerPhone(origSale.customerPhone||"");
-    setReturnItems((origSale.items||[]).map(i=>({...i,returnQty:i.qty||1,selected:true})));
+    setReturnItems((origSale.items||[]).map(i=>({...i,returnQty:i.qty||1,selected:true,condition:"resellable"})));
     setView("return");setSelectedSale(null);
   };
 
@@ -6108,12 +6384,9 @@ Cancel = Cash/Bank Transfer Refund`);
     if(prevReturned+refundTotal>returnOrigSale.total){
       alert(`❌ Cannot process return.\nOriginal sale: ${fmtMoney(returnOrigSale.total)}\nAlready returned: ${fmtMoney(prevReturned)}\nThis return: ${fmtMoney(refundTotal)}\nTotal would exceed original sale.`);return;
     }
-    // Return phones to Under Testing
-    let updatedPhones=[...phones];
-    selected.filter(i=>i.type==="phone"&&i.imei).forEach(item=>{
-      updatedPhones=updatedPhones.map(p=>p.imei===item.imei?{...p,availability:"Under Testing",history:[...(p.history||[]),{status:"Under Testing",ts:new Date().toISOString(),note:`Returned from sale ${returnOrigSale.id}`}]}:p);
-    });
-    if(onPhonesUpdate&&updatedPhones!==phones)await onPhonesUpdate(updatedPhones);
+    // Reconcile inventory for each returned item against the current unified catalog: resellable
+    // phones → Under Testing (by IMEI), resellable accessories → stock+1, damaged → write-off expense.
+    await reconcileHandedBackItems(selected,returnOrigSale.id);
     // Issue store credit if selected
     if(returnCredit==="store_credit"){
       const credit={id:Date.now().toString(),customerName,customerPhone,amount:refundTotal,issuedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+365*24*60*60*1000).toISOString(),sourceSaleId:returnOrigSale.id,used:false};
@@ -6124,7 +6397,7 @@ Cancel = Cash/Bank Transfer Refund`);
     const existing=await loadArr("tpp-sales");
     const returnSale={id:genSaleId(existing.map(s=>s.id),"RCP"),customerName,customerPhone,customerEmail,items:selected.map(i=>({...i,price:-Math.abs(i.price),qty:i.returnQty||1})),subtotal:-refundTotal,discounts:[],totalDiscount:0,total:-refundTotal,refundType:returnCredit,refundAmount:refundTotal,returnOrigSaleId:returnOrigSale.id,isReturn:true,servedBy:user?.name||"",createdAt:new Date().toISOString(),date:todayStr()};
     await save("tpp-sales",[returnSale,...existing]);setSales(prev=>[returnSale,...prev]);
-    alert(`↩ Return processed — ${fmtMoney(refundTotal)}\n${returnCredit==="store_credit"?"🏪 Store credit issued (valid 1 year).":returnCredit==="bank_transfer"?"🏦 Bank transfer refund to be processed.":"💵 Cash refund to be given."}\n${selected.filter(i=>i.type==="phone").length>0?"📱 Returned phones sent to testing queue.":""}`);
+    alert(`↩ Return processed — ${fmtMoney(refundTotal)}\n${returnCredit==="store_credit"?"🏪 Store credit issued (valid 1 year).":returnCredit==="bank_transfer"?"🏦 Bank transfer refund to be processed.":"💵 Cash refund to be given."}\n${selected.filter(i=>i.type==="catalog_phone"&&(i.condition||"resellable")==="resellable").length>0?"📱 Resellable phones sent to testing queue.":""}${selected.some(i=>i.condition==="damaged")?"\n📝 Damaged item(s) logged as inventory write-off.":""}`);
     resetForm();setView("pos");
   };
 
@@ -6279,6 +6552,10 @@ Cancel = Cash/Bank Transfer Refund`);
             item.selected&&item.qty>1&&E("div",{style:{display:"flex",alignItems:"center",gap:4,fontSize:12}},"Qty:",E("input",{type:"number",min:1,max:item.qty,value:item.returnQty||1,onChange:e=>setReturnItems(prev=>prev.map((x,j)=>j===i?{...x,returnQty:Math.min(item.qty,Math.max(1,parseInt(e.target.value)||1))}:x)),style:{...iS,width:50,padding:"4px 6px",textAlign:"center"}})),
             E("div",{style:{fontWeight:600,fontSize:13}},fmtMoney(item.price*(item.returnQty||1)))
           )
+        ),
+        item.selected&&(item.type==="catalog_phone"||item.type==="product")&&E("div",{style:{display:"flex",gap:6,marginTop:8,paddingLeft:26}},
+          E("button",{type:"button",onClick:()=>setReturnItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"resellable"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${(item.condition||"resellable")==="resellable"?T.green:T.border}`,background:(item.condition||"resellable")==="resellable"?T.greenLt:"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:(item.condition||"resellable")==="resellable"?T.green:T.muted}},"✓ Resellable"),
+          E("button",{type:"button",onClick:()=>setReturnItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"damaged"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${item.condition==="damaged"?T.red:T.border}`,background:item.condition==="damaged"?"#FEF2F2":"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:item.condition==="damaged"?T.red:T.muted}},"✕ Damaged / Not Resellable")
         )
       ))
     ),
@@ -6364,7 +6641,15 @@ Cancel = Cash/Bank Transfer Refund`);
         !customerName&&!customerPhone&&!customerEmail
           ? E("button",{onClick:()=>setShowNewCustomer(s=>!s),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},showNewCustomer?"✕ Cancel":"+ New Customer")
           : E("div",{style:{display:"flex",gap:6}},
-              !isExistingCustomer&&E("button",{onClick:async()=>{await saveCustomer(customerName,customerPhone,customerEmail);setShowNewCustomer(false);setIsExistingCustomer(true);alert(`✅ Customer saved: ${customerName}`);},style:{background:T.greenLt,color:T.green,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"💾 Save Customer"),
+              !isExistingCustomer&&E("button",{onClick:async()=>{
+                const res=await saveCustomer(customerName,customerPhone,customerEmail,{strict:true});
+                if(res&&res.errors){
+                  const msgs=[res.errors.name,res.errors.phone,res.errors.email].filter(Boolean);
+                  alert(`❌ Can't save customer:\n${msgs.join("\n")}`);
+                  return;
+                }
+                setShowNewCustomer(false);setIsExistingCustomer(true);alert(`✅ Customer saved: ${customerName}`);
+              },style:{background:T.greenLt,color:T.green,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"💾 Save Customer"),
               E("button",{onClick:()=>{setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerSuggestions([]);setShowNewCustomer(false);setIsExistingCustomer(false);},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✕ Clear")
             )
       ),
@@ -6475,6 +6760,21 @@ Cancel = Cash/Bank Transfer Refund`);
       "✓ Same value — no balance due"
     ),
 
+    // Original item(s) being traded in — condition determines resellable restock vs. write-off
+    isExchange&&exchangeItems.length>0&&E(Card,{style:{marginBottom:12}},
+      E(ST,null,"Item(s) being traded in — ",exchangeOrigSale?.id),
+      E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+        exchangeItems.map((item,i)=>E("div",{key:i,style:{border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 12px"}},
+          E("div",{style:{fontSize:13,fontWeight:500}},item.name,item.imei&&E("span",{style:{fontSize:10,color:T.muted,marginLeft:6}},"IMEI: ",item.imei)),
+          (item.type==="catalog_phone"||item.type==="product")&&E("div",{style:{display:"flex",gap:6,marginTop:6}},
+            E("button",{type:"button",onClick:()=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"resellable"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${(item.condition||"resellable")==="resellable"?T.green:T.border}`,background:(item.condition||"resellable")==="resellable"?T.greenLt:"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:(item.condition||"resellable")==="resellable"?T.green:T.muted}},"✓ Resellable"),
+            E("button",{type:"button",onClick:()=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"damaged"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${item.condition==="damaged"?T.red:T.border}`,background:item.condition==="damaged"?"#FEF2F2":"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:item.condition==="damaged"?T.red:T.muted}},"✕ Damaged / Not Resellable")
+          )
+        ))
+      ),
+      E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Resellable phones go to Under Testing before resale; resellable accessories go back into stock. Damaged items are logged as an inventory write-off instead.")
+    ),
+
     // Payment
     cart.length>0&&E(Card,{style:{marginBottom:16}},
       E(ST,null,"Payment"),
@@ -6503,10 +6803,28 @@ Cancel = Cash/Bank Transfer Refund`);
         E(Btn,{variant:"ghost",onClick:parkSale,style:{fontSize:13,padding:"11px 16px"}},"⏸️ Park"),
         E(Btn,{full:true,disabled:processing,onClick:()=>{
           if(!cart.length){alert("Cart is empty.");return;}
+          if(exchangeOwesCustomer){setShowExchangeRefundModal(true);return;}
           if(amountDue>0&&totalPaid<amountDue){alert(`Payment needed: ${fmtMoney(amountDue-totalPaid)} still owed.\n\nEnter payment amount in one of the fields above.`);return;}
           checkout();
         },style:{fontSize:15,padding:"13px",flex:1}},
           processing?"Processing…":exchangeOwesCustomer?`✓ Complete Exchange (store owes ${fmtMoney(Math.abs(exchDiff))})`:`✓ Complete — ${fmtMoney(amountDue)}`
+        )
+      )
+    ),
+
+    // Exchange refund method modal — required whenever the store owes the customer money
+    showExchangeRefundModal&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%"}},
+        E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:6}},"How is the store refunding this?"),
+        E("div",{style:{fontSize:13,color:T.muted,marginBottom:18}},`Store owes ${customerName||"the customer"} ${fmtMoney(Math.abs(exchDiff))}.`),
+        E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+          E(Btn,{full:true,onClick:async()=>{setShowExchangeRefundModal(false);await checkout("cash");}},"💵 Cash Refund"),
+          E(Btn,{full:true,onClick:async()=>{setShowExchangeRefundModal(false);await checkout("ncb");}},"🏦 NCB Bank Transfer"),
+          E(Btn,{full:true,variant:"ghost",onClick:async()=>{setShowExchangeRefundModal(false);await checkout("store_credit");}},"🏪 Store Credit (1yr)"),
+          E(Btn,{full:true,variant:"danger",onClick:()=>{
+            // Nothing has been saved yet at this point — abandon the whole exchange cleanly.
+            setShowExchangeRefundModal(false);resetForm();setView("pos");
+          }},"✕ Cancel Transaction")
         )
       )
     )
@@ -6580,14 +6898,21 @@ function CustomersTab() {
   const startEdit = (c) => setEditing({ id:c.id, name:c.name||"", phone:c.phone||"", email:c.email||"" });
 
   const saveEdit = async () => {
-    if (!editing.name.trim()) { alert("Name is required."); return; }
+    const name = editing.name.trim(), phone = editing.phone.trim(), email = editing.email.trim();
+    const errs = { name: validateCustomerName(name), phone: validatePhone(phone), email: validateEmail(email) };
+    if (errs.name || errs.phone || errs.email) {
+      alert(`❌ Can't save customer:\n${[errs.name, errs.phone, errs.email].filter(Boolean).join("\n")}`);
+      return;
+    }
+    const dup = customers.find(c => c.id !== editing.id && (c.phone === phone || c.email?.toLowerCase() === email.toLowerCase()));
+    if (dup) { alert(`❌ Another customer already has this phone or email: ${dup.name}`); return; }
     setSaving(true);
     try {
       let updated;
       if (editing.id) {
-        updated = customers.map(c=>c.id===editing.id ? { ...c, name:editing.name.trim(), phone:editing.phone.trim(), email:editing.email.trim() } : c);
+        updated = customers.map(c=>c.id===editing.id ? { ...c, name, phone, email } : c);
       } else {
-        const newCustomer = { id:Date.now().toString(), name:editing.name.trim(), phone:editing.phone.trim(), email:editing.email.trim(), createdAt:new Date().toISOString() };
+        const newCustomer = { id:Date.now().toString(), name, phone, email, createdAt:new Date().toISOString() };
         updated = [newCustomer, ...customers];
       }
       await save("tpp-customers", updated);
@@ -6699,6 +7024,9 @@ function StaffShell({
     id: "deposit",
     label: "🏦 Deposit"
   }, {
+    id: "rental",
+    label: "🏠 Rent"
+  }, {
     id: "reimburse",
     label: "↩️ Reimburse"
   }, {
@@ -6806,7 +7134,9 @@ function StaffShell({
   ), tab === "deposit" && /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(DepositForm, { user: user }),
     /*#__PURE__*/React.createElement(RecentEntries, { storeKey: "tpp-deposits", label: "Recent Deposits", formatLine: d => `${d.bank||d.source||"Bank"} — ${fmtMoney(d.amount)}` })
-  ), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementForm, {
+  ), tab === "rental" && /*#__PURE__*/React.createElement(RentalIncomeForm, {
+    user: user
+  }), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementForm, {
     user: user
   }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: false }), tab === "hours" && /*#__PURE__*/React.createElement(StaffHours, { user: user })));
 }
@@ -6969,6 +7299,9 @@ function OwnerShell({
   }, {
     id: "deposit",
     label: "🏦 Deposit"
+  }, {
+    id: "rental",
+    label: "🏠 Rental Income"
   }, {
     id: "expense-history",
     label: "🔍 Expenses"
@@ -7183,6 +7516,9 @@ function OwnerShell({
     user: user,
     onDone: fetchAll
   }), tab === "deposit" && /*#__PURE__*/React.createElement(DepositForm, {
+    user: user,
+    onDone: fetchAll
+  }), tab === "rental" && /*#__PURE__*/React.createElement(RentalIncomeForm, {
     user: user,
     onDone: fetchAll
   }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null))));
@@ -7671,6 +8007,7 @@ function EodHistory() {
       E("div", { style: { marginTop: 16 } }, E(ST, null, "Transfers")),
       E(R2, null,
         E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "NCB Transfer"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.ncb_transfer_in))),
+        E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Scotia Transfer"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.scotia_transfer_in))),
         E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px" } }, E("div", { style: { fontSize: 11, color: T.muted } }, "Other Bank"), E("div", { style: { fontWeight: 700 } }, fmtMoney(selected.other_bank_in)))
       ),
       selected.notes && E("div", { style: { marginTop: 16 } },
@@ -7809,6 +8146,7 @@ function DebtLedger() {
   const [logAmount, setLogAmount] = useState("");
   const [logDate, setLogDate] = useState(todayStr());
   const [logNote, setLogNote] = useState("");
+  const [logPaymentMethod, setLogPaymentMethod] = useState("Cash");
   const [payments, setPayments] = useState([]);
   const [formCategory, setFormCategory] = useState("Credit Card");
 
@@ -7873,13 +8211,22 @@ function DebtLedger() {
   const logPayment = async () => {
     const amt = parseFloat(logAmount);
     if (!amt||amt<=0) { alert("Enter a valid amount."); return; }
-    const pmt = { id:Date.now().toString(), debtId:logModal.id, debtName:logModal.name, amount:amt, date:logDate, note:logNote, createdAt:new Date().toISOString() };
+    if (!logPaymentMethod) { alert("Select a payment method."); return; }
+    const pmt = { id:Date.now().toString(), debtId:logModal.id, debtName:logModal.name, amount:amt, date:logDate, note:logNote, paymentMethod:logPaymentMethod, createdAt:new Date().toISOString() };
     const newBal = Math.max(0,(parseFloat(logModal.balance)||0)-amt);
     const updatedDebts = debts.map(d=>d.id===logModal.id?{...d,balance:newBal,lastPaymentDate:logDate,lastPaymentAmount:amt,remainingPayments:Math.max(0,(d.remainingPayments||0)-1),updatedAt:new Date().toISOString()}:d);
     const updatedPayments = [pmt,...payments];
     await save("tpp-debts",updatedDebts); await save("tpp-debt-payments2",updatedPayments);
+    // Only Business-type debts touch the business books — a personal debt (credit card, personal
+    // loan, etc.) is money out of your own pocket, not store money, so it must NOT show up in
+    // Expense History / EOD / Dashboard reconciliation alongside it.
+    if (logModal.type === "Business") {
+      const allExp = await loadArr("tpp-expenses");
+      const expEntry = { date:logDate, category:"Debt Payment", payment_method:logPaymentMethod, amount:amt, details:`${logModal.name}${logNote?" — "+logNote:""}`, logged_by:"", source:"debt_payment", debtId:logModal.id, createdAt:new Date().toISOString() };
+      await save("tpp-expenses",[expEntry,...allExp]);
+    }
     setDebts(updatedDebts); setPayments(updatedPayments);
-    setLogModal(null); setLogAmount(""); setLogDate(todayStr()); setLogNote("");
+    setLogModal(null); setLogAmount(""); setLogDate(todayStr()); setLogNote(""); setLogPaymentMethod("Cash");
   };
 
   const wipeDebts = async () => {
@@ -8036,7 +8383,7 @@ function DebtLedger() {
       E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%"}},
         E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
           E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17}},"💸 Log Payment"),
-          E("button",{onClick:()=>setLogModal(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#888"}},"✕")
+          E("button",{onClick:()=>{setLogModal(null);setLogAmount("");setLogDate(todayStr());setLogNote("");setLogPaymentMethod("Cash");},style:{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#888"}},"✕")
         ),
         E("div",{style:{background:"#F0F9FF",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13}},
           E("div",{style:{fontWeight:700}},logModal.name),
@@ -8044,6 +8391,7 @@ function DebtLedger() {
         ),
         E(Field,{label:"Amount Paid (USD)"}, E(Input,{type:"number",placeholder:"0.00",value:logAmount,onChange:e=>setLogAmount(e.target.value)})),
         E(Field,{label:"Payment Date"}, E(Input,{type:"date",value:logDate,onChange:e=>setLogDate(e.target.value)})),
+        E(Field,{label:"Payment Method"}, E(Sel,{value:logPaymentMethod,onChange:e=>setLogPaymentMethod(e.target.value)},PAYMENT_METHODS.map(m=>E("option",{key:m,value:m},m)))),
         E(Field,{label:"Note (optional)"}, E(Input,{placeholder:"e.g. AutoPay, Online",value:logNote,onChange:e=>setLogNote(e.target.value)})),
         logAmount&&parseFloat(logAmount)>0&&E("div",{style:{background:"#F0FDF4",borderRadius:8,padding:"10px 14px",margin:"12px 0",fontSize:13}},
           E("div",{style:{color:"#166534",fontWeight:600}},`New balance: ${fmtMoney(Math.max(0,(parseFloat(logModal.balance)||0)-parseFloat(logAmount)))}`)
@@ -9025,6 +9373,7 @@ function SettingsTab() {
 function InventoryValuation({ phones }) {
   const E = React.createElement;
   const [products, setProducts] = useState([]);
+  const [tickets, setTickets] = useState([]);
   const [view, setView] = useState("cost");
   const [loading, setLoading] = useState(true);
   useEffect(()=>{
@@ -9034,6 +9383,7 @@ function InventoryValuation({ phones }) {
         if (meta&&meta.chunks) { const all=[]; for(let i=0;i<meta.chunks;i++){const c=await load(`tpp-products-chunk-${i}`);if(Array.isArray(c))all.push(...c);} setProducts(all); }
         else setProducts(await loadArr("tpp-products"));
       } catch { setProducts(await loadArr("tpp-products")); }
+      setTickets(await loadArr("tpp-tickets-v1"));
       setLoading(false);
     })();
   },[]);
@@ -9051,6 +9401,15 @@ function InventoryValuation({ phones }) {
   const catRetail=Object.values(catGroups).reduce((s,g)=>s+g.retail,0);
   const grandCost=phoneCost+catCost; const grandRetail=phoneRetail+catRetail;
   const sv=view==="cost";
+  // Repair profit rollup: finalCost minus parts cost, for completed tickets that were priced.
+  // Falls back to summing partsUsed directly for older tickets saved before partsCostTotal existed.
+  const pricedTickets = tickets.filter(t=>(t.status==="ready"||t.status==="collected")&&parseFloat(t.finalCost)>0);
+  const repairRevenue = pricedTickets.reduce((s,t)=>s+(parseFloat(t.finalCost)||0),0);
+  const repairPartsCost = pricedTickets.reduce((s,t)=>{
+    if (t.partsCostTotal!=null) return s+(parseFloat(t.partsCostTotal)||0);
+    return s+(t.partsUsed||[]).reduce((ps,p)=>ps+(parseFloat(p.cost)||0)*(p.qty||1),0);
+  },0);
+  const repairProfit = repairRevenue - repairPartsCost;
   return E("div",{style:{maxWidth:700,margin:"0 auto"}},
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📊 Inventory Valuation"),
@@ -9067,6 +9426,14 @@ function InventoryValuation({ phones }) {
     E(R2,null,
       E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`📱 Phones (${avail.length})`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(sv?phoneCost:phoneRetail))),
       E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`📦 Catalog`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(sv?catCost:catRetail)))
+    ),
+    E(Card,{style:{marginTop:16}},
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:8,fontWeight:700}},`🔧 Repair Profit (${pricedTickets.length} priced ticket${pricedTickets.length===1?"":"s"})`),
+      E("div",{style:{display:"flex",gap:20,flexWrap:"wrap"}},
+        E("div",null,E("div",{style:{fontSize:11,color:T.muted}},"Revenue (Final Cost)"),E("div",{style:{fontWeight:700,fontSize:16}},fmtMoney(repairRevenue))),
+        E("div",null,E("div",{style:{fontSize:11,color:T.muted}},"Parts Cost"),E("div",{style:{fontWeight:700,fontSize:16,color:T.red}},fmtMoney(repairPartsCost))),
+        E("div",null,E("div",{style:{fontSize:11,color:T.muted}},"Profit"),E("div",{style:{fontWeight:700,fontSize:16,color:T.green}},fmtMoney(repairProfit)))
+      )
     )
   );
 }
@@ -9411,6 +9778,7 @@ function PurchasesTab() {
     supplier:"", poRef:"", date:todayStr(), currency:"JMD",
     shipping:"", shippingPct:false,
     tax:"", taxPct:false,
+    paymentMethod:"Cash",
     notes:"", lines:[]
   });
   const [po, setPOS] = useState(emptyPO());
@@ -9441,6 +9809,7 @@ function PurchasesTab() {
   const savePO = async () => {
     if (!po.supplier.trim()) { alert("Supplier required."); return; }
     if (!po.lines?.length) { alert("Add at least one line item."); return; }
+    if (!po.paymentMethod) { alert("Select a payment method."); return; }
     const record = {
       id: Date.now().toString(), ...po,
       shipping: shippingAmt, tax: taxAmt, invoiceTotal,
@@ -9448,6 +9817,18 @@ function PurchasesTab() {
     };
     const updated = [record, ...pos];
     await save("tpp-purchase-orders", updated); setPos(updated);
+    // Log the PO spend as an expense so inventory-purchase money leaving the business actually
+    // flows into Expenses/EOD math — previously PO spend never touched Expenses at all.
+    try {
+      const allExp = await loadArr("tpp-expenses");
+      const expEntry = {
+        date: po.date || todayStr(), category: "Inventory Purchase", payment_method: po.paymentMethod,
+        amount: invoiceTotal,
+        details: `PO ${po.poRef || record.id} — ${po.supplier}${po.currency !== "JMD" ? ` (${po.currency})` : ""}`,
+        logged_by: "", source: "purchase_order", poId: record.id, createdAt: new Date().toISOString()
+      };
+      await save("tpp-expenses", [expEntry, ...allExp]);
+    } catch(e) { console.error("PO expense log error:", e); }
     setPOS(emptyPO()); setView("pos");
     alert(`✅ Purchase Order saved — ${fmtMoney(invoiceTotal)} ${po.currency}`);
   };
@@ -9475,6 +9856,7 @@ function PurchasesTab() {
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Reference"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.poRef||"—")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Date"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.date||"—")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Currency"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.currency||"JMD")),
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Payment Method"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.paymentMethod||"—")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Status"),E("div",{style:{fontWeight:700,color:viewingPO.status==="Voided"?T.red:viewingPO.status==="Received"?T.green:T.blue,marginTop:2}},viewingPO.status)),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},fmtMoney(viewingPO.invoiceTotal||0)," ",viewingPO.currency||"JMD"))
       ),
@@ -9508,7 +9890,8 @@ function PurchasesTab() {
         E(Field,{label:"Supplier",required:true},E(Input,{placeholder:"e.g. Cell Parts JA",value:po.supplier,onChange:e=>setPO("supplier",e.target.value)})),
         E(Field,{label:"PO / Invoice Reference"},E(Input,{placeholder:"Invoice # or PO number",value:po.poRef,onChange:e=>setPO("poRef",e.target.value)})),
         E(Field,{label:"Date"},E(Input,{type:"date",value:po.date,onChange:e=>setPO("date",e.target.value)})),
-        E(Field,{label:"Currency"},E(Sel,{value:po.currency,onChange:e=>setPO("currency",e.target.value)},PO_CURRENCIES.map(c=>E("option",{key:c,value:c},c))))
+        E(Field,{label:"Currency"},E(Sel,{value:po.currency,onChange:e=>setPO("currency",e.target.value)},PO_CURRENCIES.map(c=>E("option",{key:c,value:c},c)))),
+        E(Field,{label:"Payment Method",required:true},E(Sel,{value:po.paymentMethod,onChange:e=>setPO("paymentMethod",e.target.value)},PAYMENT_METHODS.map(m=>E("option",{key:m,value:m},m))))
       ),
       E("div",{style:{display:"grid",gridTemplateColumns:"1fr auto 1fr auto",gap:8,alignItems:"flex-end",marginBottom:12}},
         E(Field,{label:"Shipping"},E(Input,{type:"number",placeholder:"0",value:po.shipping,onChange:e=>setPO("shipping",e.target.value)})),
