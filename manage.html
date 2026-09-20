@@ -14,6 +14,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -27,6 +28,13 @@
       appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
     });
     var _db        = firebase.firestore();
+    // Anonymous auth so Firestore rules can require request.auth != null — this stops the raw
+    // Firestore REST API from being wide open to anyone who finds the project config (which is
+    // always visible in a client-side app's source, by design of how Firebase works). It does NOT
+    // identify *who* is using the app — that's still the PIN screens — it just requires "came
+    // through some Firebase-authenticated session" before Firestore rules let a request through.
+    var _auth      = firebase.auth();
+    var _authReady = _auth.signInAnonymously().catch(function(e){ console.error("Anonymous auth failed:", e); });
 
 
     var useState   = React.useState;
@@ -10493,7 +10501,19 @@ function App() {
   }));
 }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    // Wait for the anonymous sign-in above to settle before mounting the app, so no component
+    // fires a Firestore read/write while still unauthenticated (which the tightened rules reject).
+    (function startApp(){
+      var root = ReactDOM.createRoot(document.getElementById('root'));
+      _authReady.then(function(){
+        root.render(React.createElement(App));
+      }).catch(function(){
+        root.render(React.createElement(App));
+      });
+      // Safety net: never block the app forever if auth is slow/unreachable — show it after 4s
+      // regardless, so a network hiccup doesn't leave staff staring at a blank screen.
+      setTimeout(function(){ root.render(React.createElement(App)); }, 4000);
+    })();
 
   // Register PWA service worker
   if ('serviceWorker' in navigator) {
