@@ -42,18 +42,32 @@
     var useRef     = React.useRef;
     var useCallback= React.useCallback;
     var XLSX       = window.XLSX;
+    // PIN lockout storage (login attempt counters) — backed by the browser's real localStorage so a
+    // lockout survives a page reload. Falls back to an in-memory object only if real localStorage is
+    // blocked (e.g. some private-browsing modes), so login never crashes either way.
     var _lockStore = {};
-    var _localStorage = {
-      getItem:    function(k){ return _lockStore[k]!==undefined?JSON.stringify(_lockStore[k]):null; },
-      setItem:    function(k,v){ try{_lockStore[k]=JSON.parse(v);}catch(e){_lockStore[k]=v;} },
-      removeItem: function(k){ delete _lockStore[k]; }
-    };
+    var _localStorage = (function(){
+      try {
+        var testKey = "__tpp_test__";
+        window.localStorage.setItem(testKey, "1");
+        window.localStorage.removeItem(testKey);
+        return window.localStorage;
+      } catch (e) {
+        return {
+          getItem:    function(k){ return _lockStore[k]!==undefined?JSON.stringify(_lockStore[k]):null; },
+          setItem:    function(k,v){ try{_lockStore[k]=JSON.parse(v);}catch(e){_lockStore[k]=v;} },
+          removeItem: function(k){ delete _lockStore[k]; }
+        };
+      }
+    })();
   </script>
   <!-- EmailJS -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <script>emailjs.init('BdjrEVD77D_bpBwT5');</script>
   <!-- ZXing — barcode/QR scanning that works across phones & laptops (native BarcodeDetector isn't supported on iOS Safari) -->
   <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <!-- JsBarcode — renders scannable Code128 barcodes for printed price/inventory labels -->
+  <script src="https://unpkg.com/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -61,7 +75,7 @@
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 
 // ── Brand constants ────────────────────────────────────────────────────────────
-const OWNER_PIN = "2727";
+const OWNER_PIN = "272700";
 const WA_NUMBER = "18764905515";
 const PHONE_1 = "876-490-5515";
 const PHONE_2 = "876-672-2442";
@@ -3197,6 +3211,7 @@ function StaffManager() {
   const [techPinInput, setTechPinInput] = useState("");
   const [techPin, setTechPin] = useState("");
   const [msg, setMsg] = useState("");
+  const [revealedPin, setRevealedPin] = useState(null); // index of the staff row currently showing its real PIN
   useEffect(() => {
     load("tpp-staff").then(s => setList(s || []));
     load("tpp-dad-pin").then(p => setDadPin(p || "0000"));
@@ -3208,7 +3223,7 @@ function StaffManager() {
   };
   const add = async () => {
     if (!newName.trim()) return alert("Enter a name.");
-    if (newPin.length < 4) return alert("PIN must be 4+ digits.");
+    if (newPin.length < 6) return alert("PIN must be 6+ digits.");
     const next = [...list, {
       name: newName.trim(),
       role: newRole,
@@ -3227,14 +3242,14 @@ function StaffManager() {
     setList(next);
   };
   const saveDadPin = async () => {
-    if (dadPinInput.length < 4) return alert("PIN must be 4+ digits.");
+    if (dadPinInput.length < 6) return alert("PIN must be 6+ digits.");
     await save("tpp-dad-pin", dadPinInput);
     setDadPin(dadPinInput);
     setDadPinInput("");
     flash("Dad's PIN updated ✓");
   };
   const saveTechPin = async () => {
-    if (techPinInput.length < 4) return alert("PIN must be 4+ digits.");
+    if (techPinInput.length < 6) return alert("PIN must be 6+ digits.");
     await save("tpp-tech-pin", techPinInput);
     setTechPin(techPinInput);
     setTechPinInput("");
@@ -3289,7 +3304,7 @@ function StaffManager() {
     value: newRole,
     onChange: e => setNewRole(e.target.value)
   }, /*#__PURE__*/React.createElement("option", null, "Staff"), /*#__PURE__*/React.createElement("option", null, "Senior Staff"), /*#__PURE__*/React.createElement("option", null, "Manager")))), /*#__PURE__*/React.createElement(Field, {
-    label: "PIN (4\u20136 digits)",
+    label: "PIN (6+ digits)",
     required: true,
     hint: "They enter this to log in"
   }, /*#__PURE__*/React.createElement(Input, {
@@ -3323,11 +3338,14 @@ function StaffManager() {
     style: { display: "flex", alignItems: "center", gap: 12 }
   }, /*#__PURE__*/React.createElement("div", {
     style: { width: 36, height: 36, borderRadius: "50%", background: T.blueLt, border: `1px solid ${T.blue}40`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Syne',sans-serif", fontWeight: 800, color: T.blue }
-  }, s.name[0].toUpperCase()), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 700 } }, s.name), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.muted } }, s.role, " · PIN: ", s.pin || "not set"))),
+  }, s.name[0].toUpperCase()), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 700 } }, s.name), /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.muted, display: "flex", alignItems: "center", gap: 6 } },
+    s.role, " · PIN: ", revealedPin === i ? (s.pin || "not set") : (s.pin ? "•".repeat(s.pin.length) : "not set"),
+    s.pin && /*#__PURE__*/React.createElement("button", { onClick: () => setRevealedPin(revealedPin === i ? null : i), style: { background: "none", border: "none", color: T.blue, cursor: "pointer", fontSize: 11, padding: 0, textDecoration: "underline" } }, revealedPin === i ? "hide" : "show")
+  ))),
   /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 6 } },
     /*#__PURE__*/React.createElement("button", { onClick: async () => {
-      const newPinVal = prompt(`Reset PIN for ${s.name}:\nEnter new PIN (4-6 digits):`);
-      if (!newPinVal || newPinVal.length < 4) { alert("PIN must be 4+ digits."); return; }
+      const newPinVal = prompt(`Reset PIN for ${s.name}:\nEnter new PIN (6+ digits):`);
+      if (!newPinVal || newPinVal.length < 6) { alert("PIN must be 6+ digits."); return; }
       const cleaned = newPinVal.replace(/[^0-9]/g,"");
       const next = list.map((x,j) => j===i ? {...x, pin:cleaned, pinResetAt:new Date().toISOString(), pinResetNotice:true} : x);
       await save("tpp-staff", next); setList(next); flash(`PIN reset for ${s.name} ✓`);
@@ -5874,6 +5892,57 @@ const printReceipt = (sale) => {
   if(w){w.document.write(html);w.document.close();}
 };
 
+// ── Barcode / price labels ──────────────────────────────────────────────────────
+// items: [{ name, price, code, sub }] — code is the value encoded into the scannable barcode
+// (a product's own barcode/SKU, or a phone unit's IMEI), sub is an optional small second line
+// (e.g. "IMEI •••1234"). Label size (mm) is remembered per-browser so it only needs setting once
+// to match whatever label roll is loaded in the printer.
+const getLabelSize = () => {
+  try {
+    return {
+      w: parseFloat(window.localStorage.getItem("tpp_label_w")) || 70,
+      h: parseFloat(window.localStorage.getItem("tpp_label_h")) || 32
+    };
+  } catch { return { w: 70, h: 32 }; }
+};
+const setLabelSize = (w, h) => {
+  try { window.localStorage.setItem("tpp_label_w", w); window.localStorage.setItem("tpp_label_h", h); } catch {}
+};
+const printBarcodeLabels = (items) => {
+  if (!items || !items.length) return;
+  const { w: widthMm, h: heightMm } = getLabelSize();
+  const labelsHtml = items.map(it => {
+    let barcodeSvg = "";
+    try {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      JsBarcode(svg, String(it.code || ""), { format: "CODE128", width: 1.6, height: 30, displayValue: true, fontSize: 9, margin: 0 });
+      barcodeSvg = new XMLSerializer().serializeToString(svg);
+    } catch (e) { barcodeSvg = `<div style="font-size:8px">${it.code || ""}</div>`; }
+    return `<div class="label">
+      <div class="lname">${(it.name || "").replace(/</g,"&lt;")}</div>
+      <div class="lprice">${fmtMoney(it.price || 0)}</div>
+      <div class="lbarcode">${barcodeSvg}</div>
+      ${it.sub ? `<div class="lsub">${it.sub}</div>` : ""}
+    </div>`;
+  }).join("");
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Labels</title>
+  <style>
+    @media print{@page{margin:1mm;size:${widthMm}mm ${heightMm}mm;}}
+    *{box-sizing:border-box;}
+    body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:0;}
+    .label{width:${widthMm}mm;height:${heightMm}mm;padding:1mm 1.5mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;page-break-after:always;overflow:hidden;}
+    .lname{font-size:8px;font-weight:700;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .lprice{font-size:11px;font-weight:800;margin:1px 0;}
+    .lbarcode svg{max-width:100%;height:auto;}
+    .lsub{font-size:8px;font-weight:700;margin-top:1px;}
+  </style></head><body>
+  ${labelsHtml}
+  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank", "width=480,height=640");
+  if (w) { w.document.write(html); w.document.close(); }
+};
+
 // ── Barcode Scanner ───────────────────────────────────────────────────────────
 function BarcodeScanner({onDetected,onClose}){
   const E=React.createElement;
@@ -6607,7 +6676,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   // ── Main POS ──────────────────────────────────────────────────────────────────
   return E("div",{style:{maxWidth:680,margin:"0 auto"}},
-    showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}},onClose:()=>setShowScanner(false)}),
+    showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);let foundUnit=null,foundProduct=null;for(const p of products){if(p.units&&p.units.length){const u=p.units.find(u=>u.imei===code&&u.status==="Available");if(u){foundUnit=u;foundProduct=p;break;}}}if(foundUnit){addUnitToCart(foundProduct,foundUnit);}else{const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}}},onClose:()=>setShowScanner(false)}),
 
     // Unit picker modal for IMEI products
     unitPicker&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
@@ -9279,7 +9348,14 @@ function SettingsTab() {
   const [warrantyLoading, setWarrantyLoading] = useState(true);
   const [warrantySaved, setWarrantySaved] = useState(false);
   const [warrantySaving, setWarrantySaving] = useState(false);
+  const [labelSize, setLabelSizeState] = useState(()=>getLabelSize());
+  const [labelSaved, setLabelSaved] = useState(false);
   useEffect(()=>{ loadWarrantySettings().then(w=>{ setWarranty(w); setWarrantyLoading(false); }); },[]);
+  const saveLabelSize = () => {
+    const w = parseFloat(labelSize.w)||70, h = parseFloat(labelSize.h)||32;
+    setLabelSize(w, h); setLabelSizeState({w,h});
+    setLabelSaved(true); setTimeout(()=>setLabelSaved(false),2500);
+  };
   const setW = (k,v) => setWarranty(w=>({...w,[k]:v}));
   const saveWarranty = async () => {
     setWarrantySaving(true);
@@ -9362,6 +9438,16 @@ function SettingsTab() {
             ),
             saved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600,marginTop:8}},"✅ Key saved!")
           )
+    ),
+    E(Card,{style:{marginBottom:20}},
+      E(ST,null,"🏷️ Barcode Label Size"),
+      E("div",{style:{fontSize:13,color:T.muted,marginBottom:12}},"Match this to the labels loaded in your label printer. Set it once — every label print uses this size."),
+      E("div",{style:{display:"flex",gap:12,alignItems:"flex-end",marginBottom:10}},
+        E(Field,{label:"Width (mm)"},E(Input,{type:"number",value:labelSize.w,onChange:e=>setLabelSizeState(s=>({...s,w:e.target.value}))})),
+        E(Field,{label:"Height (mm)"},E(Input,{type:"number",value:labelSize.h,onChange:e=>setLabelSizeState(s=>({...s,h:e.target.value}))})),
+        E(Btn,{onClick:saveLabelSize},"Save")
+      ),
+      labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!")
     ),
     E(Card,null,
       E(ST,null,"EmailJS — Receipt Emails"),
@@ -10161,6 +10247,27 @@ function ReceiveStockTab({ onCatalogUpdate }) {
       if (onCatalogUpdate) onCatalogUpdate(updatedCatalog);
       setCatalog(updatedCatalog);
       alert(`✅ Stock received!\n${receiveLines.length} product(s) updated in catalog.${flagAllTesting?"\n⚠️ All phone/tablet units flagged for testing.":""}`);
+      // Offer to print price/barcode labels for everything just received — one label per IMEI unit
+      // for phones/tablets (barcode = the IMEI itself, so scanning the label at checkout sells that
+      // exact unit), or by received quantity for non-IMEI accessories (barcode = the product's own
+      // barcode/SKU, auto-assigned from its catalog id if none was set).
+      if (confirm("🏷️ Print labels for what you just received?")) {
+        const labelItems = [];
+        receiveLines.forEach(line => {
+          const isImei = isImeiCategory(line.category);
+          if (isImei) {
+            line.units.filter(u=>u.imei).forEach(u => {
+              labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, code: u.imei, sub: `IMEI •${u.imei.slice(-4)}` });
+            });
+          } else {
+            const product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
+            const code = product?.barcode || product?.sku || product?.id || line.name;
+            const qty = parseInt(line.receivedQty)||0;
+            for (let i=0;i<qty;i++) labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, code });
+          }
+        });
+        printBarcodeLabels(labelItems);
+      }
       setView("choose"); setSelectedPO(null); setReceiveLines([]); setFlagAllTesting(false);
     } finally { setSaving(false); }
   };
@@ -10340,6 +10447,21 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                   ),
                   E("div",{style:{display:"flex",alignItems:"center",gap:8}},
                     E("div",{style:{fontWeight:700,color:avail>0?T.blue:T.red}},product.variable_price?"Variable":fmtMoney(product.price||0)),
+                    !isImei&&E("button",{onClick:async e=>{
+                      e.stopPropagation();
+                      const qtyStr=prompt(`Print how many labels for "${product.name}"?`,"1");
+                      if(!qtyStr)return;
+                      const qty=parseInt(qtyStr)||0; if(qty<=0)return;
+                      // A product with no barcode yet gets one assigned from its own catalog id, so the
+                      // label printed today can actually be scanned and matched later.
+                      let code=product.barcode;
+                      if(!code){
+                        code=product.id;
+                        await saveCatalogFn(catalog.map(p=>p.id===product.id?{...p,barcode:code}:p));
+                      }
+                      const items=Array.from({length:qty},()=>({name:product.name,price:product.price||0,code}));
+                      printBarcodeLabels(items);
+                    },style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🏷️"),
                     E("button",{onClick:e=>{e.stopPropagation();setEditingProduct(product);setFormS({name:product.name,category:product.category,price:String(product.price||""),cost:String(product.cost||""),barcode:product.barcode||"",stock:String(product.stock||""),variable_price:!!product.variable_price});setShowAddForm(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✏️"),
                     E("button",{onClick:async e=>{e.stopPropagation();if(!confirm(`Remove "${product.name}"?`))return;await saveCatalogFn(catalog.filter(p=>p.id!==product.id));},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🗑️")
                   )
@@ -10352,7 +10474,10 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                   E("div",{style:{display:"flex",flexDirection:"column",gap:4}},
                     (product.units||[]).slice(0,20).map((unit,ui)=>E("div",{key:ui,style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"4px 0",borderBottom:`1px dashed ${T.border}`}},
                       E("span",{style:{fontFamily:"monospace"}},unit.imei||"No IMEI"),
-                      E("span",{style:{color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}},unit.status)
+                      E("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                        E("span",{style:{color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}},unit.status),
+                        unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️")
+                      )
                     ))
                   ),
                   (product.units||[]).length>20&&E("div",{style:{fontSize:11,color:T.muted,marginTop:6}},`+ ${(product.units||[]).length-20} more units`)
