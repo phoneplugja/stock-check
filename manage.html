@@ -255,6 +255,28 @@ const uploadProductPhoto = async (file) => {
   return data.secure_url;
 };
 
+// One-time migration helper: pulls a photo from an external URL (e.g. a Loyverse item image
+// link pasted into a CSV) straight into the browser and re-hosts it on Cloudinary — no manual
+// download/re-upload needed. Only works if the source server allows cross-origin fetches (most
+// public product-image CDNs do, since they're built to be embedded elsewhere); if it doesn't,
+// this throws and the row is reported so that one photo can be grabbed manually instead.
+const migrateImageUrlToCloudinary = async (url) => {
+  const { cloudName, uploadPreset } = await loadCloudinarySettings();
+  if (!cloudName || !uploadPreset) throw new Error("Cloudinary isn't set up yet — see Settings → 🖼️ Product Photos.");
+  const res = await fetch(url, { mode: "cors" });
+  if (!res.ok) throw new Error(`Couldn't fetch source image (HTTP ${res.status}).`);
+  const blob = await res.blob();
+  if (!blob.type.startsWith("image/")) throw new Error("That link didn't return an image (blocked or expired).");
+  const resized = await downscaleImage(blob);
+  const form = new FormData();
+  form.append("file", resized, "photo.jpg");
+  form.append("upload_preset", uploadPreset);
+  const upRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: "POST", body: form });
+  if (!upRes.ok) throw new Error(`Cloudinary upload failed (${upRes.status})`);
+  const data = await upRes.json();
+  return data.secure_url;
+};
+
 // Cloudinary can resize on the fly from one stored photo — insert a transformation right after
 // "/upload/" in the URL rather than storing separate thumbnail files.
 const cloudinaryThumb = (url, size = 100) => {
@@ -6231,6 +6253,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [emailSending,setEmailSending]=useState(false);
   const [orderEmailModal,setOrderEmailModal]=useState(null); // {sale, email}
   const [orderEmailSending,setOrderEmailSending]=useState(false);
+  const [photoPreview,setPhotoPreview]=useState(null); // image url, or null — shown only when tapped
   // Exchange/Return
   const [isExchange,setIsExchange]=useState(false);
   const [isReturn,setIsReturn]=useState(false);
@@ -6823,6 +6846,12 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   return E("div",{style:{maxWidth:680,margin:"0 auto"}},
     showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);let foundUnit=null,foundProduct=null;for(const p of products){if(p.units&&p.units.length){const u=p.units.find(u=>u.imei===code&&u.status==="Available");if(u){foundUnit=u;foundProduct=p;break;}}}if(foundUnit){addUnitToCart(foundProduct,foundUnit);}else{const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}}},onClose:()=>setShowScanner(false)}),
 
+    // Photo preview — tap 👁️ next to any item to see its photo; closes on tap-away
+    photoPreview&&E("div",{onClick:()=>setPhotoPreview(null),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"pointer"}},
+      E("img",{src:photoPreview,style:{maxWidth:"90vw",maxHeight:"85vh",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}),
+      E("button",{onClick:()=>setPhotoPreview(null),style:{position:"absolute",top:20,right:20,background:"rgba(255,255,255,0.15)",color:"#fff",border:"none",borderRadius:8,width:36,height:36,fontSize:18,cursor:"pointer"}},"✕")
+    ),
+
     // Unit picker modal for IMEI products
     unitPicker&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
       E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:440,width:"100%",maxHeight:"80vh",overflowY:"auto"}},
@@ -6930,9 +6959,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
       searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
         E("div",{style:{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}},
-          r.raw?.image
-            ? E("img",{src:cloudinaryThumb(r.raw.image,60),style:{width:36,height:36,borderRadius:7,objectFit:"cover",flexShrink:0,border:`1px solid ${T.border}`}})
-            : r.type!=="ticket"&&E("div",{style:{width:36,height:36,borderRadius:7,background:"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0,color:T.muted}},isImeiCategory(r.raw?.category)?"📱":"📦"),
+          r.raw?.image&&E("button",{onClick:e=>{e.stopPropagation();setPhotoPreview(r.raw.image);},title:"View photo",style:{width:30,height:30,borderRadius:7,background:"#F3F4F6",border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,cursor:"pointer"}},"👁️"),
           E("div",{style:{minWidth:0}},
             E("div",{style:{fontWeight:600,fontSize:13,color:r.outOfStock?"#9CA3AF":"inherit"}},
               r.type==="ticket"?"🎫 ":""," ",r.name,
@@ -6954,7 +6981,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         cart.map((item,idx)=>{
           const itemImage = item.raw?.image || item.raw?.product?.image;
           return E("div",{key:idx,style:{padding:"10px 16px",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",gap:10}},
-          itemImage&&E("img",{src:cloudinaryThumb(itemImage,50),style:{width:36,height:36,borderRadius:7,objectFit:"cover",flexShrink:0,border:`1px solid ${T.border}`,marginTop:2}}),
+          itemImage&&E("button",{onClick:()=>setPhotoPreview(itemImage),title:"View photo",style:{width:30,height:30,borderRadius:7,background:"#F3F4F6",border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,cursor:"pointer",marginTop:2}},"👁️"),
           E("div",{style:{flex:1,minWidth:0}},
             E("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},item.type==="ticket"?"🎫":item.type==="phone"?"📱":"📦"," ",item.name,item.isDeposit&&E("span",{style:{background:T.amber,color:"#fff",fontSize:9,padding:"1px 5px",borderRadius:3,marginLeft:6}},"DEPOSIT")),
             item.type==="phone"&&E(Input,{placeholder:"IMEI",value:item.imei||"",onChange:e=>updateCartField(idx,"imei",e.target.value),style:{fontSize:11,padding:"4px 8px",marginBottom:4}}),
@@ -7299,6 +7326,7 @@ const buildAccessoryImportPlan = (rows, allProducts) => {
     const stockNum = row.stock === "" ? 0 : parseFloat(row.stock);
     const varPrice = /^true$/i.test(String(row.variable_price || "").trim());
     const id = String(row.id || "").trim();
+    const imageUrl = String(row.image_url || "").trim();
     if (!name) { preview.push({ row: rowNum, status: "error", name, error: "Name is required." }); return; }
     if (category && IMEI_CATEGORIES.includes(category)) { preview.push({ row: rowNum, status: "error", name, error: `"${category}" is a phone/IMEI category — use the Phones import for this row instead.` }); return; }
     if (isNaN(priceNum) || priceNum < 0) { preview.push({ row: rowNum, status: "error", name, error: "Price must be a number 0 or greater." }); return; }
@@ -7321,13 +7349,13 @@ const buildAccessoryImportPlan = (rows, allProducts) => {
     if (match) {
       const updated = { ...match, name, category: category || match.category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum, variable_price: varPrice };
       working = working.map(p => p.id === match.id ? updated : p);
-      preview.push({ row: rowNum, status: "update", id: match.id, name, category: updated.category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum });
+      preview.push({ row: rowNum, status: "update", id: match.id, name, category: updated.category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum, imageUrl: imageUrl || undefined });
     } else {
       if (!category) { preview.push({ row: rowNum, status: "error", name, error: "Category is required for new products." }); return; }
       const newId = `prod-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
       const newProd = { id: newId, name, category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum, variable_price: varPrice, units: [], createdAt: new Date().toISOString() };
       working = [...working, newProd];
-      preview.push({ row: rowNum, status: "add", id: newId, name, category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum });
+      preview.push({ row: rowNum, status: "add", id: newId, name, category, sku, barcode, price: priceNum, cost: costNum, stock: stockNum, imageUrl: imageUrl || undefined });
     }
   });
   return { preview, result: working };
@@ -7359,6 +7387,7 @@ const buildPhoneImportPlan = (rows, allProducts) => {
     const sellPrice = sellRaw === "" ? null : parseFloat(sellRaw);
     if (cost !== null && isNaN(cost)) { preview.push({ row: rowNum, status: "error", imei, error: "Cost must be a number." }); return; }
     if (sellPrice !== null && isNaN(sellPrice)) { preview.push({ row: rowNum, status: "error", imei, error: "Sell price must be a number." }); return; }
+    const imageUrl = String(row.image_url || "").trim();
 
     const existing = imeiMap.get(imei);
     if (existing) {
@@ -7368,7 +7397,9 @@ const buildPhoneImportPlan = (rows, allProducts) => {
       const oldUnit = product.units[unitIdx];
       const newUnit = { ...oldUnit, status, cost: cost !== null ? cost : oldUnit.cost, sellPrice: sellPrice !== null ? sellPrice : oldUnit.sellPrice };
       product.units[unitIdx] = newUnit;
-      preview.push({ row: rowNum, status: "update", imei, product: product.name, unitStatus: status, cost: newUnit.cost, sellPrice: newUnit.sellPrice });
+      // Only queue a photo migration if this model doesn't already have one — avoids re-uploading
+      // the same product photo once per IMEI row.
+      preview.push({ row: rowNum, status: "update", imei, product: product.name, unitStatus: status, cost: newUnit.cost, sellPrice: newUnit.sellPrice, productId: product.id, imageUrl: (imageUrl && !product.image) ? imageUrl : undefined });
     } else {
       const category = String(row.category || "").trim();
       const productName = String(row.product_name || row.productName || "").trim();
@@ -7388,7 +7419,7 @@ const buildPhoneImportPlan = (rows, allProducts) => {
       const newUnitId = `unit-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
       product.units.push({ id: newUnitId, imei, status, cost, sellPrice });
       imeiMap.set(imei, { productId, unitId: newUnitId });
-      preview.push({ row: rowNum, status: "add", imei, product: product.name, unitStatus: status, cost, sellPrice });
+      preview.push({ row: rowNum, status: "add", imei, product: product.name, unitStatus: status, cost, sellPrice, productId: product.id, imageUrl: (imageUrl && !product.image) ? imageUrl : undefined });
     }
   });
   return { preview, result: working };
@@ -7420,7 +7451,7 @@ function ImportPreviewTable({ preview, columns }) {
           E("td", { style: { padding: "6px 8px" } }, E("span", { style: badgeStyle(r.status) }, r.status)),
           ...(r.status === "error"
             ? [E("td", { key: "err", colSpan: columns.length, style: { padding: "6px 8px", color: T.red } }, r.error)]
-            : columns.map(c => E("td", { key: c.key, style: { padding: "6px 8px" } }, r[c.key] ?? "")))
+            : columns.map(c => E("td", { key: c.key, style: { padding: "6px 8px" } }, c.key === "imageUrl" ? (r[c.key] ? "📸 will fetch" : "—") : (r[c.key] ?? ""))))
         )))
       )
     )
@@ -7434,6 +7465,7 @@ function DataImportExportTab() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [preview, setPreview] = useState(null); // {type, planResult, preview}
+  const [photoMigration, setPhotoMigration] = useState(null); // {done, total, failed:[]}
   const custFileRef = React.useRef(null);
   const accFileRef = React.useRef(null);
   const phoneFileRef = React.useRef(null);
@@ -7491,8 +7523,45 @@ function DataImportExportTab() {
       }
       const addCount = preview.preview.filter(r => r.status === "add").length;
       const updateCount = preview.preview.filter(r => r.status === "update").length;
-      alert(`✅ Import complete — ${addCount} added, ${updateCount} updated.`);
-      setPreview(null);
+
+      // Optional: rows carrying an image_url get their photo auto-migrated to Cloudinary —
+      // one job per product, done sequentially so it's easy to show progress and not hammer
+      // Cloudinary. Anything that fails (e.g. blocked by the source server) is reported by name
+      // rather than silently dropped, so it can be grabbed manually via the 📷 button instead.
+      const seenProductIds = new Set();
+      const jobs = [];
+      preview.preview.forEach(r => {
+        if (r.status === "error" || !r.imageUrl) return;
+        const pid = r.id || r.productId;
+        if (!pid || seenProductIds.has(pid)) return;
+        seenProductIds.add(pid);
+        jobs.push({ productId: pid, url: r.imageUrl, name: r.name || r.product || pid });
+      });
+
+      let finalProducts = preview.result;
+      if (jobs.length && preview.type !== "customers") {
+        setPhotoMigration({ done: 0, total: jobs.length, failed: [] });
+        const failed = [];
+        for (const job of jobs) {
+          try {
+            const newUrl = await migrateImageUrlToCloudinary(job.url);
+            finalProducts = finalProducts.map(p => p.id === job.productId ? { ...p, image: newUrl } : p);
+          } catch (e) {
+            failed.push({ name: job.name, error: e.message || String(e) });
+          }
+          setPhotoMigration(pm => ({ ...pm, done: pm.done + 1 }));
+        }
+        if (failed.length !== jobs.length) { await saveAllProducts(finalProducts); setProducts(finalProducts); }
+        setPhotoMigration(pm => ({ ...pm, failed }));
+        const migratedCount = jobs.length - failed.length;
+        let msg = `✅ Import complete — ${addCount} added, ${updateCount} updated.\n📸 Photos: ${migratedCount}/${jobs.length} migrated automatically.`;
+        if (failed.length) msg += `\n\n${failed.length} photo(s) couldn't be pulled automatically (source blocked the request) — use the 📷 button on those items to add them manually:\n${failed.slice(0,15).map(f=>`• ${f.name}`).join("\n")}${failed.length>15?`\n…and ${failed.length-15} more`:""}`;
+        alert(msg);
+      } else {
+        alert(`✅ Import complete — ${addCount} added, ${updateCount} updated.`);
+      }
+
+      setPreview(null); setPhotoMigration(null);
       if (custFileRef.current) custFileRef.current.value = "";
       if (accFileRef.current) accFileRef.current.value = "";
       if (phoneFileRef.current) phoneFileRef.current.value = "";
@@ -7515,8 +7584,9 @@ function DataImportExportTab() {
       ),
       preview && preview.type === type && E("div", { style: { marginTop: 16 } },
         E(ImportPreviewTable, { preview: preview.preview, columns }),
+        photoMigration && E("div", { style: { marginTop: 10, fontSize: 12, color: T.muted } }, `📸 Migrating photos: ${photoMigration.done}/${photoMigration.total}…`),
         E("div", { style: { display: "flex", gap: 8, marginTop: 12 } },
-          E(Btn, { variant: "ghost", onClick: () => setPreview(null) }, "Cancel"),
+          E(Btn, { variant: "ghost", onClick: () => setPreview(null), disabled: busy === "apply" }, "Cancel"),
           E(Btn, { onClick: applyImport, disabled: busy === "apply" }, busy === "apply" ? "Applying…" : "✅ Apply Changes")
         )
       )
@@ -7532,13 +7602,13 @@ function DataImportExportTab() {
     }),
     Section({
       title: "🛒 Accessories & Parts", type: "accessories", onExport: exportAccessories, fileRef: accFileRef,
-      desc: "Columns: id, name, category, sku, barcode, price, cost, stock, variable_price. For phones/IMEI-tracked items, use the Phones section below instead. Matched by id first, then SKU, then barcode.",
-      columns: [{ key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "price", label: "Price" }, { key: "cost", label: "Cost" }, { key: "stock", label: "Stock" }]
+      desc: "Columns: id, name, category, sku, barcode, price, cost, stock, variable_price. For phones/IMEI-tracked items, use the Phones section below instead. Matched by id first, then SKU, then barcode. Optional image_url column: paste a product photo link (e.g. copied from Loyverse) and it's automatically pulled in and hosted on Cloudinary — no manual re-upload. Requires Cloudinary to be set up in Settings first, and only works if the source site allows the photo to be fetched this way; anything it can't reach is listed after import so you can grab it manually with the 📷 button.",
+      columns: [{ key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "price", label: "Price" }, { key: "cost", label: "Cost" }, { key: "stock", label: "Stock" }, { key: "imageUrl", label: "Photo" }]
     }),
     Section({
       title: "📱 Phones (IMEI-tracked)", type: "phones", onExport: exportPhones, fileRef: phoneFileRef,
-      desc: `Columns: imei, status, cost, sell_price, product_name, category, product_id. One row per physical unit. Matched by IMEI — an existing IMEI updates that unit's status/cost/price; a new IMEI adds a unit (grouping into an existing model by product_name+category, or creating a new model if none matches). Status must be one of: ${PHONE_UNIT_STATUSES.join(", ")}. Category must be one of: ${IMEI_CATEGORIES.join(", ")}.`,
-      columns: [{ key: "imei", label: "IMEI" }, { key: "product", label: "Product" }, { key: "unitStatus", label: "Status" }, { key: "cost", label: "Cost" }, { key: "sellPrice", label: "Sell Price" }]
+      desc: `Columns: imei, status, cost, sell_price, product_name, category, product_id. One row per physical unit. Matched by IMEI — an existing IMEI updates that unit's status/cost/price; a new IMEI adds a unit (grouping into an existing model by product_name+category, or creating a new model if none matches). Status must be one of: ${PHONE_UNIT_STATUSES.join(", ")}. Category must be one of: ${IMEI_CATEGORIES.join(", ")}. Optional image_url column works the same as Accessories — one photo migrated per model (not per IMEI), same Cloudinary requirement and fallback.`,
+      columns: [{ key: "imei", label: "IMEI" }, { key: "product", label: "Product" }, { key: "unitStatus", label: "Status" }, { key: "cost", label: "Cost" }, { key: "sellPrice", label: "Sell Price" }, { key: "imageUrl", label: "Photo" }]
     })
   );
 }
