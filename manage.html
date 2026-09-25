@@ -9957,6 +9957,21 @@ function PayrollManager() {
   },[]);
   const filtered = shifts.filter(s=>s.clockOut && (s.clockIn||"").startsWith(month) && (filterStaff==="all"||s.staffName===filterStaff));
   const fmtDuration=(cin,cout)=>{ const mins=Math.round((new Date(cout)-new Date(cin))/60000); return `${Math.floor(mins/60)}h ${mins%60}m`; };
+  const fmtMins=(mins)=>`${Math.floor(mins/60)}h ${mins%60}m`;
+  // Sunday–Saturday pay-period week the shift's clock-in falls in
+  const weekStartOf=(iso)=>{ const d=new Date(iso); const sunday=new Date(d); sunday.setHours(0,0,0,0); sunday.setDate(d.getDate()-d.getDay()); return sunday; };
+  const weekLabel=(start)=>{ const end=new Date(start); end.setDate(start.getDate()+6); const f=(d)=>d.toLocaleDateString([],{month:"short",day:"numeric"}); return `${f(start)} – ${f(end)}`; };
+  const weeklyTotals = (()=>{
+    const byWeek = {};
+    filtered.forEach(s=>{
+      const start = weekStartOf(s.clockIn);
+      const key = start.toISOString().slice(0,10);
+      if(!byWeek[key]) byWeek[key] = { start, staff:{} };
+      const mins = Math.round((new Date(s.clockOut)-new Date(s.clockIn))/60000);
+      byWeek[key].staff[s.staffName] = (byWeek[key].staff[s.staffName]||0) + mins;
+    });
+    return Object.values(byWeek).sort((a,b)=>b.start-a.start);
+  })();
   const saveShiftEdit = async () => {
     if(!editNote.trim()){alert("Please enter a reason for the edit.");return;}
     const base=new Date(editingShift.clockIn).toDateString();
@@ -9996,6 +10011,22 @@ function PayrollManager() {
           E("option",{value:"all"},"All Staff"),
           staff.map(s=>E("option",{key:s.name,value:s.name},s.name))
         )
+      )
+    ),
+    filtered.length>0 && E("div",{style:{marginBottom:20}},
+      E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,marginBottom:8,color:T.muted}},"📊 Weekly Totals (Sun–Sat)"),
+      E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+        weeklyTotals.map((w,wi)=>E(Card,{key:wi},
+          E("div",{style:{fontWeight:700,fontSize:13,marginBottom:8}},weekLabel(w.start)),
+          E("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+            Object.entries(w.staff).sort((a,b)=>a[0].localeCompare(b[0])).map(([name,mins])=>
+              E("div",{key:name,style:{display:"flex",justifyContent:"space-between",fontSize:12.5}},
+                E("span",null,name),
+                E("span",{style:{fontWeight:700}},fmtMins(mins))
+              )
+            )
+          )
+        ))
       )
     ),
     filtered.length===0
