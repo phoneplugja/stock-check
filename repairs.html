@@ -206,7 +206,7 @@ function App() {
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
         body{font-family:'DM Sans',sans-serif;background:#0A0A0A;}
         input,button{font-family:'DM Sans',sans-serif;}
-        input::placeholder{color:#9CA3AF;}
+        input::placeholder{color:#6B7280;}
         input:focus{outline:2px solid rgba(26,86,219,0.25);outline-offset:0;border-color:#1A56DB!important;}
         ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
       `}</style>
@@ -220,7 +220,7 @@ function App() {
             <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0 }} />
             <div>
               <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
-              <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase" }}>Repair · Accessories · Smartphones</div>
+              <div style={{ fontSize:11, color:"rgba(255,255,255,0.65)", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase", fontWeight:600 }}>Repair · Accessories · Smartphones</div>
             </div>
           </div>
 
@@ -237,7 +237,7 @@ function App() {
           </div>
 
           {/* Address */}
-          <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.35)" }}>
+          <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.6)" }}>
             📍 {ADDRESS}
           </div>
 
@@ -248,7 +248,7 @@ function App() {
               { label:"🔍 Track Repair",  href:"/repairs.html", active:true },
               { label:"🔧 Book a Repair", href:"/book-repair.html" },
             ].map(t => (
-              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "rgba(255,255,255,0.55)", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
+              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "rgba(255,255,255,0.78)", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
                 {t.label}
               </a>
             ))}
