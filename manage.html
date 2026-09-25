@@ -7586,6 +7586,17 @@ function DataImportExportTab() {
   // uploaded straight to Cloudinary from the browser (this always works — unlike a remote-URL
   // fetch, there's no other server's CORS policy involved since the files are already local).
   const normalizeForMatch = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // The leading number in a name like "1. 3 in 1 Heavy Duty Case Clear" is a real, load-bearing
+  // part of your naming system (search, in-store lookup) — it's kept in every match below, never
+  // stripped. Case-style accessories are catalogued per phone model — "1. 3 in 1 Heavy Duty Case
+  // Clear — S10", "— S10+", "— S20"... — but you only have one photo per case style, not one per
+  // model. So a photo file named after the base case (no "— model" suffix) is matched against
+  // every catalog entry that starts with that same base name, and the same uploaded photo is
+  // applied to all of them in one go.
+  const splitVariantName = (name) => {
+    const m = String(name || "").match(/^(.*?)\s[-–—]\s(.+)$/);
+    return m ? { base: m[1].trim(), variant: m[2].trim() } : { base: String(name || "").trim(), variant: null };
+  };
   const handleBulkPhotoFiles = (files) => {
     const list = Array.from(files || []);
     if (!list.length) return;
@@ -7593,17 +7604,30 @@ function DataImportExportTab() {
     const bySku = new Map(products.filter(p => p.sku).map(p => [normalizeForMatch(p.sku), p]));
     const byBarcode = new Map(products.filter(p => p.barcode).map(p => [normalizeForMatch(p.barcode), p]));
     const byName = new Map(products.map(p => [normalizeForMatch(p.name), p]));
+    // Group every product that has a "— <model>" suffix by its base (pre-dash) name, so one
+    // photo can be applied to the whole group of phone-model variants at once.
+    const groupsByBase = new Map();
+    products.forEach(p => {
+      const { base, variant } = splitVariantName(p.name);
+      if (!variant) return;
+      const key = normalizeForMatch(base);
+      if (!groupsByBase.has(key)) groupsByBase.set(key, []);
+      groupsByBase.get(key).push(p);
+    });
     const matches = list.map(file => {
       const base = file.name.replace(/\.[^.]+$/, "");
       const norm = normalizeForMatch(base);
-      const product = byId.get(norm) || bySku.get(norm) || byBarcode.get(norm) || byName.get(norm) || null;
-      return { fileName: file.name, file, product, previewUrl: URL.createObjectURL(file) };
+      const exact = byId.get(norm) || bySku.get(norm) || byBarcode.get(norm) || byName.get(norm);
+      if (exact) return { fileName: file.name, file, products: [exact], groupLabel: null, previewUrl: URL.createObjectURL(file) };
+      const group = groupsByBase.get(norm);
+      if (group && group.length) return { fileName: file.name, file, products: group, groupLabel: group[0] ? splitVariantName(group[0].name).base : null, previewUrl: URL.createObjectURL(file) };
+      return { fileName: file.name, file, products: [], groupLabel: null, previewUrl: URL.createObjectURL(file) };
     });
     setBulkPhotoMatches(matches);
   };
   const applyBulkPhotos = async () => {
     if (!bulkPhotoMatches) return;
-    const jobs = bulkPhotoMatches.filter(m => m.product);
+    const jobs = bulkPhotoMatches.filter(m => m.products.length);
     if (!jobs.length) { alert("None of these files matched a product — rename them to match a product's name, SKU, barcode, or ID, and try again."); return; }
     setBulkPhotoBusy(true);
     setBulkPhotoProgress({ done: 0, total: jobs.length });
@@ -7611,9 +7635,13 @@ function DataImportExportTab() {
     let workingProducts = products;
     for (const job of jobs) {
       try {
+        // Upload once per photo file, then apply that one URL to every matched variant —
+        // no need to re-upload the same case photo eight times for eight phone models.
         const url = await uploadProductPhoto(job.file);
-        if (url) workingProducts = workingProducts.map(p => p.id === job.product.id ? { ...p, image: url } : p);
-        else failed.push({ name: job.fileName, error: "Cloudinary not set up." });
+        if (url) {
+          const ids = new Set(job.products.map(p => p.id));
+          workingProducts = workingProducts.map(p => ids.has(p.id) ? { ...p, image: url } : p);
+        } else failed.push({ name: job.fileName, error: "Cloudinary not set up." });
       } catch (e) {
         failed.push({ name: job.fileName, error: e.message || String(e) });
       }
@@ -7622,7 +7650,8 @@ function DataImportExportTab() {
     if (failed.length !== jobs.length) { await saveAllProducts(workingProducts); setProducts(workingProducts); }
     setBulkPhotoBusy(false);
     const okCount = jobs.length - failed.length;
-    let msg = `✅ ${okCount}/${jobs.length} photo(s) uploaded and linked.`;
+    const productsLinked = jobs.filter(j => !failed.find(f => f.name === j.fileName)).reduce((s, j) => s + j.products.length, 0);
+    let msg = `✅ ${okCount}/${jobs.length} photo(s) uploaded, linked to ${productsLinked} product${productsLinked===1?"":"s"} total.`;
     if (failed.length) msg += `\n\nFailed:\n${failed.slice(0,15).map(f=>`• ${f.name} — ${f.error}`).join("\n")}`;
     alert(msg);
     bulkPhotoMatches.forEach(m => URL.revokeObjectURL(m.previewUrl));
@@ -7673,8 +7702,8 @@ function DataImportExportTab() {
       E(ST, null, "📸 Bulk Photo Upload (from downloaded files)"),
       E("div", { style: { fontSize: 13, color: T.muted, marginBottom: 14, lineHeight: 1.6 } },
         "Got the actual photo files instead of links? Rename each file to match a product's name, SKU, barcode, or ID (e.g. ",
-        E("code", null, "PHNSAMS21UNBBL128.jpg"), " or ", E("code", null, "Samsung S21 Ultra Black.jpg"),
-        "), then pick them all at once below — each gets matched to its product automatically and uploaded to Cloudinary. Requires Cloudinary to be set up in Settings first."
+        E("code", null, "PHNSAMS21UNBBL128.jpg"), " or ", E("code", null, "1. 3 in 1 Heavy Duty Case Clear.jpg"),
+        " — numbering kept, it's part of the name). For a case style sold across many phone models (\"1. 3 in 1 Heavy Duty Case Clear — S10\", \"— S10+\", etc.), name the photo just the base case name with no \"— model\" — it'll be applied to every matching variant at once. Pick them all at once below. Requires Cloudinary to be set up in Settings first."
       ),
       E("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
         E(Btn, { onClick: () => bulkPhotoFileRef.current && bulkPhotoFileRef.current.click() }, "📁 Choose Photos"),
@@ -7682,15 +7711,18 @@ function DataImportExportTab() {
       ),
       bulkPhotoMatches && E("div", { style: { marginTop: 16 } },
         E("div", { style: { display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", fontSize: 12 } },
-          E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.greenLt, color: T.green } }, `${bulkPhotoMatches.filter(m=>m.product).length} matched`),
-          bulkPhotoMatches.some(m=>!m.product) && E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.redLt, color: T.red } }, `${bulkPhotoMatches.filter(m=>!m.product).length} no match — will be skipped`)
+          E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.greenLt, color: T.green } }, `${bulkPhotoMatches.filter(m=>m.products.length).length} matched`),
+          bulkPhotoMatches.some(m=>!m.products.length) && E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.redLt, color: T.red } }, `${bulkPhotoMatches.filter(m=>!m.products.length).length} no match — will be skipped`)
         ),
         E("div", { style: { maxHeight: 320, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 8 } },
           bulkPhotoMatches.map((m, i) => E("div", { key: i, style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderTop: i>0?`1px solid ${T.border}`:"none" } },
             E("img", { src: m.previewUrl, style: { width: 32, height: 32, borderRadius: 6, objectFit: "cover", flexShrink: 0, border: `1px solid ${T.border}` } }),
             E("div", { style: { fontSize: 12, flex: 1, minWidth: 0 } },
               E("div", { style: { fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, m.fileName),
-              E("div", { style: { color: m.product ? T.green : T.red } }, m.product ? `→ ${m.product.name}` : "No matching product")
+              E("div", { style: { color: m.products.length ? T.green : T.red } },
+                !m.products.length ? "No matching product"
+                  : m.products.length === 1 ? `→ ${m.products[0].name}`
+                  : `→ ${m.products.length} variants of "${m.groupLabel}"`)
             )
           ))
         ),
