@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Phone Plug — Track My Repair</title>
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="root"></div>
@@ -38,13 +38,15 @@ const INSTAGRAM  = "@phoneplug_ja";
 const ADDRESS    = "Shop 5D, Hagley Park Plaza, Half Way Tree, Kingston";
 const STORE_URL  = "phoneplugja.com";
 
+// Light-mode status colors — pastel tint for the panel, a darker saturated
+// shade of the same hue for text/icons so it stays readable on white.
 const STATUSES = [
-  { id:"received",       label:"Received",          color:"#1A56DB", bg:"#EFF4FF" },
-  { id:"diagnosing",     label:"Diagnosing",         color:"#7C3AED", bg:"#F5F3FF" },
-  { id:"awaiting_parts", label:"Awaiting Parts",     color:"#D97706", bg:"#FFFBEB" },
-  { id:"in_repair",      label:"In Repair",          color:"#2563EB", bg:"#DBEAFE" },
-  { id:"ready",          label:"Ready for Pickup",   color:"#059669", bg:"#ECFDF5" },
-  { id:"collected",      label:"Collected",          color:"#6B7280", bg:"#F3F4F6" },
+  { id:"received",       label:"Received",          color:"#0e88bd", bg:"#eaf6fb" },
+  { id:"diagnosing",     label:"Diagnosing",         color:"#7c3aed", bg:"#f5f3ff" },
+  { id:"awaiting_parts", label:"Awaiting Parts",     color:"#b45309", bg:"#fffbeb" },
+  { id:"in_repair",      label:"In Repair",          color:"#2563eb", bg:"#eff6ff" },
+  { id:"ready",          label:"Ready for Pickup",   color:"#059669", bg:"#ecfdf5" },
+  { id:"collected",      label:"Collected",          color:"#64748b", bg:"#f1f5f9" },
 ];
 
 const fmt = (iso) => {
@@ -67,18 +69,20 @@ const load = async (key) => {
   catch(e) { console.error('load:', e); return []; }
 };
 
+// Light, modern theme — dark header stays as-is, everything below it is
+// easy-on-the-eyes white/light-grey so it's comfortable to read.
 const T = {
-  bg:"#F8F9FB", card:"#FFFFFF", border:"#E5E7EB",
-  blue:"#1A56DB", blueLt:"#EFF4FF",
-  black:"#0A0A0A", text:"#111827", muted:"#6B7280",
-  green:"#059669", greenLt:"#ECFDF5",
+  bg:"#f3f6fa", card:"#ffffff", border:"rgba(15,23,42,0.09)",
+  black:"#080c10", text:"#0f172a", muted:"#64748b",
+  accent:"#0e88bd", accentSoft:"#eaf6fb", accentBorder:"rgba(14,136,189,0.3)",
+  green:"#059669", greenLt:"#ecfdf5",
 };
 
-const iS = { width:"100%", background:"#FFFFFF", border:"1.5px solid #E5E7EB", borderRadius:8, padding:"10px 13px", color:T.text, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" };
+const iS = { width:"100%", background:"#f8fafc", border:`1.5px solid ${T.border}`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box", transition:"border-color .15s, background .15s" };
 
 const WaBtn = ({ label="💬 WhatsApp Us" }) => (
-  <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer"
-    style={{ display:"inline-flex",alignItems:"center",gap:8,background:"#25D366",color:"#fff",padding:"11px 22px",borderRadius:8,fontSize:14,fontWeight:700,textDecoration:"none" }}>
+  <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer" className="tpp-btn"
+    style={{ display:"inline-flex",alignItems:"center",gap:8,background:"#25D366",color:"#fff",padding:"12px 22px",borderRadius:11,fontSize:14,fontWeight:700,textDecoration:"none", boxShadow:"0 10px 22px -8px rgba(37,211,102,0.55)" }}>
     {label}
   </a>
 );
@@ -105,11 +109,11 @@ function TrackView({ tickets }) {
   const emoji = { received:"📥", diagnosing:"🔍", awaiting_parts:"⏳", in_repair:"🔧", ready:"✅", collected:"📦" };
 
   return (
-    <div style={{ maxWidth:520, margin:"0 auto" }}>
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:"28px 28px 24px", boxShadow:"0 2px 12px rgba(0,0,0,0.08)" }}>
+    <div style={{ maxWidth:560, margin:"0 auto" }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:20, padding:"30px 28px 26px", boxShadow:"0 1px 2px rgba(15,23,42,0.04), 0 24px 48px -20px rgba(15,23,42,0.14)" }}>
         <div style={{ textAlign:"center", marginBottom:28 }}>
           <div style={{ fontSize:40, marginBottom:10 }}>📱</div>
-          <h2 style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:24, margin:0, color:T.text }}>Track Your Repair</h2>
+          <h2 style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:700, fontSize:24, margin:0, color:T.text }}>Track Your Repair</h2>
           <p style={{ color:T.muted, fontSize:14, marginTop:8, lineHeight:1.6 }}>
             Enter your <strong>ticket ID</strong> (e.g. TPP-AB3X7K) or the <strong>phone number</strong> you gave at drop-off.
           </p>
@@ -119,15 +123,15 @@ function TrackView({ tickets }) {
           <input value={input} onChange={e => setInput(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === "Enter" && doSearch()}
             placeholder="Ticket ID or phone number"
-            style={{ flex:1, ...iS, fontSize:16, fontFamily:"'Syne',sans-serif", fontWeight:700, letterSpacing:1, background:"#F8F9FB" }} />
-          <button onClick={doSearch} style={{ background:T.blue, color:"#FFF", border:"none", borderRadius:8, padding:"10px 22px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+            style={{ flex:1, ...iS, fontSize:16, fontFamily:"'Space Grotesk',sans-serif", fontWeight:700, letterSpacing:1 }} />
+          <button onClick={doSearch} className="tpp-btn" style={{ background:"linear-gradient(135deg,#22c2f2,#0e88bd)", color:"#fff", border:"none", borderRadius:11, padding:"11px 22px", fontWeight:700, fontSize:14, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", boxShadow:"0 10px 24px -8px rgba(14,136,189,0.5)" }}>
             Search
           </button>
         </div>
         <div style={{ fontSize:11, color:T.muted, textAlign:"center", marginBottom:4 }}>Your ticket ID is on the receipt given at drop-off</div>
 
         {searched && !result && (
-          <div style={{ marginTop:22, textAlign:"center", padding:"24px 20px", background:"#F9FAFB", borderRadius:12, border:"1px solid #E5E7EB" }}>
+          <div style={{ marginTop:22, textAlign:"center", padding:"24px 20px", background:"#f8fafc", borderRadius:14, border:`1px solid ${T.border}` }}>
             <div style={{ fontSize:36, marginBottom:10 }}>🔍</div>
             <div style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:6 }}>Ticket not found</div>
             <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.6 }}>
@@ -139,9 +143,9 @@ function TrackView({ tickets }) {
 
         {result && s && (
           <div style={{ marginTop:22 }}>
-            <div style={{ background:s.bg, border:`2px solid ${s.color}40`, borderRadius:14, padding:"24px 20px", textAlign:"center", marginBottom:18 }}>
+            <div style={{ background:s.bg, border:`1px solid ${s.color}30`, borderRadius:16, padding:"24px 20px", textAlign:"center", marginBottom:18 }}>
               <div style={{ fontSize:44, marginBottom:8 }}>{emoji[result.status] || "📱"}</div>
-              <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800, color:s.color }}>{s.label}</div>
+              <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:22, fontWeight:700, color:s.color }}>{s.label}</div>
               <div style={{ fontSize:12, color:T.muted, marginTop:5 }}>Last updated {fmt(result.updatedAt)}</div>
             </div>
 
@@ -153,32 +157,32 @@ function TrackView({ tickets }) {
               ["Est. Ready",   result.estimatedCompletion ? fmtDate(result.estimatedCompletion) : "To be confirmed"],
               ...(result.finalCost ? [["Final Cost", fmtMoney(result.finalCost)]] : []),
             ].map(([k, v]) => (
-              <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12, fontSize:13, paddingBottom:12, borderBottom:"1px solid #E5E7EB" }}>
+              <div key={k} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12, fontSize:13, paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>
                 <span style={{ color:T.muted, flexShrink:0, marginRight:12 }}>{k}</span>
-                <span style={{ fontWeight:500, textAlign:"right", maxWidth:"65%" }}>{v}</span>
+                <span style={{ fontWeight:500, textAlign:"right", maxWidth:"65%", color:T.text }}>{v}</span>
               </div>
             ))}
 
             {result.status === "ready" && (
-              <div style={{ background:T.greenLt, border:"1px solid #A7F3D0", borderRadius:12, padding:"20px 18px", marginTop:8, textAlign:"center" }}>
+              <div style={{ background:T.greenLt, border:"1px solid rgba(5,150,105,0.25)", borderRadius:14, padding:"20px 18px", marginTop:8, textAlign:"center" }}>
                 <div style={{ fontWeight:800, color:T.green, fontSize:16, marginBottom:6 }}>📍 Your device is ready!</div>
-                <div style={{ fontSize:13, color:"#065F46", marginBottom:4, lineHeight:1.7 }}>
+                <div style={{ fontSize:13, color:"#065f46", marginBottom:4, lineHeight:1.7 }}>
                   Please collect within <strong>3 days</strong> to avoid storage fees.
                 </div>
-                <div style={{ fontSize:13, color:"#065F46", fontWeight:600, marginBottom:18 }}>{ADDRESS}</div>
+                <div style={{ fontSize:13, color:"#065f46", fontWeight:600, marginBottom:18 }}>{ADDRESS}</div>
                 <WaBtn label="💬 Let us know you're coming" />
               </div>
             )}
 
             {result.status === "collected" && (
-              <div style={{ background:"#F3F4F6", border:"1px solid #E5E7EB", borderRadius:12, padding:"16px 18px", marginTop:8, textAlign:"center" }}>
+              <div style={{ background:"#f8fafc", border:`1px solid ${T.border}`, borderRadius:14, padding:"16px 18px", marginTop:8, textAlign:"center" }}>
                 <div style={{ fontSize:13, color:T.muted, lineHeight:1.6 }}>✅ This device has been collected. Thank you for choosing The Phone Plug!</div>
               </div>
             )}
 
             {!["ready","collected"].includes(result.status) && (
-              <div style={{ marginTop:16, padding:"14px 16px", background:"#F9FAFB", borderRadius:10, fontSize:12, color:T.muted, textAlign:"center", border:"1px solid #E5E7EB" }}>
-                Questions? DM <strong style={{ color:T.blue }}>{INSTAGRAM}</strong> or{" "}
+              <div style={{ marginTop:16, padding:"14px 16px", background:"#f8fafc", borderRadius:12, fontSize:12, color:T.muted, textAlign:"center", border:`1px solid ${T.border}` }}>
+                Questions? DM <strong style={{ color:T.accent }}>{INSTAGRAM}</strong> or{" "}
                 <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer" style={{ color:"#25D366", fontWeight:700, textDecoration:"none" }}>WhatsApp us</a>.
               </div>
             )}
@@ -200,26 +204,30 @@ function App() {
   }, []);
 
   return (
-    <div style={{ minHeight:"100vh", background:T.black, fontFamily:"inherit" }}>
+    <div style={{ minHeight:"100vh", background:T.bg, fontFamily:"inherit" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        body{font-family:'DM Sans',sans-serif;background:#0A0A0A;}
-        input,button{font-family:'DM Sans',sans-serif;}
-        input::placeholder{color:#6B7280;}
-        input:focus{outline:2px solid rgba(26,86,219,0.25);outline-offset:0;border-color:#1A56DB!important;}
-        ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
+        body{font-family:'Inter',sans-serif;background:#f3f6fa;}
+        input,button{font-family:'Inter',sans-serif;}
+        input::placeholder{color:#94a3b8;}
+        input:focus{outline:none;border-color:#0e88bd!important;background:#fff!important;box-shadow:0 0 0 4px rgba(14,136,189,0.12);}
+        ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+        .tpp-btn{transition:transform .15s ease, box-shadow .15s ease, filter .15s ease;}
+        .tpp-btn:hover{transform:translateY(-1px); filter:brightness(1.04);}
+        .tpp-btn:active{transform:translateY(0);}
       `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ background:T.black, borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
-        <div style={{ maxWidth:600, margin:"0 auto", padding:"0 20px" }}>
+      {/* ── Header (kept dark to match the rest of the site) ── */}
+      <div style={{ position:"relative", background:T.black, borderBottom:"1px solid rgba(255,255,255,0.08)", overflow:"hidden" }}>
+        <div style={{ position:"absolute", width:280, height:280, background:"radial-gradient(circle, rgba(41,181,232,0.25), transparent 70%)", filter:"blur(50px)", top:-140, right:-60, pointerEvents:"none" }} />
+        <div style={{ position:"relative", maxWidth:640, margin:"0 auto", padding:"0 20px" }}>
 
           {/* Logo + name */}
           <div style={{ display:"flex", alignItems:"center", gap:16, paddingTop:22, paddingBottom:18, borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-            <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0 }} />
+            <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0, filter:"drop-shadow(0 0 14px rgba(41,181,232,0.35))" }} />
             <div>
-              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
+              <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:700, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
               <div style={{ fontSize:11, color:"#ffffff", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase", fontWeight:600 }}>Repair · Accessories · Smartphones</div>
             </div>
           </div>
@@ -254,7 +262,7 @@ function App() {
               { label:"🔍 Track Repair",  href:"/repairs.html", active:true },
               { label:"🔧 Book a Repair", href:"/book-repair.html" },
             ].map(t => (
-              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "#ffffff", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
+              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(41,181,232,0.14)" : "transparent", color: t.active ? "#60d3f7" : "#ffffff", border: t.active ? "1px solid rgba(41,181,232,0.35)" : "1px solid transparent" }}>
                 {t.label}
               </a>
             ))}
@@ -262,9 +270,9 @@ function App() {
         </div>
       </div>
 
-      {/* ── Content ── */}
-      <div style={{ background:T.bg, minHeight:"calc(100vh - 180px)" }}>
-        <div style={{ maxWidth:600, margin:"0 auto", padding:"36px 20px 60px" }}>
+      {/* ── Content (light, easy to read) ── */}
+      <div style={{ minHeight:"calc(100vh - 180px)" }}>
+        <div style={{ maxWidth:640, margin:"0 auto", padding:"36px 20px 60px" }}>
           <TrackView tickets={tickets} />
         </div>
       </div>
