@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Phone Plug — Book a Repair</title>
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="root"></div>
@@ -39,16 +39,16 @@
     const LOGO_SRC  = "/logo.png";
 
     const T = {
-      bg:"#F8F9FB", card:"#FFFFFF", border:"#E5E7EB",
-      blue:"#1A56DB", blueLt:"#EFF4FF",
-      black:"#0A0A0A", text:"#111827", muted:"#6B7280",
-      green:"#059669", greenLt:"#ECFDF5",
-      red:"#DC2626", redLt:"#FEF2F2",
-      amber:"#D97706", amberLt:"#FFFBEB",
+      bg:"#080c10", card:"#161c24", border:"rgba(255,255,255,0.08)",
+      blue:"#29b5e8", blueLt:"rgba(41,181,232,0.1)",
+      black:"#080c10", text:"#ffffff", muted:"rgba(255,255,255,0.6)",
+      green:"#2ecc71", greenLt:"rgba(46,204,113,0.1)",
+      red:"#e74c3c", redLt:"rgba(231,76,60,0.1)",
+      amber:"#f5a623", amberLt:"rgba(245,166,35,0.1)",
     };
 
     const iS = {
-      width:"100%", background:"#FFFFFF", border:"1.5px solid #E5E7EB",
+      width:"100%", background:"#0f1318", border:"1.5px solid rgba(255,255,255,0.1)",
       borderRadius:8, padding:"10px 13px", color:T.text, fontSize:14,
       fontFamily:"inherit", outline:"none", boxSizing:"border-box"
     };
@@ -92,13 +92,13 @@
     );
 
     const Card = ({ children, style:s }) => (
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:"24px 24px 20px", boxShadow:"0 2px 12px rgba(0,0,0,0.08)", ...s }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:"24px 24px 20px", boxShadow:"0 8px 30px rgba(0,0,0,0.35)", ...s }}>
         {children}
       </div>
     );
 
     const ST = ({ children }) => (
-      <div style={{ fontFamily:"'Syne',sans-serif", fontSize:10.5, fontWeight:800, color:T.blue, textTransform:"uppercase", letterSpacing:"1px", marginBottom:16 }}>
+      <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:10.5, fontWeight:700, color:T.blue, textTransform:"uppercase", letterSpacing:"1px", marginBottom:16 }}>
         {children}
       </div>
     );
@@ -114,7 +114,7 @@
             return (
               <React.Fragment key={i}>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:5 }}>
-                  <div style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${col}`, background: done ? T.greenLt : active ? T.blueLt : T.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:800, color:col, transition:"all .3s" }}>
+                  <div style={{ width:30, height:30, borderRadius:"50%", border:`2px solid ${col}`, background: done ? T.greenLt : active ? T.blueLt : "rgba(255,255,255,0.04)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:800, color:col, transition:"all .3s", boxShadow: active ? `0 0 14px ${T.blueLt}` : "none" }}>
                     {done ? "✓" : i+1}
                   </div>
                   <span style={{ fontSize:11, fontWeight:600, color:col, whiteSpace:"nowrap" }}>{s}</span>
@@ -129,12 +129,12 @@
 
     const Btn = ({ children, onClick, variant="primary", full, disabled, style:s }) => {
       const v = {
-        primary: { background:T.blue, color:"#FFF", border:"none" },
-        ghost:   { background:"#F3F4F6", color:T.text, border:`1.5px solid ${T.border}` },
-        green:   { background:T.greenLt, color:T.green, border:"1px solid #A7F3D0" },
+        primary: { background:T.blue, color:"#04141c", border:"none" },
+        ghost:   { background:"rgba(255,255,255,0.05)", color:T.text, border:`1.5px solid ${T.border}` },
+        green:   { background:T.greenLt, color:T.green, border:"1px solid rgba(46,204,113,0.3)" },
       };
       return (
-        <button onClick={onClick} disabled={disabled} style={{ ...v[variant], borderRadius:8, padding:"11px 20px", fontSize:14, fontWeight:700, cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit", width:full?"100%":"auto", opacity:disabled?.5:1, ...s }}>
+        <button onClick={onClick} disabled={disabled} style={{ ...v[variant], borderRadius:8, padding:"11px 20px", fontSize:14, fontWeight:700, cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit", width:full?"100%":"auto", opacity:disabled?.5:1, transition:"transform .15s, box-shadow .15s", ...s }}>
           {children}
         </button>
       );
@@ -244,7 +244,7 @@
               <input type="email" style={errs.customerEmail?iSErr:iS} placeholder="customer@email.com" value={form.customerEmail} onChange={e=>set("customerEmail",e.target.value)} />
             </Field>
           </Card>
-          <div style={{ background:"#EFF4FF", border:"1px solid #BFDBFE", borderRadius:10, padding:"12px 16px", fontSize:13, color:"#1E40AF", marginBottom:20, lineHeight:1.6 }}>
+          <div style={{ background:T.blueLt, border:"1px solid rgba(41,181,232,0.25)", borderRadius:10, padding:"12px 16px", fontSize:13, color:"#8fd8f5", marginBottom:20, lineHeight:1.6 }}>
             💡 We'll contact you on this number to confirm your appointment time.
           </div>
           <Btn onClick={()=>next(0)}>Continue →</Btn>
@@ -310,7 +310,7 @@
               {COMMON_ISSUES.map(issue => {
                 const sel = form.selectedIssues.includes(issue);
                 return (
-                  <button key={issue} onClick={()=>toggleIssue(issue)} style={{ padding:"7px 14px", borderRadius:99, border:`1.5px solid ${sel?T.blue:T.border}`, background:sel?T.blueLt:"#F9FAFB", color:sel?T.blue:T.muted, fontSize:13, fontWeight:600, cursor:"pointer", transition:"all .2s", fontFamily:"inherit" }}>
+                  <button key={issue} onClick={()=>toggleIssue(issue)} style={{ padding:"7px 14px", borderRadius:99, border:`1.5px solid ${sel?T.blue:T.border}`, background:sel?T.blueLt:"rgba(255,255,255,0.04)", color:sel?T.blue:T.muted, fontSize:13, fontWeight:600, cursor:"pointer", transition:"all .2s", fontFamily:"inherit" }}>
                     {issue}
                   </button>
                 );
@@ -375,7 +375,7 @@
                 {form.notes && <div style={{ fontSize:13, color:T.muted }}>📝 {form.notes}</div>}
               </Card>
             )}
-            <div style={{ background:"#F9FAFB", border:`1px solid ${T.border}`, borderRadius:10, padding:"12px 16px", fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.6 }}>
+            <div style={{ background:"rgba(255,255,255,0.04)", border:`1px solid ${T.border}`, borderRadius:10, padding:"12px 16px", fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.6 }}>
               By submitting, you confirm this information is accurate. We'll contact you to confirm your slot. Walk-ins also welcome.
             </div>
             <div style={{ display:"flex", gap:10 }}>
@@ -391,13 +391,13 @@
         <Card>
           <div style={{ textAlign:"center", padding:"16px 8px" }}>
             <div style={{ fontSize:52, marginBottom:14 }}>🎉</div>
-            <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:24, marginBottom:8 }}>Booking Confirmed!</div>
+            <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:800, fontSize:24, marginBottom:8 }}>Booking Confirmed!</div>
             <p style={{ fontSize:14, color:T.muted, lineHeight:1.7, marginBottom:24, maxWidth:380, margin:"0 auto 24px" }}>
               We've received your repair request. Our team will be in touch shortly to confirm your appointment.
             </p>
-            <div style={{ background:T.blueLt, border:`1px solid #BFDBFE`, borderRadius:14, padding:"20px 24px", display:"inline-block", marginBottom:24 }}>
+            <div style={{ background:T.blueLt, border:`1px solid rgba(41,181,232,0.3)`, borderRadius:14, padding:"20px 24px", display:"inline-block", marginBottom:24 }}>
               <div style={{ fontSize:11, fontWeight:700, color:T.blue, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:6 }}>Your Booking Reference</div>
-              <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:28, color:T.blue, letterSpacing:"0.1em" }}>{bookRef}</div>
+              <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:800, fontSize:28, color:T.blue, letterSpacing:"0.1em" }}>{bookRef}</div>
               <div style={{ fontSize:12, color:T.muted, marginTop:6 }}>Screenshot this for your records</div>
             </div>
             <p style={{ fontSize:13, color:T.muted, lineHeight:1.7, marginBottom:20 }}>
@@ -405,7 +405,7 @@
             </p>
             <div style={{ display:"flex", justifyContent:"center", gap:12, flexWrap:"wrap" }}>
               <WaBtn label="💬 Message us on WhatsApp" />
-              <a href="/repairs.html" style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#F3F4F6", color:T.text, padding:"11px 20px", borderRadius:8, fontSize:14, fontWeight:700, textDecoration:"none", border:`1.5px solid ${T.border}` }}>
+              <a href="/repairs.html" style={{ display:"inline-flex", alignItems:"center", gap:8, background:"rgba(255,255,255,0.05)", color:T.text, padding:"11px 20px", borderRadius:8, fontSize:14, fontWeight:700, textDecoration:"none", border:`1.5px solid ${T.border}` }}>
                 🔍 Track a Repair
               </a>
             </div>
@@ -437,14 +437,15 @@
       return (
         <div style={{ minHeight:"100vh", background:T.black, fontFamily:"inherit" }}>
           <style>{`
-            @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
             *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-            body{font-family:'DM Sans',sans-serif;background:#0A0A0A;}
-            input,button,select,textarea{font-family:'DM Sans',sans-serif;}
-            input::placeholder,textarea::placeholder{color:#6B7280;}
-            input:focus,textarea:focus,select:focus{outline:2px solid rgba(26,86,219,0.25);outline-offset:0;border-color:#1A56DB!important;}
+            body{font-family:'Inter',sans-serif;background:#080c10;}
+            body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(41,181,232,0.04) 1px, transparent 1px),linear-gradient(90deg, rgba(41,181,232,0.04) 1px, transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+            input,button,select,textarea{font-family:'Inter',sans-serif;}
+            input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.35);}
+            input:focus,textarea:focus,select:focus{outline:2px solid rgba(41,181,232,0.25);outline-offset:0;border-color:#29b5e8!important;}
             ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
-            select option{background:#fff;color:#111827;}
+            select option{background:#161c24;color:#fff;}
           `}</style>
 
           {/* ── Header ── */}
@@ -453,9 +454,9 @@
 
               {/* Logo + name */}
               <div style={{ display:"flex", alignItems:"center", gap:16, paddingTop:22, paddingBottom:18, borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-                <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0 }} />
+                <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0, filter:"drop-shadow(0 0 14px rgba(41,181,232,0.35))" }} />
                 <div>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
+                  <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
                   <div style={{ fontSize:11, color:"#ffffff", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase", fontWeight:600 }}>Repair · Accessories · Smartphones</div>
                 </div>
               </div>
@@ -493,7 +494,7 @@
             <div style={{ maxWidth:600, margin:"0 auto", padding:"36px 20px 60px" }}>
 
               <div style={{ marginBottom:28 }}>
-                <h2 style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:24, margin:0, color:T.text }}>Book a Repair</h2>
+                <h2 style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:800, fontSize:24, margin:0, color:T.text }}>Book a Repair</h2>
                 <p style={{ color:T.muted, fontSize:14, marginTop:8, lineHeight:1.6 }}>
                   Fill in your details and we'll confirm your appointment. Walk-ins always welcome too.
                 </p>
