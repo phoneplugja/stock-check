@@ -218,8 +218,10 @@ const saveCloudinarySettings = async (settings) => {
 };
 
 // Downscales a photo client-side before upload (keeps free-tier usage low and uploads fast on
-// a shop's mobile data) — caps the longest side at 900px and re-encodes as JPEG.
-const downscaleImage = (file, maxSide = 900, quality = 0.82) => new Promise((resolve, reject) => {
+// a shop's mobile data), and pads it onto a square white canvas so every product photo — no
+// matter what shape the original was — displays the same consistent way across search results,
+// cart, catalog and the stock-checker site.
+const downscaleImage = (file, maxSide = 900, quality = 0.85) => new Promise((resolve, reject) => {
   const img = new Image();
   const url = URL.createObjectURL(file);
   img.onload = () => {
@@ -230,8 +232,11 @@ const downscaleImage = (file, maxSide = 900, quality = 0.82) => new Promise((res
       else { width = Math.round(width * maxSide / height); height = maxSide; }
     }
     const canvas = document.createElement("canvas");
-    canvas.width = width; canvas.height = height;
-    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+    canvas.width = maxSide; canvas.height = maxSide;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, maxSide, maxSide);
+    ctx.drawImage(img, Math.round((maxSide - width) / 2), Math.round((maxSide - height) / 2), width, height);
     canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not process image.")), "image/jpeg", quality);
   };
   img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read image.")); };
@@ -7466,9 +7471,13 @@ function DataImportExportTab() {
   const [busy, setBusy] = useState("");
   const [preview, setPreview] = useState(null); // {type, planResult, preview}
   const [photoMigration, setPhotoMigration] = useState(null); // {done, total, failed:[]}
+  const [bulkPhotoMatches, setBulkPhotoMatches] = useState(null); // [{fileName, file, product, previewUrl}]
+  const [bulkPhotoBusy, setBulkPhotoBusy] = useState(false);
+  const [bulkPhotoProgress, setBulkPhotoProgress] = useState(null); // {done, total}
   const custFileRef = React.useRef(null);
   const accFileRef = React.useRef(null);
   const phoneFileRef = React.useRef(null);
+  const bulkPhotoFileRef = React.useRef(null);
 
   const reload = async () => {
     const [c, p] = await Promise.all([loadArr("tpp-customers"), loadAllProducts()]);
@@ -7571,6 +7580,56 @@ function DataImportExportTab() {
     } finally { setBusy(""); }
   };
 
+  // ── Bulk Photo Upload — match local image files to products by filename ────────
+  // For when photos are downloaded as actual files rather than pulled from a URL: pick many at
+  // once, each is matched to a product by its filename (against id, SKU, barcode, or name), then
+  // uploaded straight to Cloudinary from the browser (this always works — unlike a remote-URL
+  // fetch, there's no other server's CORS policy involved since the files are already local).
+  const normalizeForMatch = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const handleBulkPhotoFiles = (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const byId = new Map(products.map(p => [normalizeForMatch(p.id), p]));
+    const bySku = new Map(products.filter(p => p.sku).map(p => [normalizeForMatch(p.sku), p]));
+    const byBarcode = new Map(products.filter(p => p.barcode).map(p => [normalizeForMatch(p.barcode), p]));
+    const byName = new Map(products.map(p => [normalizeForMatch(p.name), p]));
+    const matches = list.map(file => {
+      const base = file.name.replace(/\.[^.]+$/, "");
+      const norm = normalizeForMatch(base);
+      const product = byId.get(norm) || bySku.get(norm) || byBarcode.get(norm) || byName.get(norm) || null;
+      return { fileName: file.name, file, product, previewUrl: URL.createObjectURL(file) };
+    });
+    setBulkPhotoMatches(matches);
+  };
+  const applyBulkPhotos = async () => {
+    if (!bulkPhotoMatches) return;
+    const jobs = bulkPhotoMatches.filter(m => m.product);
+    if (!jobs.length) { alert("None of these files matched a product — rename them to match a product's name, SKU, barcode, or ID, and try again."); return; }
+    setBulkPhotoBusy(true);
+    setBulkPhotoProgress({ done: 0, total: jobs.length });
+    const failed = [];
+    let workingProducts = products;
+    for (const job of jobs) {
+      try {
+        const url = await uploadProductPhoto(job.file);
+        if (url) workingProducts = workingProducts.map(p => p.id === job.product.id ? { ...p, image: url } : p);
+        else failed.push({ name: job.fileName, error: "Cloudinary not set up." });
+      } catch (e) {
+        failed.push({ name: job.fileName, error: e.message || String(e) });
+      }
+      setBulkPhotoProgress(pm => ({ ...pm, done: pm.done + 1 }));
+    }
+    if (failed.length !== jobs.length) { await saveAllProducts(workingProducts); setProducts(workingProducts); }
+    setBulkPhotoBusy(false);
+    const okCount = jobs.length - failed.length;
+    let msg = `✅ ${okCount}/${jobs.length} photo(s) uploaded and linked.`;
+    if (failed.length) msg += `\n\nFailed:\n${failed.slice(0,15).map(f=>`• ${f.name} — ${f.error}`).join("\n")}`;
+    alert(msg);
+    bulkPhotoMatches.forEach(m => URL.revokeObjectURL(m.previewUrl));
+    setBulkPhotoMatches(null); setBulkPhotoProgress(null);
+    if (bulkPhotoFileRef.current) bulkPhotoFileRef.current.value = "";
+  };
+
   if (loading) return E("div", { style: { textAlign: "center", padding: "60px 20px", color: T.muted } }, "Loading...");
 
   const Section = ({ title, desc, onExport, fileRef, type, columns }) =>
@@ -7609,7 +7668,39 @@ function DataImportExportTab() {
       title: "📱 Phones (IMEI-tracked)", type: "phones", onExport: exportPhones, fileRef: phoneFileRef,
       desc: `Columns: imei, status, cost, sell_price, product_name, category, product_id. One row per physical unit. Matched by IMEI — an existing IMEI updates that unit's status/cost/price; a new IMEI adds a unit (grouping into an existing model by product_name+category, or creating a new model if none matches). Status must be one of: ${PHONE_UNIT_STATUSES.join(", ")}. Category must be one of: ${IMEI_CATEGORIES.join(", ")}. Optional image_url column works the same as Accessories — one photo migrated per model (not per IMEI), same Cloudinary requirement and fallback.`,
       columns: [{ key: "imei", label: "IMEI" }, { key: "product", label: "Product" }, { key: "unitStatus", label: "Status" }, { key: "cost", label: "Cost" }, { key: "sellPrice", label: "Sell Price" }, { key: "imageUrl", label: "Photo" }]
-    })
+    }),
+    E(Card, { style: { marginBottom: 20 } },
+      E(ST, null, "📸 Bulk Photo Upload (from downloaded files)"),
+      E("div", { style: { fontSize: 13, color: T.muted, marginBottom: 14, lineHeight: 1.6 } },
+        "Got the actual photo files instead of links? Rename each file to match a product's name, SKU, barcode, or ID (e.g. ",
+        E("code", null, "PHNSAMS21UNBBL128.jpg"), " or ", E("code", null, "Samsung S21 Ultra Black.jpg"),
+        "), then pick them all at once below — each gets matched to its product automatically and uploaded to Cloudinary. Requires Cloudinary to be set up in Settings first."
+      ),
+      E("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
+        E(Btn, { onClick: () => bulkPhotoFileRef.current && bulkPhotoFileRef.current.click() }, "📁 Choose Photos"),
+        E("input", { ref: bulkPhotoFileRef, type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onChange: e => handleBulkPhotoFiles(e.target.files) })
+      ),
+      bulkPhotoMatches && E("div", { style: { marginTop: 16 } },
+        E("div", { style: { display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", fontSize: 12 } },
+          E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.greenLt, color: T.green } }, `${bulkPhotoMatches.filter(m=>m.product).length} matched`),
+          bulkPhotoMatches.some(m=>!m.product) && E("span", { style: { display: "inline-block", fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: T.redLt, color: T.red } }, `${bulkPhotoMatches.filter(m=>!m.product).length} no match — will be skipped`)
+        ),
+        E("div", { style: { maxHeight: 320, overflowY: "auto", border: `1px solid ${T.border}`, borderRadius: 8 } },
+          bulkPhotoMatches.map((m, i) => E("div", { key: i, style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderTop: i>0?`1px solid ${T.border}`:"none" } },
+            E("img", { src: m.previewUrl, style: { width: 32, height: 32, borderRadius: 6, objectFit: "cover", flexShrink: 0, border: `1px solid ${T.border}` } }),
+            E("div", { style: { fontSize: 12, flex: 1, minWidth: 0 } },
+              E("div", { style: { fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, m.fileName),
+              E("div", { style: { color: m.product ? T.green : T.red } }, m.product ? `→ ${m.product.name}` : "No matching product")
+            )
+          ))
+        ),
+        E("div", { style: { display: "flex", gap: 8, marginTop: 12, alignItems: "center" } },
+          E(Btn, { variant: "ghost", onClick: () => { bulkPhotoMatches.forEach(m=>URL.revokeObjectURL(m.previewUrl)); setBulkPhotoMatches(null); }, disabled: bulkPhotoBusy }, "Cancel"),
+          E(Btn, { onClick: applyBulkPhotos, disabled: bulkPhotoBusy }, bulkPhotoBusy ? "Uploading…" : "✅ Upload & Link Photos"),
+          bulkPhotoProgress && E("span", { style: { fontSize: 12, color: T.muted } }, `${bulkPhotoProgress.done}/${bulkPhotoProgress.total}`)
+        )
+      )
+    )
   );
 }
 
