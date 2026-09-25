@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>The Phone Plug — Stock Checker</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <style>
   :root {
     --black: #080c10;
@@ -25,8 +27,8 @@
   .header-logo img { height: 48px; width: auto; object-fit: contain; filter: drop-shadow(0 0 14px rgba(41,181,232,0.5)); }
   .header-tagline { border-left: 1px solid rgba(41,181,232,0.25); padding-left: 14px; }
   .header-tagline .line1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.8rem; font-weight: 700; color: var(--cyan); letter-spacing: 0.08em; text-transform: uppercase; }
-  .header-tagline .line2 { font-size: 0.7rem; color: rgba(255,255,255,0.35); margin-top: 2px; }
-  .header-right { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: rgba(255,255,255,0.4); }
+  .header-tagline .line2 { font-size: 0.7rem; color: rgba(255,255,255,0.65); margin-top: 2px; }
+  .header-right { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: rgba(255,255,255,0.65); font-weight: 500; }
   .live-dot { width: 7px; height: 7px; background: var(--cyan); border-radius: 50%; animation: blink 2s infinite; box-shadow: 0 0 8px var(--cyan); }
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
   .hero { position: relative; z-index: 1; padding: 3.5rem 2rem 0; text-align: center; overflow: hidden; }
@@ -44,19 +46,19 @@
   .hero-badge::before { content: ''; width: 5px; height: 5px; background: var(--cyan); border-radius: 50%; box-shadow: 0 0 6px var(--cyan); animation: blink 2s infinite; }
   .hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 2.75rem; font-weight: 700; color: var(--white); letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 0.75rem; }
   .hero h1 span { color: var(--cyan); text-shadow: 0 0 40px rgba(41,181,232,0.5); }
-  .hero-sub { font-size: 0.95rem; color: rgba(255,255,255,0.5); max-width: 420px; margin: 0 auto 2.5rem; }
+  .hero-sub { font-size: 0.95rem; color: rgba(255,255,255,0.75); max-width: 420px; margin: 0 auto 2.5rem; }
   .feature-strip { display: flex; justify-content: center; border-top: 1px solid rgba(41,181,232,0.1); border-bottom: 1px solid rgba(41,181,232,0.1); background: rgba(41,181,232,0.03); margin: 0 -2rem; }
-  .feature-item { display: flex; align-items: center; gap: 8px; padding: 0.875rem 1.5rem; border-right: 1px solid rgba(41,181,232,0.1); font-size: 0.75rem; color: rgba(255,255,255,0.4); flex: 1; justify-content: center; }
+  .feature-item { display: flex; align-items: center; gap: 8px; padding: 0.875rem 1.5rem; border-right: 1px solid rgba(41,181,232,0.1); font-size: 0.75rem; color: rgba(255,255,255,0.68); flex: 1; justify-content: center; }
   .feature-item:last-child { border-right: none; }
   .feature-item svg { color: var(--cyan); flex-shrink: 0; }
-  .feature-item strong { color: rgba(255,255,255,0.7); display: block; font-size: 0.78rem; }
+  .feature-item strong { color: rgba(255,255,255,0.92); display: block; font-size: 0.78rem; font-weight: 600; }
   main { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
   .search-instruction { font-size: 1rem; font-weight: 700; color: #ffffff; margin-bottom: 0.75rem; letter-spacing: 0.01em; }
   .search-row { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .search-wrap { flex: 1; min-width: 200px; position: relative; }
   .search-wrap input { width: 100%; background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px 13px 44px; font-family: 'Inter',sans-serif; font-size: 0.9rem; color: var(--white); outline: none; transition: all 0.2s; }
   .search-wrap input:focus { border-color: var(--cyan); background: rgba(41,181,232,0.05); box-shadow: 0 0 0 3px rgba(41,181,232,0.1); }
-  .search-wrap input::placeholder { color: rgba(255,255,255,0.2); }
+  .search-wrap input::placeholder { color: rgba(255,255,255,0.4); }
   .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.3); }
   select { background: var(--black-3); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 13px 14px; font-family: 'Inter',sans-serif; font-size: 0.875rem; color: var(--white); outline: none; cursor: pointer; transition: border-color 0.2s; }
   select:focus { border-color: var(--cyan); }
@@ -77,18 +79,18 @@
   .badge.in { background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.2); }
   .badge.out { background: rgba(231,76,60,0.12); color: #e74c3c; border: 1px solid rgba(231,76,60,0.2); }
   .card-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-  .meta-tag { font-size: 0.68rem; color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.06); }
+  .meta-tag { font-size: 0.7rem; font-weight: 600; color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08); padding: 3px 9px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.1); }
   .price-tag { font-size: 0.75rem; font-weight: 600; color: #2ecc71; background: rgba(46,204,113,0.08); padding: 3px 10px; border-radius: 5px; border: 1px solid rgba(46,204,113,0.25); }
   .variants { padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
   .variant-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; }
-  .variant-name { color: rgba(255,255,255,0.6); }
+  .variant-name { color: rgba(255,255,255,0.85); font-weight: 500; }
   .card-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid rgba(41,181,232,0.15); }
   .card-cta { font-size: 0.78rem; font-weight: 600; color: #ffffff; display: flex; align-items: center; gap: 6px; }
   .card-cta::before { content: '📞'; font-size: 0.75rem; }
   .wa-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; background: #25D366; color: #ffffff; font-family: 'Inter', sans-serif; font-size: 0.82rem; font-weight: 600; border-radius: 99px; text-decoration: none; transition: background 0.2s, transform 0.15s; align-self: flex-start; }
   .wa-btn:hover { background: #1ebe5d; transform: translateY(-1px); }
   .wa-btn svg { flex-shrink: 0; }
-  .loading-state { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.3); font-size: 0.875rem; }
+  .loading-state { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 5rem 1rem; color: rgba(255,255,255,0.55); font-size: 0.875rem; }
   .spinner { width: 30px; height: 30px; border: 2px solid rgba(255,255,255,0.08); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.75s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .prompt-state { text-align: center; padding: 3rem 1rem; }
@@ -96,22 +98,22 @@
   .prompt-phone::before { content: ''; width: 18px; height: 3px; background: rgba(41,181,232,0.3); border-radius: 99px; position: absolute; top: 8px; }
   .prompt-phone::after { content: ''; width: 14px; height: 2px; background: rgba(41,181,232,0.2); border-radius: 99px; position: absolute; bottom: 8px; }
   .prompt-phone-icon { font-size: 1.5rem; }
-  .prompt-state strong { color: rgba(255,255,255,0.6); font-size: 0.95rem; display: block; margin-bottom: 0.4rem; }
-  .prompt-state p { color: rgba(255,255,255,0.25); font-size: 0.825rem; }
-  .empty-state { text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.25); font-size: 0.875rem; }
+  .prompt-state strong { color: rgba(255,255,255,0.85); font-size: 0.95rem; display: block; margin-bottom: 0.4rem; }
+  .prompt-state p { color: rgba(255,255,255,0.55); font-size: 0.825rem; }
+  .empty-state { text-align: center; padding: 4rem 1rem; color: rgba(255,255,255,0.55); font-size: 0.875rem; }
   .error-box { background: rgba(197,34,31,0.1); border: 1px solid rgba(197,34,31,0.3); border-radius: var(--radius); padding: 0.875rem 1.25rem; color: #e74c3c; font-size: 0.825rem; margin-bottom: 1.25rem; }
-  .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.2); margin-top: 1.5rem; }
+  .last-sync { text-align: right; font-size: 0.7rem; color: rgba(255,255,255,0.45); margin-top: 1.5rem; }
   .contact { position: relative; z-index: 1; background: var(--black-3); border-top: 1px solid rgba(41,181,232,0.15); padding: 2.5rem 2rem; }
   .contact-inner { max-width: 900px; margin: 0 auto; }
   .contact-top { display: flex; align-items: center; gap: 14px; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .contact-logo img { height: 36px; filter: drop-shadow(0 0 8px rgba(41,181,232,0.3)); }
   .contact-top-text .t1 { font-family: 'Space Grotesk', sans-serif; font-size: 0.9rem; font-weight: 600; color: #ffffff; }
-  .contact-top-text .t2 { font-size: 0.75rem; color: rgba(255,255,255,0.3); margin-top: 2px; }
+  .contact-top-text .t2 { font-size: 0.75rem; color: rgba(255,255,255,0.55); margin-top: 2px; }
   .contact h3 { font-family: 'Space Grotesk', sans-serif; font-weight: 600; color: var(--cyan); letter-spacing: 0.05em; text-transform: uppercase; font-size: 0.72rem; margin-bottom: 1rem; }
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
   .contact-item { display: flex; align-items: center; gap: 12px; }
   .contact-icon { width: 36px; height: 36px; background: rgba(41,181,232,0.1); border: 1px solid rgba(41,181,232,0.2); border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--cyan); }
-  .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.3); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .contact-label { font-size: 0.68rem; color: rgba(255,255,255,0.55); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
   .contact-value { font-size: 0.85rem; color: #ffffff; font-weight: 600; }
   footer { position: relative; z-index: 1; background: var(--black); border-top: 1px solid rgba(255,255,255,0.04); text-align: center; padding: 1.5rem; font-size: 0.72rem; color: rgba(255,255,255,0.12); }
   footer span { color: var(--cyan); opacity: 0.5; }
@@ -270,38 +272,129 @@
 <footer>&copy; 2026 <span>The Phone Plug</span> &nbsp;&middot;&nbsp; Jamaica's go to for phone accessories and parts &nbsp;&middot;&nbsp; Stock updates automatically</footer>
 
 <script>
+  // ── Firebase (same project as the Phone Plug management app) ─────────────
+  firebase.initializeApp({
+    apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
+    authDomain: "phone-plug-3a7fe.firebaseapp.com",
+    projectId: "phone-plug-3a7fe",
+    storageBucket: "phone-plug-3a7fe.firebasestorage.app",
+    messagingSenderId: "847520590345",
+    appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
+  });
+  const _db = firebase.firestore();
+
+  const load = async key => {
+    try {
+      const s = await _db.collection('tpp').doc(key).get();
+      return s.exists ? s.data().v : null;
+    } catch (e) {
+      console.error("FB load:", e);
+      return null;
+    }
+  };
+  const loadArr = async key => {
+    const v = await load(key);
+    return Array.isArray(v) ? v : [];
+  };
+  // Product catalog is stored either as one array ("tpp-products") or, once it grows past
+  // ~100 items, chunked ("tpp-products-meta" + "tpp-products-chunk-N") — same pattern the
+  // management app uses, so this reads it back exactly the same way.
+  const loadAllProducts = async () => {
+    const meta = await load("tpp-products-meta");
+    if (meta && meta.chunks) {
+      const all = [];
+      for (let i = 0; i < meta.chunks; i++) {
+        const chunk = await load(`tpp-products-chunk-${i}`);
+        if (Array.isArray(chunk)) all.push(...chunk);
+      }
+      return all;
+    }
+    return await loadArr("tpp-products");
+  };
+
+  // Cloudinary can resize on the fly — same transform the management app uses for thumbnails.
+  const cloudinaryThumb = (url, size = 100) => {
+    if (!url || !url.includes("/upload/")) return url;
+    return url.replace("/upload/", `/upload/w_${size},h_${size},c_fill,g_auto,q_auto,f_auto/`);
+  };
+
+  // Only these catalog categories are shown here (matches what customers browse in-store).
   const ALLOWED_CATEGORIES = [
     "Accessories- Samsung",
     "Accessories- Apple",
     "Accessories - Samsung Cases"
   ];
 
-  let allItems = [], inventoryMap = {}, loaded = false;
+  // Same base-name / model-variant pattern the management app uses for its photo matching:
+  // "3 in 1 Heavy Duty Case Clear — S10" groups with "...— S10+" under one base-name card.
+  const splitVariantName = (name) => {
+    const m = String(name || "").match(/^(.*?)\s[-–—]\s(.+)$/);
+    return m ? { base: m[1].trim(), variant: m[2].trim() } : { base: String(name || "").trim(), variant: null };
+  };
 
-  function getQty(variantId) {
-    return inventoryMap[variantId] !== undefined ? inventoryMap[variantId] : 999;
-  }
+  let allItems = [], loaded = false;
 
-  function getItemQty(item) {
-    return (item.variants || []).reduce((sum, v) => sum + getQty(v.variant_id), 0);
-  }
+  function buildDisplayItems(products) {
+    const accessories = products.filter(p =>
+      ALLOWED_CATEGORIES.some(c => c.toLowerCase() === String(p.category || "").toLowerCase())
+    );
+    const groups = new Map();
+    const standalone = [];
+    accessories.forEach(p => {
+      const { base, variant } = splitVariantName(p.name);
+      if (variant) {
+        const key = base.toLowerCase();
+        if (!groups.has(key)) groups.set(key, { name: base, category: p.category, sku: p.sku, products: [] });
+        groups.get(key).products.push({ ...p, variantLabel: variant });
+      } else {
+        standalone.push(p);
+      }
+    });
 
-  function getImage(item) {
-    if (item.images && Array.isArray(item.images) && item.images.length > 0) {
-      const img = item.images[0];
-      if (typeof img === 'string') return img;
-      if (img.image_url) return img.image_url;
-      if (img.url) return img.url;
-      if (img.src) return img.src;
-    }
-    if (item.image_url) return item.image_url;
-    if (item.image) return item.image;
-    return null;
+    const items = [];
+    groups.forEach(g => {
+      // If only one product ended up in a "group" (no sibling variants), treat it as standalone
+      // but keep its full name (base — model) rather than dropping the model off the card.
+      if (g.products.length < 2) {
+        const p = g.products[0];
+        items.push({
+          name: p.name, category: p.category, sku: p.sku || "",
+          image: p.image || null,
+          minPrice: p.price || 0, maxPrice: p.price || 0,
+          totalQty: p.stock || 0,
+          variants: null
+        });
+        return;
+      }
+      const withImage = g.products.find(p => p.image);
+      const inStockPrices = g.products.filter(p => (p.stock || 0) > 0).map(p => parseFloat(p.price) || 0).filter(x => x > 0);
+      items.push({
+        name: g.name,
+        category: g.category,
+        sku: g.products[0].sku || "",
+        image: withImage ? withImage.image : null,
+        minPrice: inStockPrices.length ? Math.min(...inStockPrices) : 0,
+        maxPrice: inStockPrices.length ? Math.max(...inStockPrices) : 0,
+        totalQty: g.products.reduce((s, p) => s + (p.stock || 0), 0),
+        variants: g.products.map(p => ({ label: p.variantLabel, qty: p.stock || 0 }))
+      });
+    });
+    standalone.forEach(p => {
+      items.push({
+        name: p.name, category: p.category, sku: p.sku || "",
+        image: p.image || null,
+        minPrice: p.price || 0, maxPrice: p.price || 0,
+        totalQty: p.stock || 0,
+        variants: null
+      });
+    });
+    return items;
   }
 
   function cardImageHtml(item) {
     if (item.image) {
-      return '<div class="card-img-wrap"><img class="card-img" src="' + esc(item.image) + '" alt="' + esc(item.name) + '" onerror="this.parentNode.innerHTML=\'<div class=card-img-placeholder>📱</div>\'"></div>';
+      const src = cloudinaryThumb(item.image, 400);
+      return '<div class="card-img-wrap"><img class="card-img" src="' + esc(src) + '" alt="' + esc(item.name) + '" onerror="this.parentNode.innerHTML=\'<div class=card-img-placeholder>📱</div>\'"></div>';
     }
     return '<div class="card-img-wrap"><div class="card-img-placeholder">📱</div></div>';
   }
@@ -333,7 +426,7 @@
   function buildCard(item) {
     const imgHtml = cardImageHtml(item);
     const hasVariants = item.variants && item.variants.length > 1;
-    const totalQty = getItemQty(item);
+    const totalQty = item.totalQty || 0;
 
     if (totalQty <= 0) {
       return '<div class="card">' +
@@ -345,9 +438,9 @@
     }
 
     if (hasVariants) {
-      const inStockVariants = item.variants.filter(v => getQty(v.variant_id) > 0);
+      const inStockVariants = item.variants.filter(v => v.qty > 0);
       const varRows = inStockVariants.map(v => {
-        return '<div class="variant-row"><span class="variant-name">' + esc(v.option1_value || v.option2_value || 'Variant') + '</span><span class="badge in">In stock</span></div>';
+        return '<div class="variant-row"><span class="variant-name">' + esc(v.label || 'Variant') + '</span><span class="badge in">In stock</span></div>';
       }).join('');
       return '<div class="card">' +
         '<div class="card-body">' +
@@ -385,11 +478,8 @@
 
     let filtered = allItems.filter(item => {
       const variantMatch = (item.variants || []).some(v => {
-        const v1 = (v.option1_value || '').toLowerCase().trim();
-        const v2 = (v.option2_value || '').toLowerCase().trim();
-        const nameMatch = v1 === q || v2 === q;
-        const inStock = getQty(v.variant_id) > 0;
-        return nameMatch && inStock;
+        const vName = (v.label || '').toLowerCase().trim();
+        return vName === q && v.qty > 0;
       });
       const cleanName = item.name.toLowerCase().replace(/\./g, '');
       const matchQ = cleanName.includes(cleanQ) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
@@ -431,46 +521,9 @@
     document.getElementById('grid').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading inventory&hellip;</p></div>';
     document.getElementById('error-area').innerHTML = '';
     try {
-      const [itemsRes, storesRes, catsRes] = await Promise.all([
-        fetch('/api/loyverse?path=items'),
-        fetch('/api/loyverse?path=stores'),
-        fetch('/api/loyverse?path=categories')
-      ]);
-      if (!itemsRes.ok) throw new Error('API error ' + itemsRes.status + '. Check LOYVERSE_TOKEN in Vercel.');
-      const itemsData = await itemsRes.json();
-      const storesData = storesRes.ok ? await storesRes.json() : null;
-      const catsData = catsRes.ok ? await catsRes.json() : { categories: [] };
-      const catMap = {};
-      (catsData.categories || []).forEach(c => { catMap[c.id] = c.name; });
-      const storeId = storesData && storesData.stores && storesData.stores[0] ? storesData.stores[0].id : '';
-      const invRes = await fetch('/api/loyverse?path=inventory' + (storeId ? '&store_id=' + storeId : ''));
-      const invData = invRes.ok ? await invRes.json() : { inventory_levels: [] };
-      inventoryMap = {};
-      (invData.inventory_levels || []).forEach(l => {
-        inventoryMap[l.variant_id] = (l.in_stock === null || l.in_stock === undefined) ? 999 : l.in_stock;
-      });
-      allItems = (itemsData.items || [])
-        .map(item => {
-          const catName = catMap[item.category_id] || item.category_name || '';
-          // Only use IN STOCK variant prices to avoid inflated ranges
-          const prices = (item.variants || [])
-            .filter(v => (inventoryMap[v.variant_id] === undefined || inventoryMap[v.variant_id] > 0))
-            .map(v => parseFloat(v.price || v.default_price || 0))
-            .filter(p => p > 0);
-          const minPrice = prices.length ? Math.min(...prices) : 0;
-          const maxPrice = prices.length ? Math.max(...prices) : 0;
-          return {
-            id: item.id,
-            name: item.item_name,
-            category: catName,
-            sku: (item.variants && item.variants[0] && item.variants[0].sku) || '',
-            image: getImage(item),
-            variants: item.variants || [],
-            minPrice: minPrice,
-            maxPrice: maxPrice
-          };
-        })
-        .filter(item => ALLOWED_CATEGORIES.some(c => c.toLowerCase() === item.category.toLowerCase()));
+      const products = await loadAllProducts();
+      if (!Array.isArray(products)) throw new Error('Could not read the catalog. Please try again shortly.');
+      allItems = buildDisplayItems(products);
       loaded = true;
       populateCats();
       showPrompt();
