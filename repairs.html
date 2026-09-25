@@ -220,15 +220,15 @@ function App() {
             <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:64, width:"auto", objectFit:"contain", flexShrink:0 }} />
             <div>
               <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color:"#FFFFFF", letterSpacing:-0.3, lineHeight:1 }}>THE PHONE PLUG</div>
-              <div style={{ fontSize:11, color:"rgba(255,255,255,0.88)", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase", fontWeight:600 }}>Repair · Accessories · Smartphones</div>
+              <div style={{ fontSize:11, color:"#ffffff", marginTop:5, letterSpacing:"0.5px", textTransform:"uppercase", fontWeight:600 }}>Repair · Accessories · Smartphones</div>
             </div>
           </div>
 
           {/* Contact row */}
           <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", justifyContent:"space-between", gap:10, padding:"12px 0" }}>
             <div style={{ display:"flex", gap:16, flexWrap:"wrap" }}>
-              <a href={`tel:${PHONE_1.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.7)", textDecoration:"none" }}>📞 {PHONE_1}</a>
-              <a href={`tel:${PHONE_2.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.7)", textDecoration:"none" }}>📞 {PHONE_2}</a>
+              <a href={`tel:${PHONE_1.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.92)", textDecoration:"none", fontWeight:500 }}>📞 {PHONE_1}</a>
+              <a href={`tel:${PHONE_2.replace(/-/g,"")}`} style={{ fontSize:13, color:"rgba(255,255,255,0.92)", textDecoration:"none", fontWeight:500 }}>📞 {PHONE_2}</a>
             </div>
             <div style={{ display:"flex", gap:16 }}>
               <a href="https://instagram.com/phoneplug_ja" target="_blank" rel="noopener noreferrer" style={{ display:"inline-flex", alignItems:"center", gap:6, fontSize:13, color:"#E4405F", textDecoration:"none", fontWeight:600 }}>
@@ -243,7 +243,7 @@ function App() {
           </div>
 
           {/* Address */}
-          <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.8)" }}>
+          <div style={{ paddingBottom:4, fontSize:12, color:"rgba(255,255,255,0.92)" }}>
             📍 {ADDRESS}
           </div>
 
@@ -254,7 +254,7 @@ function App() {
               { label:"🔍 Track Repair",  href:"/repairs.html", active:true },
               { label:"🔧 Book a Repair", href:"/book-repair.html" },
             ].map(t => (
-              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "rgba(255,255,255,0.88)", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
+              <a key={t.href} href={t.href} style={{ fontSize:13, fontWeight:600, padding:"7px 14px", borderRadius:8, textDecoration:"none", background: t.active ? "rgba(26,86,219,0.12)" : "transparent", color: t.active ? "#60A5FA" : "#ffffff", border: t.active ? "1px solid rgba(26,86,219,0.3)" : "1px solid transparent" }}>
                 {t.label}
               </a>
             ))}
