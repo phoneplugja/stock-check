@@ -345,6 +345,7 @@ function App() {
         .tpp-btn:active{transform:translateY(0);}
         @media (max-width:640px){ .tpp-wordmark{display:none;} .tpp-cta-text{display:none;} .tpp-nav{display:none;} }
         .tpp-tabbar{ display:none; }
+        .tpp-quick-actions{ display:none; }
         @media (max-width:640px){
           .tpp-tabbar{ display:flex; position:fixed; bottom:0; left:0; right:0; z-index:200; background:rgba(8,12,16,0.97); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); border-top:1px solid rgba(41,181,232,0.18); padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
           .tpp-mtab{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; padding:6px 2px; text-decoration:none; color:rgba(255,255,255,0.55); font-size:10.5px; font-weight:600; line-height:1.15; text-align:center; border-radius:12px; transition:color .2s, background .2s; }
@@ -358,7 +359,6 @@ function App() {
           .tpp-qa-whatsapp{ background:#25D366; color:#fff; }
           .tpp-qa-directions{ background:${T.accentSoft}; color:${T.accent}; border:1px solid ${T.accentBorder}; }
         }
-        .tpp-quick-actions{ display:none; }
       `}</style>
 
       <Header active="track" />
