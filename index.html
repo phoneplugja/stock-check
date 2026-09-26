@@ -5,9 +5,84 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="format-detection" content="telephone=no">
 <title>The Phone Plug — Stock Checker</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<style>
+  /* ── Spin & Win promo banner + first-visit popup ───────────────────────────
+     Plain HTML/CSS/JS, independent of the rest of the page — same widget as
+     book-repair.html so it stays consistent across the site. */
+  :root{ --tpp-promo-gradient: linear-gradient(115deg, #0e88bd 0%, #4f9ff5 32%, #7c5cff 68%, #fb5f8a 100%); }
+  #tpp-spin-banner{
+    /* Not sticky on purpose — the <header> below is already sticky at z-index:100,
+       and stacking two sticky bars fights for the same top-of-viewport slot. */
+    position:relative; z-index:1;
+    display:flex; align-items:center; justify-content:center; gap:16px;
+    background:var(--tpp-promo-gradient); background-size:180% 180%;
+    animation:tpp-drift 12s ease-in-out infinite;
+    color:#fff; padding:12px 18px; text-align:center; flex-wrap:wrap;
+    box-shadow:0 6px 20px -8px rgba(76,60,220,0.45);
+    font-family:'Inter',sans-serif;
+  }
+  @keyframes tpp-drift{ 0%,100%{ background-position:0% 50%; } 50%{ background-position:100% 50%; } }
+  #tpp-spin-banner .tpp-badge{ width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,0.22); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  #tpp-spin-banner .tpp-copy{ font-size:13.5px; font-weight:600; letter-spacing:.005em; }
+  #tpp-spin-banner .tpp-copy b{ font-family:'Space Grotesk',sans-serif; font-weight:700; }
+  #tpp-spin-banner .tpp-spin-cta{
+    display:inline-flex; align-items:center; gap:6px;
+    background:#fff; color:#3d2f8f; border:none; border-radius:999px;
+    padding:8px 16px 8px 14px; font-size:12.5px; font-weight:800; cursor:pointer;
+    font-family:inherit; text-decoration:none; white-space:nowrap;
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  #tpp-spin-banner .tpp-spin-cta:hover{ transform:translateY(-1px); box-shadow:0 8px 18px -6px rgba(0,0,0,0.25); }
+
+  #tpp-spin-overlay{
+    position:fixed; inset:0; background:rgba(8,10,20,0.6); backdrop-filter:blur(3px);
+    display:flex; align-items:center; justify-content:center; z-index:200;
+    padding:20px; opacity:0; pointer-events:none; transition:opacity .3s ease;
+    font-family:'Inter',sans-serif;
+  }
+  #tpp-spin-overlay.show{ opacity:1; pointer-events:auto; }
+  #tpp-spin-modal{
+    background:#fff; border-radius:28px; max-width:380px; width:100%;
+    padding:0; text-align:center; position:relative; overflow:hidden;
+    box-shadow:0 40px 80px -24px rgba(15,23,42,0.5);
+    transform:translateY(10px) scale(.97); transition:transform .3s cubic-bezier(.2,.8,.2,1);
+  }
+  #tpp-spin-overlay.show #tpp-spin-modal{ transform:translateY(0) scale(1); }
+  .tpp-spin-hero{ position:relative; background:var(--tpp-promo-gradient); background-size:180% 180%; animation:tpp-drift 12s ease-in-out infinite; padding:36px 26px 46px; overflow:hidden; }
+  .tpp-spin-hero::before, .tpp-spin-hero::after{ content:""; position:absolute; border-radius:50%; background:rgba(255,255,255,0.14); }
+  .tpp-spin-hero::before{ width:140px; height:140px; top:-60px; right:-40px; }
+  .tpp-spin-hero::after{ width:90px; height:90px; bottom:-50px; left:-30px; }
+  #tpp-spin-close{
+    position:absolute; top:14px; right:14px; z-index:2;
+    width:30px; height:30px; border-radius:50%;
+    border:none; background:rgba(255,255,255,0.25); color:#fff; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-family:inherit;
+    transition:background .15s;
+  }
+  #tpp-spin-close:hover{ background:rgba(255,255,255,0.4); }
+  .tpp-spin-iconwrap{ position:relative; width:66px; height:66px; margin:0 auto 14px; }
+  .tpp-spin-ring{ position:absolute; inset:0; border-radius:50%; border:2px solid rgba(255,255,255,0.55); animation:tpp-pulse 2.2s ease-out infinite; }
+  @keyframes tpp-pulse{ 0%{ transform:scale(0.85); opacity:.9; } 100%{ transform:scale(1.55); opacity:0; } }
+  .tpp-spin-badge{ position:relative; width:66px; height:66px; border-radius:50%; background:rgba(255,255,255,0.2); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; }
+  .tpp-spin-eyebrow{ display:inline-block; background:rgba(255,255,255,0.22); color:#fff; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; padding:5px 12px; border-radius:999px; margin-bottom:10px; }
+  .tpp-spin-title{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color:#fff; letter-spacing:-0.01em; line-height:1.25; position:relative; z-index:1; }
+  .tpp-spin-body{ padding:22px 26px 28px; }
+  .tpp-spin-sub{ font-size:14px; color:#64748b; line-height:1.6; margin-bottom:20px; }
+  .tpp-spin-sub b{ color:#0f172a; }
+  .tpp-spin-btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; background:linear-gradient(135deg,#7c5cff,#0e88bd);
+    color:#fff; border:none; border-radius:14px; padding:15px 20px; font-size:15px;
+    font-family:'Space Grotesk',sans-serif; font-weight:700; cursor:pointer; text-decoration:none;
+    box-shadow:0 14px 28px -10px rgba(76,60,220,0.55);
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .tpp-spin-btn:hover{ transform:translateY(-2px); box-shadow:0 18px 34px -10px rgba(76,60,220,0.6); }
+  .tpp-spin-tag{ display:inline-flex; align-items:center; gap:6px; margin-top:14px; font-size:11.5px; font-weight:600; color:#94a3b8; }
+</style>
 <style>
   :root {
     --black: #080c10;
@@ -161,6 +236,82 @@
 </style>
 </head>
 <body>
+
+  <!-- ═══ Spin & Win — promo banner ═══ -->
+  <div id="tpp-spin-banner">
+    <span class="tpp-badge">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="display:block"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="#fff"/></svg>
+    </span>
+    <span class="tpp-copy"><b>Intro Offer:</b> Spin the wheel — win <b>10–25% off</b> your next repair</span>
+    <a href="/spin-wheel.html" class="tpp-spin-cta">
+      Spin Now
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#3d2f8f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+  </div>
+
+  <!-- ═══ Spin & Win — first-visit popup ═══ -->
+  <div id="tpp-spin-overlay">
+    <div id="tpp-spin-modal">
+      <div class="tpp-spin-hero">
+        <button id="tpp-spin-close" aria-label="Close">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </button>
+        <div class="tpp-spin-iconwrap">
+          <span class="tpp-spin-ring"></span>
+          <span class="tpp-spin-badge">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="#fff"/></svg>
+          </span>
+        </div>
+        <div class="tpp-spin-eyebrow">New Shop · Intro Offer</div>
+        <div class="tpp-spin-title">Win 10–25% off<br/>your next repair</div>
+      </div>
+      <div class="tpp-spin-body">
+        <div class="tpp-spin-sub">One spin, one guaranteed prize — <b>every spin wins something</b>, up to JMD $1,500 off. Takes about 10 seconds.</div>
+        <a href="/spin-wheel.html" class="tpp-spin-btn">
+          Spin the Wheel
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <div class="tpp-spin-tag">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 2 2 8.5l10 6.5 10-6.5L12 2Z" stroke="#94a3b8" stroke-width="1.6" stroke-linejoin="round"/><path d="M2 15.5 12 22l10-6.5M2 12l10 6.5L22 12" stroke="#94a3b8" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span>Celebrating our launch — while the intro offer lasts</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // Set the real go-live date once the promo starts, then leave this alone — the
+      // banner and popup both quietly retire themselves 6 months after it, no manual
+      // takedown needed. No end date is shown to customers on purpose (keeps it reading
+      // as an open-ended "we're new" intro offer rather than a countdown).
+      var PROMO_START = new Date("2026-09-26");
+      var PROMO_END = new Date(PROMO_START.getTime());
+      PROMO_END.setMonth(PROMO_END.getMonth() + 6);
+
+      if (new Date() > PROMO_END) {
+        var b = document.getElementById("tpp-spin-banner");
+        var o = document.getElementById("tpp-spin-overlay");
+        if (b) b.remove();
+        if (o) o.remove();
+      } else {
+        var SEEN_KEY = "tpp-spin-popup-seen";
+        var overlay = document.getElementById("tpp-spin-overlay");
+        var closeBtn = document.getElementById("tpp-spin-close");
+        function openPopup() { overlay.classList.add("show"); }
+        function closePopup() {
+          overlay.classList.remove("show");
+          try { localStorage.setItem(SEEN_KEY, "1"); } catch (e) {}
+        }
+        var alreadySeen = false;
+        try { alreadySeen = !!localStorage.getItem(SEEN_KEY); } catch (e) {}
+        if (!alreadySeen) setTimeout(openPopup, 900);
+        closeBtn.addEventListener("click", closePopup);
+        overlay.addEventListener("click", function (e) { if (e.target === overlay) closePopup(); });
+        document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePopup(); });
+      }
+    })();
+  </script>
 
 <header>
   <div class="header-brand">
