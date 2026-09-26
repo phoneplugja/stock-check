@@ -500,13 +500,6 @@
       return (
         <footer style={{ background:"#0d1117", borderTop:"1px solid rgba(41,181,232,0.15)", padding:"2.5rem 20px 2rem" }}>
           <div style={{ maxWidth:900, margin:"0 auto" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:26, paddingBottom:26, borderBottom:"1px solid rgba(255,255,255,0.07)" }}>
-              <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:34, filter:"drop-shadow(0 0 8px rgba(41,181,232,0.3))" }} />
-              <div>
-                <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:700, fontSize:14, color:"#fff" }}>The Phone Plug</div>
-                <div style={{ fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:2 }}>Repair · Accessories · Smartphones</div>
-              </div>
-            </div>
             <div style={{ fontSize:11, fontWeight:700, color:"#29b5e8", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:18 }}>Contact &amp; Support</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:18, marginBottom:26 }}>
               <a href={`tel:${PHONE_1.replace(/-/g,"")}`} style={{ display:"flex", alignItems:"center", gap:12, textDecoration:"none" }}>
@@ -542,6 +535,13 @@
               </div>
               <div><div style={lbl}>Visit Us</div><div style={val}>{ADDRESS}</div></div>
             </a>
+            <div style={{ display:"flex", alignItems:"center", gap:14, marginTop:26, paddingTop:22, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+              <img src={LOGO_SRC} alt="The Phone Plug" style={{ height:34, filter:"drop-shadow(0 0 8px rgba(41,181,232,0.3))" }} />
+              <div>
+                <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontWeight:700, fontSize:14, color:"#fff" }}>The Phone Plug</div>
+                <div style={{ fontSize:12, color:"rgba(255,255,255,0.55)", marginTop:2 }}>Repair · Accessories · Smartphones</div>
+              </div>
+            </div>
           </div>
         </footer>
       );
