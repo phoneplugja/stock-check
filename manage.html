@@ -3742,10 +3742,29 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
       }
     }
     setStage("saving");
-    const ex = await loadArr("tpp-phones");
-    const newEntries = phones.map(p => ({ ...p, imei: String(p.imei).replace(/\s/g,""), createdAt: new Date().toISOString() }));
-    await save("tpp-phones", [...newEntries, ...ex]);
-    alert(`✅ ${phones.length} phone(s) added to inventory!`);
+    // A scanned invoice is inventory being ordered, not inventory already in hand — so this creates
+    // a Purchase Order (status "Ordered") instead of writing phones straight in as "Available".
+    // Each phone becomes its own PO line (qty 1) carrying the IMEI the AI already read, so when
+    // staff receive this PO in Purchases → Receive Stock, the IMEI is pre-filled and the normal
+    // "flag for testing" step still applies before anything becomes sellable.
+    const lines = phones.map((p, i) => ({
+      id: `${Date.now()}-${i}`,
+      name: `${p.make||""} ${p.model||""} ${p.storage||""} ${p.color||""}`.replace(/\s+/g," ").trim(),
+      category: p.catalogCategory || guessCatalogCategory(p.make),
+      qty: 1,
+      unitCost: parseFloat(p.total_invoice) || 0,
+      imeis: [String(p.imei).replace(/\s/g,"")]
+    }));
+    const supplier = phones.find(p=>p.supplier)?.supplier || phones.find(p=>p.site)?.site || "AI Invoice Import";
+    const poRef = phones.find(p=>p.order_number)?.order_number || "";
+    const date = phones.find(p=>p.date)?.date || todayStr();
+    const paymentMethod = phones.find(p=>p.payment_method)?.payment_method || "Other";
+    await createPurchaseOrder({
+      supplier, poRef, date, currency: "JMD", paymentMethod,
+      notes: "Created automatically from the AI Invoice Scanner.",
+      lines, source: "ai-scan"
+    });
+    alert(`✅ Purchase Order created for ${phones.length} phone(s).\n\nGo to Purchases → Receive Stock to receive it into inventory — that's also where you can flag the units for testing before they go on sale.`);
     onDone();
   };
 
@@ -3918,6 +3937,12 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
           /*#__PURE__*/React.createElement(Input, { type:"number", value:p[key]||"", onChange:e=>updatePhone(i,key,e.target.value) })
         ))
       ),
+      /*#__PURE__*/React.createElement("div", { style:{marginBottom:10} },
+        /*#__PURE__*/React.createElement("label", { style:{fontSize:11,fontWeight:700,color:T.muted,display:"block",marginBottom:3} }, "Catalog Category (where this lands once received)"),
+        /*#__PURE__*/React.createElement(Sel, { value:p.catalogCategory||guessCatalogCategory(p.make), onChange:e=>updatePhone(i,"catalogCategory",e.target.value) },
+          IMEI_CATEGORIES.map(c => /*#__PURE__*/React.createElement("option", { key:c, value:c }, c))
+        )
+      ),
       /*#__PURE__*/React.createElement("div", { style:{background:"#EFF4FF",border:`1.5px solid ${T.blue}`,borderRadius:10,padding:"12px 14px"} },
         /*#__PURE__*/React.createElement("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8} },
           /*#__PURE__*/React.createElement("label", { style:{fontSize:12,fontWeight:700,color:T.blue} }, "📱 IMEI Number *"),
@@ -3953,7 +3978,7 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
 
   return /*#__PURE__*/React.createElement("div", { style:{textAlign:"center",padding:"60px 20px"} },
     /*#__PURE__*/React.createElement("div", { style:{fontSize:48,marginBottom:12} }, "💾"),
-    /*#__PURE__*/React.createElement("div", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,color:T.green} }, "Saving to inventory...")
+    /*#__PURE__*/React.createElement("div", { style:{fontFamily:"'Syne',sans-serif",fontWeight:800,color:T.green} }, "Creating Purchase Order...")
   );
 }
 
@@ -6212,6 +6237,46 @@ const getAvailableStock = (product) => {
   return product.stock || 0;
 };
 
+// Single place that actually creates a Purchase Order record: writes it as "Ordered" so it shows
+// up under the Purchases tab's Pending list, and logs the spend to Expenses. Anything that brings
+// stock into the business — a manually-entered PO or an AI-scanned invoice — should create a PO
+// through here, so every path into inventory goes PO Created → Received → Testing → Available,
+// with nothing able to skip straight to "in stock."
+async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD", shipping = 0, tax = 0, paymentMethod, notes = "", lines = [], source = "manual" }) {
+  const lineSubtotal = lines.reduce((s, l) => s + (parseFloat(l.unitCost) || 0) * (parseInt(l.qty) || 0), 0);
+  const invoiceTotal = lineSubtotal + (parseFloat(shipping) || 0) + (parseFloat(tax) || 0);
+  const record = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    supplier, poRef, date: date || todayStr(), currency,
+    shipping: parseFloat(shipping) || 0, tax: parseFloat(tax) || 0,
+    paymentMethod, notes, lines, invoiceTotal,
+    status: "Ordered", source, createdAt: new Date().toISOString()
+  };
+  const existingPOs = await loadArr("tpp-purchase-orders");
+  await save("tpp-purchase-orders", [record, ...existingPOs]);
+  try {
+    const allExp = await loadArr("tpp-expenses");
+    const expEntry = {
+      date: record.date, category: "Inventory Purchase", payment_method: paymentMethod,
+      amount: invoiceTotal,
+      details: `PO ${poRef || record.id} — ${supplier}${currency !== "JMD" ? ` (${currency})` : ""}`,
+      logged_by: "", source: "purchase_order", poId: record.id, createdAt: new Date().toISOString()
+    };
+    await save("tpp-expenses", [expEntry, ...allExp]);
+  } catch (e) { console.error("PO expense log error:", e); }
+  return record;
+}
+
+// AI-scanned invoices don't know the shop's catalog categories — this gives a reasonable default
+// (staff can still change the category once the PO is received) based on the make the AI read off
+// the invoice.
+const guessCatalogCategory = (make) => {
+  const m = (make || "").toLowerCase();
+  if (m.includes("apple") || m.includes("iphone")) return "Like New iPhones";
+  if (m.includes("samsung")) return "Like New Samsung";
+  return "New in box";
+};
+
 const saveCatalog = async (products) => {
   if (!products) return;
   if (products.length > 80) {
@@ -7283,7 +7348,7 @@ function CustomersTab() {
 // CSV import worked: export current records → edit in Excel/Sheets → re-import the same file
 // (old rows update in place by matching key, new rows get added). Each of the three is fully
 // independent — importing one never touches the other two.
-const PHONE_UNIT_STATUSES = ["Available", "Sold", "Under Testing", "Damaged"];
+const PHONE_UNIT_STATUSES = ["Available", "Sold", "Under Testing", "Needs Repair", "Returned to Supplier", "Damaged"];
 
 const parseCSVFile = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -7928,7 +7993,7 @@ function StaffShell({
       maxWidth: 960,
       margin: "0 auto"
     }
-  }, tab === "pos" && /*#__PURE__*/React.createElement(StaffPOS, { user: user }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: false }), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
+  }, tab === "pos" && /*#__PURE__*/React.createElement(StaffPOS, { user: user }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: false }), tab === "testing" && /*#__PURE__*/React.createElement(UnitTestingQueue, null), tab === "eod" && /*#__PURE__*/React.createElement(EodForm, {
     user: user
   }), tab === "expense" && /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(ExpenseForm, { user: user }),
@@ -8358,7 +8423,7 @@ function OwnerShell({
   }), tab === "rental" && /*#__PURE__*/React.createElement(RentalIncomeForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user }), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(ProductsTab, { data: data, user: user, fetchAll: fetchAll, updatePhones: updatePhones, archiveOldSales: archiveOldSales, initialSubTab: "testing" }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user }), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
 }
 
 
@@ -10883,27 +10948,14 @@ function PurchasesTab() {
     if (!po.supplier.trim()) { alert("Supplier required."); return; }
     if (!po.lines?.length) { alert("Add at least one line item."); return; }
     if (!po.paymentMethod) { alert("Select a payment method."); return; }
-    const record = {
-      id: Date.now().toString(), ...po,
-      shipping: shippingAmt, tax: taxAmt, invoiceTotal,
-      status: "Ordered", createdAt: new Date().toISOString()
-    };
-    const updated = [record, ...pos];
-    await save("tpp-purchase-orders", updated); setPos(updated);
-    // Log the PO spend as an expense so inventory-purchase money leaving the business actually
-    // flows into Expenses/EOD math — previously PO spend never touched Expenses at all.
-    try {
-      const allExp = await loadArr("tpp-expenses");
-      const expEntry = {
-        date: po.date || todayStr(), category: "Inventory Purchase", payment_method: po.paymentMethod,
-        amount: invoiceTotal,
-        details: `PO ${po.poRef || record.id} — ${po.supplier}${po.currency !== "JMD" ? ` (${po.currency})` : ""}`,
-        logged_by: "", source: "purchase_order", poId: record.id, createdAt: new Date().toISOString()
-      };
-      await save("tpp-expenses", [expEntry, ...allExp]);
-    } catch(e) { console.error("PO expense log error:", e); }
+    const record = await createPurchaseOrder({
+      supplier: po.supplier, poRef: po.poRef, date: po.date, currency: po.currency,
+      shipping: shippingAmt, tax: taxAmt, paymentMethod: po.paymentMethod, notes: po.notes,
+      lines: po.lines, source: "manual"
+    });
+    setPos([record, ...pos]);
     setPOS(emptyPO()); setView("pos");
-    alert(`✅ Purchase Order saved — ${fmtMoney(invoiceTotal)} ${po.currency}`);
+    alert(`✅ Purchase Order saved — ${fmtMoney(record.invoiceTotal)} ${po.currency}`);
   };
 
   const voidPO = async (id) => {
@@ -11137,7 +11189,9 @@ function ReceiveStockTab({ onCatalogUpdate }) {
     setReceiveLines((po.lines||[]).map(l=>({
       ...l,
       receivedQty: l.qty,
-      units: isImeiCategory(l.category) ? Array.from({length:l.qty},(_,i)=>({tempId:i,imei:"",status:"Available"})) : [],
+      // A line created from the AI Invoice Scanner already carries the IMEI(s) it read off the
+      // invoice (l.imeis) — pre-fill those instead of leaving staff to retype what was already extracted.
+      units: isImeiCategory(l.category) ? Array.from({length:l.qty},(_,i)=>({tempId:i,imei:(l.imeis&&l.imeis[i])||"",status:"Available"})) : [],
       matchedProductId: null,
       isNew: false,
       sellPrice: "",
@@ -11501,9 +11555,9 @@ const INVOICE_TYPES = [
   {id:"mixture",label:"🔀 Mixture",hint:"Mixed invoice"},
 ];
 
-function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
+function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, initialSubTab }) {
   const E = React.createElement;
-  const [subTab, setSubTab] = useState("catalog");
+  const [subTab, setSubTab] = useState(initialSubTab || "catalog");
   const [catalog, setCatalogState] = useState([]);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
 
@@ -11516,12 +11570,15 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
     setCatalogState(updated);
   };
 
+  const testingCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category) ? (p.units||[]).filter(u=>u.status==="Under Testing").length : 0), 0);
+
   const subTabs=[
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
+    {id:"testing",label:`🔬 Testing Queue${testingCount?` (${testingCount})`:""}`},
   ];
 
-  const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12}},
+  const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12,flexWrap:"wrap"}},
     subTabs.map(st=>E("button",{key:st.id,onClick:()=>setSubTab(st.id),style:{background:subTab===st.id?T.blue:"#F3F4F6",color:subTab===st.id?"#fff":T.muted,border:"none",borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},st.label))
   );
 
@@ -11529,78 +11586,142 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales }) {
 
   if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
+  if (subTab==="testing") return E("div",null,tabBar,E(UnitTestingQueue,{catalog,onCatalogUpdate:saveCatalogFn}));
 
   return null;
 }
 
 
-function PhoneTestingQueue({ phones, onUpdate }) {
+// ── Unit Testing Queue ────────────────────────────────────────────────────────
+// Operates on the catalog/units system (the same one POS, Purchases, and Receive Stock use),
+// not the legacy tpp-phones array — so a unit flagged "Under Testing" at receive time (whether the
+// PO was entered by hand or created by the AI Invoice Scanner) shows up here, and the only ways out
+// of this queue are: pass → Available (sellable), fail → Needs Repair, or fail → Returned to
+// Supplier. Every transition is written to the unit's own history log for a full audit trail.
+// `catalog`/`onCatalogUpdate` are optional — if this is mounted on its own (e.g. a shell without
+// the rest of the Products tab wired in) it loads and saves the catalog itself.
+function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
   const E = React.createElement;
-  const [testingPhone, setTestingPhone] = useState(null);
-  const queue = (phones||[]).filter(p=>p.availability==="Under Testing"&&!p.voided);
+  const [localCatalog, setLocalCatalog] = useState(catalogProp || []);
+  const [loaded, setLoaded] = useState(!!catalogProp);
 
-  const runTest = async (phone) => {
+  useEffect(() => {
+    if (catalogProp) { setLocalCatalog(catalogProp); setLoaded(true); return; }
+    loadCatalog().then(c => { setLocalCatalog(c||[]); setLoaded(true); });
+  }, [catalogProp]);
+
+  const catalog = catalogProp || localCatalog;
+
+  const persist = async (updated) => {
+    setLocalCatalog(updated);
+    if (onCatalogUpdate) await onCatalogUpdate(updated);
+    else await saveCatalog(updated);
+  };
+
+  const collect = (status) => {
+    const rows = [];
+    catalog.forEach(product => {
+      if (!isImeiCategory(product.category)) return;
+      (product.units||[]).forEach((unit, unitIdx) => {
+        if (unit.status === status) rows.push({ product, unit, unitIdx });
+      });
+    });
+    return rows;
+  };
+  const queue = collect("Under Testing");
+  const needsRepair = collect("Needs Repair");
+  const returned = collect("Returned to Supplier");
+
+  const updateUnitStatus = async (product, unitIdx, newStatus, note) => {
+    const updated = catalog.map(p => {
+      if (p.id !== product.id) return p;
+      const units = (p.units||[]).map((u,i) => i!==unitIdx ? u : {
+        ...u, status: newStatus,
+        history: [...(u.history||[]), { status:newStatus, ts:new Date().toISOString(), note }]
+      });
+      return { ...p, units, stock: units.filter(u=>u.status==="Available").length };
+    });
+    await persist(updated);
+  };
+
+  const runTest = async (product, unit, unitIdx) => {
     const tests = ["Screen","Battery","Charging Port","Front Camera","Rear Camera","Speaker","Microphone","Buttons","WiFi/Cellular","Overall"];
     const results = [];
     let allPassed = true;
-    for(const test of tests){
-      const r = prompt(`Testing: ${phone.make} ${phone.model}\n\n${test}\nEnter result (pass / fail / skip):`);
-      if(r===null)return;
-      const res = r.toLowerCase().includes("f")?"fail":r.toLowerCase().includes("s")?"skip":"pass";
-      results.push({test,result:res});
-      if(res==="fail")allPassed=false;
+    for (const test of tests) {
+      const r = prompt(`Testing: ${product.name} — IMEI ${unit.imei||"—"}\n\n${test}\nEnter result (pass / fail / skip):`);
+      if (r === null) return; // cancelled mid-checklist — leave the unit's status untouched
+      const res = r.toLowerCase().includes("f") ? "fail" : r.toLowerCase().includes("s") ? "skip" : "pass";
+      results.push({ test, result: res });
+      if (res === "fail") allPassed = false;
     }
-    const notes = prompt("Additional notes (optional):")||"";
-    const newStatus = allPassed?"Available":"To Be Repaired";
+    const notes = prompt("Additional notes (optional):") || "";
     const faults = results.filter(r=>r.result==="fail").map(r=>r.test).join(", ");
-    alert(allPassed?"✅ All tests passed — phone marked Available.":`❌ Failed: ${faults}\nStatus → To Be Repaired.`);
-    const updatedPhones=(phones||[]).map(p=>p.id===phone.id||p.imei===phone.imei?{
-      ...p,availability:newStatus,
-      testRecord:{date:new Date().toISOString(),results,notes,passed:allPassed},
-      testedAt:new Date().toISOString(),
-      history:[...(p.history||[]),{status:newStatus,ts:new Date().toISOString(),note:`Testing complete — ${allPassed?"PASSED":"FAILED"}${faults?" — "+faults:""}`}]
-    }:p);
-    await onUpdate(updatedPhones);
-    setTestingPhone(null);
+
+    if (allPassed) {
+      await updateUnitStatus(product, unitIdx, "Available", `Testing complete — PASSED${notes?" — "+notes:""}`);
+      alert("✅ All tests passed — unit marked Available.");
+      return;
+    }
+    const goToRepair = confirm(`❌ Failed: ${faults}\n\nOK = send for repair.\nCancel = return to supplier instead.`);
+    if (goToRepair) {
+      await updateUnitStatus(product, unitIdx, "Needs Repair", `Failed testing — ${faults}${notes?" — "+notes:""} — sent for repair`);
+      alert("🔧 Unit marked Needs Repair.");
+    } else {
+      await updateUnitStatus(product, unitIdx, "Returned to Supplier", `Failed testing — ${faults}${notes?" — "+notes:""} — returned to supplier`);
+      alert("↩️ Unit marked Returned to Supplier.");
+    }
   };
 
-  return E("div",{style:{maxWidth:640,margin:"0 auto"}},
-    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+  const UnitRow = ({ product, unit, unitIdx, actions }) => E(Card,{style:{borderLeft:`3px solid ${T.amber}`}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}},
       E("div",null,
-        E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔬 Testing Queue"),
-        E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${queue.length} device${queue.length!==1?"s":""} awaiting testing`)
-      )
+        E("div",{style:{fontWeight:700,fontSize:14}},product.name),
+        E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},"IMEI: ",unit.imei||"—"),
+        unit.supplier&&E("div",{style:{fontSize:11,color:T.muted}},"Supplier: ",unit.supplier),
+        unit.poRef&&E("div",{style:{fontSize:11,color:T.muted}},"PO: ",unit.poRef),
+        unit.receivedDate&&E("div",{style:{fontSize:11,color:T.muted}},"Received: ",fmtDate(unit.receivedDate)),
+        unit.history?.slice(-1)[0]?.note&&E("div",{style:{fontSize:11,color:T.amber,marginTop:4,fontStyle:"italic"}},unit.history.slice(-1)[0].note)
+      ),
+      E("div",{style:{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}, actions)
+    )
+  );
+
+  if (!loaded) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading testing queue...");
+
+  return E("div",{style:{maxWidth:680,margin:"0 auto"}},
+    E("div",{style:{marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔬 Testing Queue"),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${queue.length} unit${queue.length!==1?"s":""} awaiting testing`)
     ),
     queue.length===0
       ?E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted,background:"#F9FAFB",borderRadius:12}},
           E("div",{style:{fontSize:40,marginBottom:12}},"🔬"),
-          E("div",{style:{fontWeight:600,fontSize:15}},"No devices in testing queue"),
-          E("div",{style:{fontSize:13,marginTop:6}},"Mark a phone as 'Under Testing' in the inventory to add it here.")
+          E("div",{style:{fontWeight:600,fontSize:15}},"No units in testing queue"),
+          E("div",{style:{fontSize:13,marginTop:6}},"Units get flagged for testing in Purchases → Receive Stock — they'll show up here as soon as that stock is received.")
         )
       :E("div",{style:{display:"flex",flexDirection:"column",gap:10}},
-          queue.map((p,i)=>E(Card,{key:i,style:{borderLeft:`3px solid ${T.amber}`}},
-            E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
-              E("div",null,
-                E("div",{style:{fontWeight:700,fontSize:14}},p.make," ",p.model," ",p.storage," ",p.color),
-                p.imei&&E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},"IMEI: ",p.imei),
-                p.supplier&&E("div",{style:{fontSize:11,color:T.muted}},"Supplier: ",p.supplier),
-                p.receivedDate&&E("div",{style:{fontSize:11,color:T.muted}},"Received: ",fmtDate(p.receivedDate)),
-                p.history?.slice(-1)[0]?.note&&E("div",{style:{fontSize:11,color:T.amber,marginTop:4,fontStyle:"italic"}},p.history.slice(-1)[0].note)
-              ),
-              E("div",{style:{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}},
-                E(Btn,{onClick:()=>runTest(p),style:{fontSize:12}},"🔬 Run Tests"),
-                E(Btn,{variant:"ghost",style:{fontSize:11,padding:"5px 10px"},onClick:async()=>{
-                  const updatedPhones=(phones||[]).map(ph=>ph.id===p.id||ph.imei===p.imei?{...ph,availability:"Available",history:[...(ph.history||[]),{status:"Available",ts:new Date().toISOString(),note:"Manually marked Available without testing"}]}:ph);
-                  await onUpdate(updatedPhones);
-                }},"→ Mark Available"),
-                E(Btn,{variant:"ghost",style:{fontSize:11,padding:"5px 10px",color:T.red},onClick:async()=>{
-                  const updatedPhones=(phones||[]).map(ph=>ph.id===p.id||ph.imei===p.imei?{...ph,availability:"To Be Repaired",history:[...(ph.history||[]),{status:"To Be Repaired",ts:new Date().toISOString(),note:"Marked for repair from testing queue"}]}:ph);
-                  await onUpdate(updatedPhones);
-                }},"→ Send to Repair")
-              )
-            )
-          ))
-        )
+          queue.map(({product,unit,unitIdx},i)=>E(UnitRow,{key:i,product,unit,unitIdx,actions:[
+            E(Btn,{key:"test",onClick:()=>runTest(product,unit,unitIdx),style:{fontSize:12}},"🔬 Run Tests"),
+            E(Btn,{key:"avail",variant:"ghost",style:{fontSize:11,padding:"5px 10px"},onClick:()=>updateUnitStatus(product,unitIdx,"Available","Manually marked Available without testing")},"→ Mark Available"),
+            E(Btn,{key:"repair",variant:"ghost",style:{fontSize:11,padding:"5px 10px",color:T.red},onClick:()=>updateUnitStatus(product,unitIdx,"Needs Repair","Marked for repair from testing queue")},"→ Send to Repair"),
+            E(Btn,{key:"return",variant:"ghost",style:{fontSize:11,padding:"5px 10px",color:T.red},onClick:()=>{ if(confirm(`Return "${product.name}" (IMEI ${unit.imei||"—"}) to the supplier?`)) updateUnitStatus(product,unitIdx,"Returned to Supplier","Returned to supplier from testing queue"); }},"→ Return to Supplier")
+          ]}))
+        ),
+    needsRepair.length>0 && E("div",{style:{marginTop:28}},
+      E(ST,null,`🔧 Needs Repair (${needsRepair.length})`),
+      E("div",{style:{display:"flex",flexDirection:"column",gap:10,marginTop:10}},
+        needsRepair.map(({product,unit,unitIdx},i)=>E(UnitRow,{key:i,product,unit,unitIdx,actions:[
+          E(Btn,{key:"retest",variant:"ghost",style:{fontSize:11,padding:"5px 10px"},onClick:()=>updateUnitStatus(product,unitIdx,"Under Testing","Repair complete — sent back for retesting")},"✓ Repair Complete → Retest")
+        ]}))
+      )
+    ),
+    returned.length>0 && E("div",{style:{marginTop:28}},
+      E(ST,null,`↩️ Returned to Supplier (${returned.length})`),
+      E("div",{style:{display:"flex",flexDirection:"column",gap:10,marginTop:10}},
+        returned.map(({product,unit,unitIdx},i)=>E(UnitRow,{key:i,product,unit,unitIdx,actions:[]}))
+      )
+    )
   );
 }
 
