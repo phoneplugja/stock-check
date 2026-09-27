@@ -7798,6 +7798,9 @@ function StaffShell({
   }, {
     id: "hours",
     label: "⏱️ My Hours"
+  }, {
+    id: "redeem",
+    label: "🎁 Redeem"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7898,7 +7901,7 @@ function StaffShell({
     user: user
   }), tab === "reimburse" && /*#__PURE__*/React.createElement(ReimbursementForm, {
     user: user
-  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: false }), tab === "hours" && /*#__PURE__*/React.createElement(StaffHours, { user: user })));
+  }), tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: false }), tab === "hours" && /*#__PURE__*/React.createElement(StaffHours, { user: user }), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user })));
 }
 
 // ── Technician Shell ──────────────────────────────────────────────────────────
@@ -7906,6 +7909,14 @@ function TechnicianShell({
   user,
   onLogout
 }) {
+  const [tab, setTab] = useState("repairs");
+  const techTabs = [{
+    id: "repairs",
+    label: "\uD83D\uDD27 Repairs"
+  }, {
+    id: "redeem",
+    label: "\uD83C\uDF81 Redeem"
+  }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       minHeight: "100vh",
@@ -7967,11 +7978,32 @@ function TechnicianShell({
     }
   }, "\u2190 Switch"))), /*#__PURE__*/React.createElement("div", {
     style: {
+      background: "#FFFFFF",
+      borderBottom: "1px solid #E5E7EB",
+      display: "flex",
+      padding: "0 8px"
+    }
+  }, techTabs.map(t => /*#__PURE__*/React.createElement("button", {
+    key: t.id,
+    onClick: () => setTab(t.id),
+    style: {
+      padding: "14px 18px",
+      border: "none",
+      background: "none",
+      fontFamily: "inherit",
+      color: tab === t.id ? T.blue : T.muted,
+      fontWeight: tab === t.id ? 700 : 400,
+      borderBottom: `2px solid ${tab === t.id ? T.blue : "transparent"}`,
+      fontSize: 13,
+      cursor: "pointer"
+    }
+  }, t.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
       maxWidth: 960,
       margin: "0 auto",
       padding: "28px 20px 60px"
     }
-  }, /*#__PURE__*/React.createElement(RepairManager, null)));
+  }, tab === "repairs" && /*#__PURE__*/React.createElement(RepairManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user })));
 }
 
 // ── Owner Shell ───────────────────────────────────────────────────────────────
@@ -8095,6 +8127,9 @@ function OwnerShell({
   }, {
     id: "payroll",
     label: "⏱️ Payroll"
+  }, {
+    id: "redeem",
+    label: "🎁 Redeem"
   }, {
     id: "import-export",
     label: "📥 Import/Export"
@@ -8284,7 +8319,148 @@ function OwnerShell({
   }), tab === "rental" && /*#__PURE__*/React.createElement(RentalIncomeForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(PhoneTestingQueue, { phones: data.phones || [], onUpdate: updatePhones }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user }), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
+}
+
+
+// ── Redeem Spin-to-Win Prize (built into manage.html) ─────────────────────────
+const SPIN_CODES_COL = "spin_codes";
+const spinDiscountFor = (record, repairTotal) => Math.min(Math.round(record.percent / 100 * repairTotal), record.cap);
+const spinFmtDateTime = iso => {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-JM", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return iso;
+  }
+};
+
+function RedeemRecordCard({ record, onRedeem, busy }) {
+  const expired = new Date(record.expiresAt) < new Date();
+  const status = record.redeemed ? "redeemed" : expired ? "expired" : "active";
+  const statusStyle = {
+    redeemed: { bg: T.greenLt, fg: T.green, label: "✓ Already Redeemed" },
+    expired: { bg: T.redLt, fg: T.red, label: "⚠ Expired" },
+    active: { bg: T.blueLt, fg: T.blue, label: "● Active — Not Yet Redeemed" }
+  }[status];
+
+  const [repairTotal, setRepairTotal] = useState("");
+  const total = Number(repairTotal.replace(/[^0-9.]/g, "")) || 0;
+  const discount = total > 0 ? spinDiscountFor(record, total) : null;
+  const cappedOut = discount !== null && discount === record.cap && record.percent / 100 * total > record.cap;
+
+  return /*#__PURE__*/React.createElement(Card, { style: { marginBottom: 14 } },
+    /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 12 } },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "monospace", fontSize: 20, fontWeight: 800, letterSpacing: 2 } }, record.code),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.muted, marginTop: 2 } }, "Won ", spinFmtDateTime(record.createdAt))
+      ),
+      /*#__PURE__*/React.createElement("div", { style: { background: statusStyle.bg, color: statusStyle.fg, fontSize: 11.5, fontWeight: 800, padding: "6px 10px", borderRadius: 8, whiteSpace: "nowrap" } }, statusStyle.label)
+    ),
+    /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18, paddingBottom: 18, borderBottom: `1px solid ${T.border}` } },
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 } }, "Prize"),
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22 } }, record.percent, "% ", /*#__PURE__*/React.createElement("span", { style: { fontSize: 13, fontWeight: 600, color: T.muted } }, "(up to ", fmtMoney(record.cap), ")"))
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 } }, "Customer Phone"),
+        /*#__PURE__*/React.createElement("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 18 } }, record.phone)
+      ),
+      record.name && /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 } }, "Name"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, record.name)
+      ),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 } }, "Expires"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 14, fontWeight: 600, color: expired ? T.red : T.text } }, spinFmtDateTime(record.expiresAt))
+      )
+    ),
+    status === "redeemed" && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.muted, background: T.greenLt, borderRadius: 10, padding: "10px 14px" } },
+      "Redeemed ", spinFmtDateTime(record.redeemedAt), record.redeemedBy ? ` by ${record.redeemedBy}` : "", record.appliedAmount != null ? ` — ${fmtMoney(record.appliedAmount)} off a ${fmtMoney(record.repairTotal)} repair.` : "."
+    ),
+    status === "expired" && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.red, background: T.redLt, borderRadius: 10, padding: "10px 14px" } },
+      "This code expired and can no longer be redeemed. Use manager discretion if you'd like to honor it anyway."
+    ),
+    status === "active" && /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement(Field, { label: "Repair Total (JMD)" },
+        /*#__PURE__*/React.createElement(Input, { placeholder: "e.g. 8200", inputMode: "decimal", value: repairTotal, onChange: e => setRepairTotal(e.target.value) })
+      ),
+      total > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, background: T.amberLt, border: "1px solid #FDE68A", borderRadius: 10, padding: "10px 14px", marginBottom: 12 } },
+        record.percent, "% of ", fmtMoney(total), " = ", fmtMoney(Math.round(record.percent / 100 * total)),
+        cappedOut ? /*#__PURE__*/React.createElement(React.Fragment, null, " — capped at ", /*#__PURE__*/React.createElement("b", null, fmtMoney(record.cap))) : null,
+        /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "Apply ", fmtMoney(discount), " off.")
+      ),
+      /*#__PURE__*/React.createElement(Btn, { variant: "green", full: true, onClick: () => onRedeem(total, discount), disabled: busy || total <= 0 },
+        busy ? "Redeeming…" : total > 0 ? `✓ Confirm — Apply ${fmtMoney(discount)}` : "Enter repair total to continue"
+      )
+    )
+  );
+}
+
+function RedeemSpinPanel({ user }) {
+  const [query, setQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState(null);
+  const [busyCode, setBusyCode] = useState(null);
+
+  const search = async () => {
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const qCode = q.toUpperCase().replace(/\s+/g, "");
+      const qPhone10 = q.replace(/\D/g, "").slice(-10);
+      let matches = [];
+      const byCode = await _db.collection(SPIN_CODES_COL).doc(qCode).get();
+      if (byCode.exists) matches = [byCode.data()];
+      if (matches.length === 0 && qPhone10.length >= 7) {
+        const snap = await _db.collection(SPIN_CODES_COL).where("phoneNorm", "==", qPhone10).get();
+        matches = snap.docs.map(d => d.data());
+      }
+      setResults(matches);
+    } catch (e) {
+      alert("Search failed. Check your connection and try again.\n" + e.message);
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const redeem = async (record, repairTotal, appliedAmount) => {
+    setBusyCode(record.code);
+    try {
+      const redeemedAt = new Date().toISOString();
+      const updates = { redeemed: true, redeemedAt, redeemedBy: user?.name || null, repairTotal, appliedAmount };
+      await _db.collection(SPIN_CODES_COL).doc(record.code).update(updates);
+      setResults(prev => prev.map(r => r.code === record.code ? { ...r, ...updates } : r));
+    } catch (e) {
+      alert("Couldn't save redemption. Try again.\n" + e.message);
+    } finally {
+      setBusyCode(null);
+    }
+  };
+
+  return /*#__PURE__*/React.createElement("div", { style: { maxWidth: 520, margin: "0 auto" } },
+    /*#__PURE__*/React.createElement(Card, { style: { marginBottom: 18 } },
+      /*#__PURE__*/React.createElement("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 17, marginBottom: 4 } }, "Redeem Spin-to-Win Prize"),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.muted, marginBottom: 16 } }, "Look up by redemption code or customer phone number."),
+      /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 10 } },
+        /*#__PURE__*/React.createElement(Input, {
+          style: { letterSpacing: 1, fontSize: 15 }, placeholder: "e.g. SPIN-4K7QZ2 or 8761234567",
+          value: query, onChange: e => setQuery(e.target.value),
+          onKeyDown: e => { if (e.key === "Enter") search(); },
+          autoFocus: true
+        }),
+        /*#__PURE__*/React.createElement(Btn, { onClick: search, disabled: searching, style: { flexShrink: 0 } }, searching ? "…" : "Search")
+      )
+    ),
+    results !== null && results.length === 0 && /*#__PURE__*/React.createElement(Card, { style: { textAlign: "center", color: T.muted, fontSize: 14, lineHeight: 1.6 } },
+      "No record found for that code or number. Double-check for typos — and if this prize was won more than a few months ago, it may have expired and been automatically removed from our system."
+    ),
+    results !== null && results.map(r => /*#__PURE__*/React.createElement(RedeemRecordCard, {
+      key: r.code, record: r, busy: busyCode === r.code, onRedeem: (total, amount) => redeem(r, total, amount)
+    }))
+  );
 }
 
 // ── Reimbursement Form (Staff submit) ─────────────────────────────────────────
