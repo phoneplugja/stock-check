@@ -196,6 +196,15 @@
       </div>
     );
 
+    // A small pill link back to another page on the site — placed right under the headline
+    // (not buried at the bottom of the card) so it's visible the instant the screen loads,
+    // no scrolling required. Real <a> tags, so they work without JS.
+    const CompactNavBtn = ({ href, children }) => (
+      <a href={href} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", gap:5, background:T.accentSoft, color:T.accent, border:`1px solid ${T.accentBorder}`, borderRadius:9, padding:"9px 10px", fontSize:12, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif", textDecoration:"none", textAlign:"center", lineHeight:1.2 }}>
+        {children}
+      </a>
+    );
+
     const WaBtn = ({ label="WhatsApp Us" }) => (
       <a href={`https://wa.me/${WA_NUMBER}`} target="_blank" rel="noopener noreferrer"
         style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#25D366", color:"#fff", padding:"12px 22px", borderRadius:11, fontSize:14, fontWeight:700, fontFamily:"'Space Grotesk',sans-serif", textDecoration:"none", boxShadow:"0 10px 22px -8px rgba(37,211,102,0.55)" }}>
@@ -278,6 +287,10 @@
             </div>
           </Hero>
           <div style={{ padding:"24px 26px 30px", textAlign:"center" }}>
+            <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+              <CompactNavBtn href="/book-repair.html">Book a Repair</CompactNavBtn>
+              <CompactNavBtn href="/stock-checker.html">Stock Checker</CompactNavBtn>
+            </div>
             <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, marginBottom: record ? 18 : 22 }}>
               One spin per customer. {record ? "Here's your prize from before — bring your phone number to redeem in-store." : "If you think this is a mistake, our team can look it up by your phone number."}
             </div>
@@ -443,6 +456,11 @@
             <div style={{ fontSize:13, color:"rgba(255,255,255,0.85)", marginTop:4 }}>up to {money(record.cap)}</div>
           </Hero>
           <div style={{ padding:"24px 26px 30px", textAlign:"center" }}>
+
+          <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+            <CompactNavBtn href="/book-repair.html">Book a Repair</CompactNavBtn>
+            <CompactNavBtn href="/stock-checker.html">Stock Checker</CompactNavBtn>
+          </div>
 
           <div style={{ background:T.violetSoft, border:`1px solid ${T.violetBorder}`, borderRadius:14, padding:"18px 18px 16px", marginBottom:18 }}>
             <div style={{ fontSize:11.5, fontWeight:700, color:T.violet, textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:8 }}>Your Redemption Code</div>
