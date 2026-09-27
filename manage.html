@@ -3651,7 +3651,7 @@ Each element in the array should have these fields:
 Return ONLY the JSON array, no explanation, no markdown.` });
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
-        headers:{ "Content-Type":"application/json" },
+        headers:{ "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({
           model:"claude-sonnet-4-5",
           max_tokens:1000,
@@ -3673,7 +3673,7 @@ Return ONLY the JSON array, no explanation, no markdown.` });
           const imeiBase64 = await fileToBase64(imeiListFile);
           const imeiResp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
-            headers: { "Content-Type":"application/json" },
+            headers: { "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
             body: JSON.stringify({
               model: "claude-sonnet-4-5",
               max_tokens: 500,
@@ -3847,7 +3847,7 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
       const base64 = await fileToBase64(file);
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type":"application/json" },
+        headers: { "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
         body: JSON.stringify({
           model: "claude-sonnet-4-5",
           max_tokens: 100,
@@ -10798,7 +10798,7 @@ function ImeiScanner({onDetected, onClose}) {
       const apiKey = (() => { try { return localStorage.getItem("tpp_anthropic_key")||""; } catch { return ""; } })();
       if (!apiKey) { setError("No API key set. Add one in Settings."); setLoading(false); return; }
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
+        method:"POST", headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:200,messages:[{role:"user",content:[
           {type:"image",source:{type:"base64",media_type:file.type,data:b64}},
           {type:"text",text:"Extract the IMEI number from this image. Return ONLY the 15-digit IMEI, nothing else. Multiple IMEIs: one per line. No IMEI found: return NOT_FOUND."}
