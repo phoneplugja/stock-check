@@ -11219,6 +11219,10 @@ function ReceiveStockTab({ onCatalogUpdate }) {
         const units = flagAllTesting
           ? line.units.map(u=>({...u,status:"Under Testing"}))
           : line.units;
+        // Leaving Sell Price blank here means "price set at sale time" — mark the product Variable
+        // instead of silently listing it at JMD 0. Typing an actual price always takes it out of
+        // Variable mode, since staff explicitly set a fixed price at that point.
+        const sellPriceBlank = String(line.sellPrice||"").trim()==="";
 
         if (isImei) {
           // Find or create catalog product
@@ -11232,7 +11236,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
               price: parseFloat(line.sellPrice)||0,
               cost: parseFloat(line.unitCost)||0,
               stock: 0, units: [],
-              variable_price: false, createdAt: new Date().toISOString()
+              variable_price: sellPriceBlank, createdAt: new Date().toISOString()
             };
             updatedCatalog = [product, ...updatedCatalog];
           }
@@ -11250,19 +11254,21 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           product.units = [...(product.units||[]), ...newUnits];
           product.stock = product.units.filter(u=>u.status==="Available").length;
           product.cost = parseFloat(line.unitCost)||product.cost;
-          if (parseFloat(line.sellPrice)) product.price = parseFloat(line.sellPrice);
+          if (sellPriceBlank) { product.variable_price = true; }
+          else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
           receiveHistory.push({ productName:line.name, category:line.category, qty:newUnits.length, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
         } else {
           // Non-IMEI: just add to stock count
           let product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
           if (!product) {
-            product = { id:`prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, name:line.name, category:line.category, price:parseFloat(line.sellPrice)||0, cost:parseFloat(line.unitCost)||0, stock:0, units:[], variable_price:false, createdAt:new Date().toISOString() };
+            product = { id:`prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, name:line.name, category:line.category, price:parseFloat(line.sellPrice)||0, cost:parseFloat(line.unitCost)||0, stock:0, units:[], variable_price:sellPriceBlank, createdAt:new Date().toISOString() };
             updatedCatalog = [product, ...updatedCatalog];
           }
           product.stock = (product.stock||0) + (parseInt(line.receivedQty)||0);
           if (parseFloat(line.unitCost)) product.cost = parseFloat(line.unitCost);
-          if (parseFloat(line.sellPrice)) product.price = parseFloat(line.sellPrice);
+          if (sellPriceBlank) { product.variable_price = true; }
+          else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
           receiveHistory.push({ productName:line.name, category:line.category, qty:parseInt(line.receivedQty)||0, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
         }
@@ -11344,7 +11350,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           ),
           E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
             E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))})),
-            E(Field,{label:"Sell Price"},E(Input,{type:"number",placeholder:"0",value:line.sellPrice||"",onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,sellPrice:e.target.value}:l))}))
+            E(Field,{label:"Sell Price"},E(Input,{type:"number",placeholder:"Leave blank = Variable",value:line.sellPrice||"",onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,sellPrice:e.target.value}:l))}))
           ),
           isImei
             ? E("div",null,
