@@ -5328,10 +5328,10 @@ function OwnerDashboard({
   }, e.payment_method), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px",
-      color: e.voided ? T.muted : T.red,
+      color: e.voided ? T.muted : (parseFloat(e.amount) || 0) < 0 ? T.green : T.red,
       fontWeight: 700
     }
-  }, fmtMoney(parseFloat(e.amount) || 0)), /*#__PURE__*/React.createElement("td", {
+  }, ((parseFloat(e.amount) || 0) < 0 ? "-" : "") + fmtMoney(parseFloat(e.amount) || 0)), /*#__PURE__*/React.createElement("td", {
     style: {
       padding: "9px 10px",
       color: T.muted,
@@ -6320,6 +6320,31 @@ const findDuplicateGroups = (catalog) => {
     if (group.length > 1) groups.push(group);
   });
   return groups;
+};
+
+// Finds exactly which catalog units (IMEI-tracked) and which stock-count increases (non-IMEI) came
+// from a given PO, so voiding a Received PO can offer to undo them instead of silently leaving
+// inventory that was never legitimately received sitting in the catalog. Matches by poId first —
+// stamped onto every unit/history row at receive time — falling back to poRef+supplier for older
+// receives from before that field existed.
+const findPOImpact = (catalog, stockReceiveHistory, po) => {
+  const matchesPO = (row) => row.poId ? row.poId === po.id : !!(po.poRef && row.poRef === po.poRef && row.supplier === po.supplier);
+  const units = [];
+  (catalog||[]).forEach(product => {
+    if (!isImeiCategory(product.category)) return;
+    (product.units||[]).forEach((unit, unitIdx) => {
+      if (matchesPO(unit)) units.push({ product, unit, unitIdx });
+    });
+  });
+  const stockByProduct = new Map();
+  (stockReceiveHistory||[]).forEach(h => {
+    if (!matchesPO(h)) return;
+    let product = h.productId ? (catalog||[]).find(p=>p.id===h.productId) : null;
+    if (!product) product = (catalog||[]).find(p=>p.name?.toLowerCase()===String(h.productName||"").toLowerCase() && p.category===h.category);
+    if (!product || isImeiCategory(product.category)) return; // IMEI units are already covered above
+    stockByProduct.set(product.id, { product, qty: (stockByProduct.get(product.id)?.qty||0) + (parseInt(h.qty)||0) });
+  });
+  return { units, stockAdjustments: Array.from(stockByProduct.values()) };
 };
 
 // Single place that actually creates a Purchase Order record: writes it as "Ordered" so it shows
@@ -7619,6 +7644,54 @@ const buildPhoneImportPlan = (rows, allProducts) => {
   return { preview, result: working };
 };
 
+// Full-catalog export/reimport — one row PER PRODUCT (not per unit), across every category, so the
+// whole catalog can be pulled out in a single file, cleaned up (e.g. fixing names that got mangled
+// before an earlier migration — "X 128 GB Black - Black" — either by hand or by pasting into an AI),
+// and brought back in one pass. It only ever edits EXISTING products matched by id: a row whose id
+// doesn't match anything already in the catalog is skipped rather than creating a new product, since
+// this tool's job is cleanup, not bringing in new stock (the category-specific imports above, or
+// Receive Stock, do that). For an IMEI-tracked product it never touches stock/units — those stay
+// exactly as they are and only name/category/sku/barcode/price/cost/variable_price can change here.
+const buildAllProductsImportPlan = (rows, allProducts) => {
+  const byId = new Map(allProducts.map(p => [p.id, p]));
+  const seenIds = new Set();
+  const preview = [];
+  let working = [...allProducts];
+  rows.forEach((row, idx) => {
+    const rowNum = idx + 2;
+    const id = String(row.id || "").trim();
+    const name = String(row.name || "").trim();
+    if (!id) { preview.push({ row: rowNum, status: "error", name, error: "Missing id — this tool only edits products that already exist (export first, edit that file, don't add new rows). Use the Accessories/Phones import above to add brand-new products." }); return; }
+    if (seenIds.has(id)) { preview.push({ row: rowNum, status: "error", id, name, error: "Duplicate id within this file." }); return; }
+    seenIds.add(id);
+    const match = byId.get(id);
+    if (!match) { preview.push({ row: rowNum, status: "error", id, name, error: "No existing product with this id — row skipped." }); return; }
+    if (!name) { preview.push({ row: rowNum, status: "error", id, name, error: "Name is required." }); return; }
+    const category = String(row.category || "").trim() || match.category;
+    const isImei = IMEI_CATEGORIES.includes(category);
+    const sku = row.sku === undefined ? (match.sku || "") : String(row.sku || "").trim();
+    const barcode = row.barcode === undefined ? (match.barcode || "") : String(row.barcode || "").trim();
+    const priceRaw = String(row.price ?? "").trim();
+    const costRaw = String(row.cost ?? "").trim();
+    const price = priceRaw === "" ? match.price : parseFloat(priceRaw);
+    const cost = costRaw === "" ? match.cost : parseFloat(costRaw);
+    if (isNaN(price) || price < 0) { preview.push({ row: rowNum, status: "error", id, name, error: "Price must be a number 0 or greater." }); return; }
+    if (isNaN(cost) || cost < 0) { preview.push({ row: rowNum, status: "error", id, name, error: "Cost must be a number 0 or greater." }); return; }
+    const variablePriceRaw = String(row.variable_price ?? "").trim();
+    const variable_price = variablePriceRaw === "" ? !!match.variable_price : /^true$/i.test(variablePriceRaw);
+    const updated = { ...match, name, category, sku, barcode, price, cost, variable_price, updatedAt: new Date().toISOString() };
+    if (!isImei) {
+      const stockRaw = String(row.stock ?? "").trim();
+      const stockNum = stockRaw === "" ? match.stock : parseInt(stockRaw);
+      updated.stock = isNaN(stockNum) ? match.stock : stockNum;
+    } // IMEI products: stock stays derived from .units, untouched here.
+    working = working.map(p => p.id === id ? updated : p);
+    const oldName = match.name !== name ? match.name : "";
+    preview.push({ row: rowNum, status: "update", id, name, category, oldName });
+  });
+  return { preview, result: working };
+};
+
 // Shared review table shown before any import is committed — nothing is written to Firestore
 // until the owner explicitly hits "Apply".
 function ImportPreviewTable({ preview, columns }) {
@@ -7664,6 +7737,7 @@ function DataImportExportTab() {
   const [bulkPhotoBusy, setBulkPhotoBusy] = useState(false);
   const [bulkPhotoProgress, setBulkPhotoProgress] = useState(null); // {done, total}
   const custFileRef = React.useRef(null);
+  const allProductsFileRef = React.useRef(null);
   const accFileRef = React.useRef(null);
   const phoneFileRef = React.useRef(null);
   const bulkPhotoFileRef = React.useRef(null);
@@ -7677,6 +7751,20 @@ function DataImportExportTab() {
   const exportCustomers = () => {
     downloadCSV("TPP_Customers.csv", ["id", "name", "phone", "email"],
       customers.map(c => [c.id, c.name || "", c.phone || "", c.email || ""]));
+  };
+  const exportAllProducts = () => {
+    downloadCSV("TPP_All_Products.csv",
+      ["id", "name", "category", "sku", "barcode", "price", "cost", "stock", "unit_count", "variable_price"],
+      products.map(p => {
+        const isImei = IMEI_CATEGORIES.includes(p.category);
+        return [
+          p.id, p.name || "", p.category || "", p.sku || "", p.barcode || "",
+          p.price || 0, p.cost || 0,
+          isImei ? (p.units || []).filter(u => u.status === "Available").length : (p.stock || 0),
+          isImei ? (p.units || []).length : "",
+          p.variable_price ? "TRUE" : "FALSE"
+        ];
+      }));
   };
   const exportAccessories = () => {
     const accessories = products.filter(p => !IMEI_CATEGORIES.includes(p.category));
@@ -7699,6 +7787,7 @@ function DataImportExportTab() {
       if (!rows.length) { alert("That file has no rows to import."); setBusy(""); return; }
       let plan;
       if (type === "customers") plan = buildCustomerImportPlan(rows, customers);
+      else if (type === "all-products") plan = buildAllProductsImportPlan(rows, products);
       else if (type === "accessories") plan = buildAccessoryImportPlan(rows, products);
       else plan = buildPhoneImportPlan(rows, products);
       setPreview({ type, ...plan });
@@ -7876,6 +7965,11 @@ function DataImportExportTab() {
       title: "👤 Customers", type: "customers", onExport: exportCustomers, fileRef: custFileRef,
       desc: "Columns: id, name, phone, email. Leave id blank for a brand-new customer — existing customers are matched by id first, then by phone number.",
       columns: [{ key: "name", label: "Name" }, { key: "phone", label: "Phone" }, { key: "email", label: "Email" }]
+    }),
+    Section({
+      title: "📦 All Products (whole catalog, for bulk cleanup)", type: "all-products", onExport: exportAllProducts, fileRef: allProductsFileRef,
+      desc: "Every product in the catalog in one file — phones and accessories together, one row per product (not per IMEI unit). Meant for bulk fixes like cleaning up bad names (e.g. old imports that ended up as \"Model 128GB Black - Black\") — export, fix the name/category/sku/barcode/price/cost columns (in Excel, Sheets, or by pasting into an AI), then re-import the same file. Matched ONLY by id, so don't add new rows here — this never creates a product, it only edits existing ones (add new stock via Receive Stock, or the Accessories/Phones sections below). For phones, stock/units are left completely untouched no matter what the stock column says — only name/category/sku/barcode/price/cost/variable_price can change here.",
+      columns: [{ key: "id", label: "ID" }, { key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "oldName", label: "Renamed From" }]
     }),
     Section({
       title: "🛒 Accessories & Parts", type: "accessories", onExport: exportAccessories, fileRef: accFileRef,
@@ -8082,7 +8176,7 @@ function StaffShell({
     user: user
   }), tab === "expense" && /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(ExpenseForm, { user: user }),
-    /*#__PURE__*/React.createElement(RecentEntries, { storeKey: "tpp-expenses", label: "Recent Expenses", formatLine: e => `${e.category} — ${fmtMoney(e.amount)} (${e.payment_method})` })
+    /*#__PURE__*/React.createElement(RecentEntries, { storeKey: "tpp-expenses", label: "Recent Expenses", formatLine: e => `${e.category} — ${(parseFloat(e.amount)||0) < 0 ? "-" : ""}${fmtMoney(e.amount)} (${e.payment_method})` })
   ), tab === "deposit" && /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(DepositForm, { user: user }),
     /*#__PURE__*/React.createElement(RecentEntries, { storeKey: "tpp-deposits", label: "Recent Deposits", formatLine: d => `${d.bank||d.source||"Bank"} — ${fmtMoney(d.amount)}` })
@@ -9063,7 +9157,7 @@ function ExpenseHistory() {
           E("div", { style: { fontFamily: "'Syne',sans-serif", fontSize: 18, fontWeight: 800, color: T.text } }, selected.category),
           E("div", { style: { fontSize: 12, color: T.muted, marginTop: 4 } }, selected.date, " \u00b7 Logged by ", selected.logged_by || "—")
         ),
-        E("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22, color: T.blue } }, fmtMoney(selected.amount))
+        E("div", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 22, color: (parseFloat(selected.amount)||0) < 0 ? T.green : T.blue } }, ((parseFloat(selected.amount)||0) < 0 ? "-" : "") + fmtMoney(selected.amount))
       ),
       E("div", { style: { background: "#F9FAFB", borderRadius: 8, padding: "10px 12px", fontSize: 13, marginBottom: 12 } }, selected.details || "No details provided."),
       E("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
@@ -9087,7 +9181,7 @@ function ExpenseHistory() {
           E("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, ex.date, " \u00b7 ", ex.payment_method, ex.details ? ` \u00b7 ${ex.details.slice(0,40)}${ex.details.length>40?"…":""}` : "")
         ),
         E("div", { style: { textAlign: "right" } },
-          E("div", { style: { fontWeight: 700, color: T.blue } }, fmtMoney(ex.amount)),
+          E("div", { style: { fontWeight: 700, color: (parseFloat(ex.amount)||0) < 0 ? T.green : T.blue } }, ((parseFloat(ex.amount)||0) < 0 ? "-" : "") + fmtMoney(ex.amount)),
           E("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, "\u203a View")
         )
       ))
@@ -10478,11 +10572,15 @@ function PurchasesTab() {
   const E = React.createElement;
   const [pos, setPos] = useState([]);
   const [history, setHistory] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [view, setView] = useState("pos");
   const [viewingPO, setViewingPO] = useState(null);
   const [poTab, setPoTab] = useState("pending");
   const [filter, setFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
+  // Set when voiding a PO that was already Received — holds the affected units/stock for review
+  // before anything is actually changed. { po, reason, impact, selectedUnitIds:Set, stockEdits:{} }
+  const [voidReview, setVoidReview] = useState(null);
 
   // New PO form
   const emptyPO = () => ({
@@ -10499,8 +10597,8 @@ function PurchasesTab() {
   const setNL = (k,v) => setNewLineS(p=>({...p,[k]:v}));
 
   useEffect(() => {
-    Promise.all([loadArr("tpp-purchase-orders"), loadArr("tpp-stock-receives")]).then(([p,h]) => {
-      setPos(p||[]); setHistory(h||[]);
+    Promise.all([loadArr("tpp-purchase-orders"), loadArr("tpp-stock-receives"), loadCatalog()]).then(([p,h,c]) => {
+      setPos(p||[]); setHistory(h||[]); setCatalog(c||[]);
     });
   }, []);
 
@@ -10531,12 +10629,79 @@ function PurchasesTab() {
     alert(`✅ Purchase Order saved — ${fmtMoney(record.invoiceTotal)} ${po.currency}`);
   };
 
+  // Actually performs the void: applies whatever inventory changes were chosen (none, if the PO
+  // was never received or staff chose to skip), flags the PO Voided, and logs the expense reversal.
+  const executeVoidPO = async (target, reason, { unitIdsToReturn = [], stockEdits = {} } = {}) => {
+    if (unitIdsToReturn.length || Object.keys(stockEdits).length) {
+      const unitIdSet = new Set(unitIdsToReturn);
+      const updatedCatalog = catalog.map(product => {
+        let units = product.units;
+        let touched = false;
+        if (units && units.some(u => unitIdSet.has(u.id))) {
+          units = units.map(u => unitIdSet.has(u.id)
+            ? { ...u, status: "Returned to Supplier", history: [...(u.history||[]), { status: "Returned to Supplier", ts: new Date().toISOString(), note: `PO ${target.poRef||target.id} voided — ${reason}` }] }
+            : u);
+          touched = true;
+        }
+        const stockEdit = stockEdits[product.id];
+        if (stockEdit !== undefined && (parseInt(stockEdit)||0) > 0) touched = true;
+        if (!touched) return product;
+        const next = { ...product };
+        if (units !== product.units) { next.units = units; next.stock = units.filter(u=>u.status==="Available").length; }
+        if (stockEdit !== undefined) next.stock = Math.max(0, (product.stock||0) - (parseInt(stockEdit)||0));
+        return next;
+      });
+      await saveCatalog(updatedCatalog); setCatalog(updatedCatalog);
+    }
+    const updated = pos.map(p=>p.id===target.id?{...p,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
+    await save("tpp-purchase-orders", updated); setPos(updated);
+    if (viewingPO?.id===target.id) setViewingPO(updated.find(p=>p.id===target.id));
+    // Voiding shouldn't leave the original spend sitting in Expenses/EOD math forever — log an
+    // offsetting reversal (negative amount) tied to the same PO, rather than editing or deleting
+    // the original "Inventory Purchase" expense, so the ledger still shows both the original charge
+    // and that it was later voided, instead of silently erasing history.
+    try {
+      const allExp = await loadArr("tpp-expenses");
+      const reversal = {
+        date: todayStr(), category: "Inventory Purchase", payment_method: target.paymentMethod,
+        amount: -(target.invoiceTotal || 0),
+        details: `Void reversal — PO ${target.poRef || target.id} — ${target.supplier}${target.currency && target.currency !== "JMD" ? ` (${target.currency})` : ""} — ${reason}`,
+        logged_by: "", source: "purchase_order_void", poId: target.id, createdAt: new Date().toISOString()
+      };
+      await save("tpp-expenses", [reversal, ...allExp]);
+    } catch (e) { console.error("PO void expense reversal error:", e); }
+    setVoidReview(null);
+  };
+
+  // Entry point from the Void button. A PO that was never received has nothing in inventory to
+  // reconcile, so it voids immediately. A Received PO might — this looks up what that PO actually
+  // put into the catalog and, if there's anything there, stops to let staff review and choose what
+  // to undo (or explicitly skip) before anything changes.
   const voidPO = async (id) => {
     const reason = prompt("Reason for voiding?"); if (!reason) return;
-    const updated = pos.map(p=>p.id===id?{...p,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
-    await save("tpp-purchase-orders", updated); setPos(updated);
-    if (viewingPO?.id===id) setViewingPO(updated.find(p=>p.id===id));
+    const target = pos.find(p=>p.id===id);
+    if (!target) return;
+    if (target.status === "Received") {
+      const impact = findPOImpact(catalog, history, target);
+      if (impact.units.length || impact.stockAdjustments.length) {
+        setVoidReview({
+          po: target, reason, impact,
+          selectedUnitIds: new Set(impact.units.filter(({unit})=>unit.status!=="Sold").map(({unit})=>unit.id)),
+          stockEdits: Object.fromEntries(impact.stockAdjustments.map(a=>[a.product.id, Math.min(a.qty, a.product.stock||0)]))
+        });
+        return;
+      }
+    }
+    await executeVoidPO(target, reason);
   };
+
+  const toggleVoidUnit = (unitId) => setVoidReview(v => {
+    if (!v) return v;
+    const next = new Set(v.selectedUnitIds);
+    next.has(unitId) ? next.delete(unitId) : next.add(unitId);
+    return { ...v, selectedUnitIds: next };
+  });
+  const setVoidStockEdit = (productId, val) => setVoidReview(v => v ? ({ ...v, stockEdits: { ...v.stockEdits, [productId]: val } }) : v);
 
   const openPos = pos.filter(p=>p.status!=="Voided");
   const allTypes = ["phones","accessories","parts","gadgets","mixture"];
@@ -10572,6 +10737,54 @@ function PurchasesTab() {
         E(Btn,{variant:"ghost",onClick:()=>setViewingPO(null)},"Close"),
         viewingPO.status!=="Voided"&&viewingPO.status!=="Received"&&E(Btn,{variant:"ghost",style:{color:T.green},onClick:()=>{setViewingPO(null);setView("receive");}},"📥 Receive Stock"),
         viewingPO.status!=="Voided"&&E(Btn,{variant:"danger",onClick:()=>voidPO(viewingPO.id)},"🚫 Void")
+      )
+    )
+  );
+
+  // ── Void Review Modal ───────────────────────────────────────────────────────
+  // Shown only when voiding a PO that was already Received and actually put something into the
+  // catalog — lets staff pick exactly which units/stock to undo before anything is touched.
+  const VoidReviewModal = () => voidReview && E("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1100, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+    E("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:560, width:"100%", maxHeight:"88vh", overflowY:"auto" } },
+      E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18, marginBottom:6 } }, "🚫 Void Received PO — Review Inventory"),
+      E("div", { style:{ fontSize:13, color:T.muted, marginBottom:16, lineHeight:1.5 } },
+        `"${voidReview.po.supplier}"${voidReview.po.poRef?` — ${voidReview.po.poRef}`:""} was already received. Choose what to undo below — anything left unchecked, or with "Reduce by" at 0, stays exactly as it is.`
+      ),
+      voidReview.impact.units.length>0 && E("div", { style:{ marginBottom:16 } },
+        E(ST, null, `Phone/Tablet Units (${voidReview.impact.units.length})`),
+        E("div", { style:{ display:"flex", flexDirection:"column", gap:6, marginTop:8 } },
+          voidReview.impact.units.map(({product,unit},i) => {
+            const alreadySold = unit.status==="Sold";
+            return E("label", { key:i, style:{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:8, background:"#F9FAFB", border:`1px solid ${T.border}`, cursor:alreadySold?"not-allowed":"pointer", opacity:alreadySold?0.6:1 } },
+              E("input", { type:"checkbox", disabled:alreadySold, checked:voidReview.selectedUnitIds.has(unit.id), onChange:()=>toggleVoidUnit(unit.id) }),
+              E("div", { style:{ flex:1 } },
+                E("div", { style:{ fontWeight:600, fontSize:13 } }, product.name),
+                E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, "IMEI: ", unit.imei||"—", " · Status: ", unit.status, alreadySold?" — already sold, can't be reversed automatically":"")
+              )
+            );
+          })
+        ),
+        E("div", { style:{ fontSize:11, color:T.muted, marginTop:8 } }, "Checked units will be marked Returned to Supplier.")
+      ),
+      voidReview.impact.stockAdjustments.length>0 && E("div", { style:{ marginBottom:16 } },
+        E(ST, null, `Accessory/Part Stock (${voidReview.impact.stockAdjustments.length})`),
+        E("div", { style:{ display:"flex", flexDirection:"column", gap:8, marginTop:8 } },
+          voidReview.impact.stockAdjustments.map(({product,qty},i) => E("div", { key:i, style:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 10px", background:"#F9FAFB", borderRadius:8, border:`1px solid ${T.border}` } },
+            E("div", null,
+              E("div", { style:{ fontWeight:600, fontSize:13 } }, product.name),
+              E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `This PO added ${qty} · current stock: ${product.stock||0}`)
+            ),
+            E("div", { style:{ display:"flex", alignItems:"center", gap:6 } },
+              E("span", { style:{ fontSize:11, color:T.muted } }, "Reduce by"),
+              E(Input, { type:"number", min:0, max:product.stock||0, value:voidReview.stockEdits[product.id]??0, onChange:e=>setVoidStockEdit(product.id, Math.max(0,Math.min(product.stock||0, parseInt(e.target.value)||0))), style:{ width:70 } })
+            )
+          ))
+        )
+      ),
+      E("div", { style:{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" } },
+        E(Btn, { variant:"ghost", onClick:()=>setVoidReview(v=>v?({...v, selectedUnitIds:new Set(), stockEdits:{}}):v) }, "Skip — don't touch inventory"),
+        E(Btn, { variant:"ghost", onClick:()=>setVoidReview(null) }, "Cancel Void"),
+        E(Btn, { variant:"danger", onClick:()=>executeVoidPO(voidReview.po, voidReview.reason, { unitIdsToReturn:[...voidReview.selectedUnitIds], stockEdits:voidReview.stockEdits }) }, "✅ Confirm Void")
       )
     )
   );
@@ -10649,6 +10862,7 @@ function PurchasesTab() {
 
   return E("div",{style:{maxWidth:720,margin:"0 auto"}},
     E(PODetail,null),
+    E(VoidReviewModal,null),
     // AI Invoice modal
     view==="ai"&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}},
       E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:680,width:"100%"}},
@@ -10817,6 +11031,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
             cost: parseFloat(line.unitCost)||0,
             sellPrice: parseFloat(line.sellPrice)||0,
             receivedDate: today,
+            poId: selectedPO?.id||"",
             poRef: selectedPO?.poRef||"",
             supplier: selectedPO?.supplier||"",
             history: [{status:u.status||"Available",ts:new Date().toISOString(),note:`Received${selectedPO?.poRef?" via PO "+selectedPO.poRef:""}`}]
@@ -10827,7 +11042,9 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           if (sellPriceBlank) { product.variable_price = true; }
           else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
-          receiveHistory.push({ productName:line.name, category:line.category, qty:newUnits.length, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
+          // poId here (not just poRef) is what lets a later void reliably find exactly these units,
+          // even when the PO was left without a reference number.
+          receiveHistory.push({ productId:product.id, productName:line.name, category:line.category, qty:newUnits.length, unitCost:line.unitCost, receivedDate:today, poId:selectedPO?.id||"", poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
         } else {
           // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
@@ -10840,7 +11057,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           if (sellPriceBlank) { product.variable_price = true; }
           else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
-          receiveHistory.push({ productName:line.name, category:line.category, qty:parseInt(line.receivedQty)||0, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
+          receiveHistory.push({ productId:product.id, productName:line.name, category:line.category, qty:parseInt(line.receivedQty)||0, unitCost:line.unitCost, receivedDate:today, poId:selectedPO?.id||"", poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
         }
       }
 
