@@ -6237,6 +6237,31 @@ const getAvailableStock = (product) => {
   return product.stock || 0;
 };
 
+// Suggests which existing catalog product a PO line is restocking, so Receive Stock never has to
+// silently guess. Only ever a *suggestion* — an exact normalized-name match auto-picks it, anything
+// looser (same model but the storage/color words don't line up, a typo, a slightly different name
+// from an AI-scanned invoice) falls back to "no match" so staff have to confirm it themselves rather
+// than two different SKUs getting silently merged into one product.
+const suggestProductMatch = (catalog, line) => {
+  const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  const lineName = norm(line.name);
+  if (!lineName) return null;
+  const sameCategory = (catalog||[]).filter(p => p.category === line.category);
+  const exact = sameCategory.find(p => norm(p.name) === lineName);
+  if (exact) return exact;
+  const lineWords = lineName.split(" ").filter(w => w.length > 1);
+  if (!lineWords.length) return null;
+  let best = null, bestScore = 0;
+  sameCategory.forEach(p => {
+    const pName = norm(p.name);
+    const score = lineWords.filter(w => pName.includes(w)).length / lineWords.length;
+    if (score > bestScore) { bestScore = score; best = p; }
+  });
+  // Require near-total word overlap (e.g. storage/color words all present) before auto-matching —
+  // a partial match (same model, different storage/color) is exactly the case that should NOT merge.
+  return bestScore >= 0.85 ? best : null;
+};
+
 // Single place that actually creates a Purchase Order record: writes it as "Ordered" so it shows
 // up under the Purchases tab's Pending list, and logs the spend to Expenses. Anything that brings
 // stock into the business — a manually-entered PO or an AI-scanned invoice — should create a PO
@@ -9581,518 +9606,6 @@ function DebtLedger() {
   );
 }
 
-
-
-function StockReceiving({ products, onProductsUpdate, invoiceType, allPhones = [], onPhonesDone }) {
-  const E = React.createElement;
-  const [drafts, setDrafts] = useState([]);
-  const [activeDraft, setActiveDraft] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [view, setView] = useState("main"); // "main" | "po" | "history"
-  const [saving, setSaving] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  // AI scanning state
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState("");
-  const fileInputRef = React.useRef(null);
-
-  const scanInvoice = async (file) => {
-    // Phone invoices go through InvoiceImporter (already has full flow)
-    if (invoiceType === "phones") {
-      alert("For phone invoices, use the 📱 Phones tab → Import Invoice. This gives you full IMEI entry and per-device verification.");
-      return;
-    }
-    setScanning(true); setScanError("");
-    const typeHints = {
-      accessories: "accessories like phone cases, chargers, cables, screen protectors, headphones",
-      parts: "phone repair parts like screens, batteries, charging ports, cameras, back glass",
-      gadgets: "tech gadgets like smartwatches, earbuds, powerbanks, tablets",
-      mixture: "a mix of phone accessories, parts, and gadgets"
-    };
-    const typeHint = typeHints[invoiceType] || "phone shop accessories and parts";
-    try {
-      const base64 = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result.split(",")[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
-      const isPDF = file.type === "application/pdf";
-      const mediaType = isPDF ? "application/pdf" : file.type || "image/jpeg";
-
-      const response = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: [
-              isPDF
-                ? { type: "document", source: { type: "base64", media_type: mediaType, data: base64 } }
-                : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-              { type: "text", text: `You are parsing a supplier invoice for a phone shop. This invoice contains ${typeHint}. Extract all line items and invoice details.
-
-Return ONLY valid JSON, no markdown:
-{
-  "supplier": "supplier name or empty string",
-  "poRef": "invoice number or empty string",
-  "invoiceTotal": "total as number string or empty string",
-  "receivedDate": "date YYYY-MM-DD or empty string",
-  "lines": [
-    {
-      "name": "exact product name from invoice",
-      "qty": "quantity as number string",
-      "costPerUnit": "unit cost as number string",
-      "category": "one of: Accessories - Samsung Cases, Accessories - Apple Cases, Accessories- Samsung, Accessories- Apple, Parts & Components, Gadgets, Tablets, Other",
-      "barcode": "barcode or SKU if visible, else empty string"
-    }
-  ]
-}` }
-            ]
-          }]
-        })
-      });
-
-      const data = await response.json();
-      const text = data.content?.find(c=>c.type==="text")?.text || "";
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
-
-      if (parsed.supplier) setPO("supplier", parsed.supplier);
-      if (parsed.poRef) setPO("poRef", parsed.poRef);
-      if (parsed.invoiceTotal) setPO("invoiceTotal", parsed.invoiceTotal);
-      if (parsed.receivedDate) setPO("receivedDate", parsed.receivedDate);
-
-      if (parsed.lines?.length > 0) {
-        const newLines = parsed.lines.map(line => {
-          const q = (line.name||"").toLowerCase();
-          // Try to match to existing catalog
-          const match = products.find(p =>
-            p.name.toLowerCase().includes(q.slice(0,12)) ||
-            q.includes(p.name.toLowerCase().slice(0,12)) ||
-            (line.barcode && p.barcode === line.barcode)
-          );
-          return {
-            productId: match?.id || null,
-            name: match?.name || line.name,
-            aiName: line.name,
-            category: match?.category || line.category || "Other",
-            isNew: !match,
-            costPerUnit: line.costPerUnit || "",
-            qty: line.qty || "1",
-            barcode: line.barcode || match?.barcode || "",
-            sku: match?.sku || "",
-            price: match?.price || 0,
-            needsVerification: !match
-          };
-        });
-        setLines(newLines);
-        setView("po");
-        alert(`✅ Scanned ${parsed.lines.length} line items. Review — items flagged ⚠️ need to be matched or confirmed as new.`);
-      } else {
-        setScanError("No line items found. Try a clearer image or enter manually.");
-      }
-    } catch(e) {
-      setScanError("Scan failed: " + e.message);
-      console.error(e);
-    } finally { setScanning(false); }
-  };
-
-  // PO header state
-  const emptyPO = { supplier:"", poRef:"", invoiceTotal:"", shipping:"", tax:"", receivedDate:todayStr(), notes:"" };
-  const [po, setPOS] = useState(emptyPO);
-  const [savedPOs, setSavedPOs] = useState([]);
-  const [showPOPicker, setShowPOPicker] = useState(false);
-
-  useEffect(() => {
-    loadArr("tpp-purchase-orders").then(all => setSavedPOs((all||[]).filter(p=>p.status==="open")));
-  }, [view]);
-  const setPO = (k,v) => setPOS(p=>({...p,[k]:v}));
-
-  // Line items
-  const [lines, setLines] = useState([]);
-  const [search, setSearch] = useState("");
-  const [catFilter, setCatFilter] = useState("all");
-  const [searchResults, setSearchResults] = useState([]);
-  const [showNewLine, setShowNewLine] = useState(false);
-  const emptyNew = { name:"", category:"Accessory", price:"", costPerUnit:"", barcode:"", qty:"1", sku:"" };
-  const [newLine, setNewLine] = useState(emptyNew);
-  const setNL = (k,v) => setNewLine(p=>({...p,[k]:v}));
-
-  useEffect(() => {
-    loadArr("tpp-stock-receives").then(setHistory);
-    loadArr("tpp-po-drafts").then(setDrafts);
-  }, []);
-
-  // Categories from products
-  const categories = ["all", ...Array.from(new Set(products.map(p=>p.category).filter(Boolean))).sort()];
-
-  // Search
-  useEffect(() => {
-    if (!search.trim()) { setSearchResults([]); return; }
-    const q = search.toLowerCase();
-    const results = products.filter(p => {
-      const matchCat = catFilter === "all" || p.category === catFilter;
-      const matchQ = p.name.toLowerCase().includes(q) || (p.barcode||"").includes(q) || (p.sku||"").toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
-      return matchCat && matchQ;
-    }).slice(0,8);
-    setSearchResults(results);
-  }, [search, catFilter, products]);
-
-  const lineTotal = lines.reduce((s,l) => s + (parseFloat(l.costPerUnit)||0)*(parseInt(l.qty)||0), 0);
-  const invoiceAmt = parseFloat(po.invoiceTotal)||0;
-  const variance = invoiceAmt > 0 ? invoiceAmt - lineTotal : 0;
-  const reconciled = invoiceAmt > 0 && Math.abs(variance) < 0.01;
-
-  const addExistingLine = (product) => {
-    const existing = lines.find(l=>l.productId===product.id);
-    if (existing) { setLines(ls=>ls.map(l=>l.productId===product.id?{...l,qty:String(parseInt(l.qty)+1)}:l)); }
-    else { setLines(ls=>[...ls, { productId:product.id, name:product.name, category:product.category, isNew:false, costPerUnit:String(product.cost||0), qty:"1", barcode:product.barcode||"", sku:product.sku||"", price:product.price||0 }]); }
-    setSearch(""); setSearchResults([]);
-  };
-
-  const addNewLine = () => {
-    if (!newLine.name.trim()||!newLine.qty) { alert("Name and quantity required."); return; }
-    setLines(ls=>[...ls, { ...newLine, productId:null, isNew:true }]);
-    setNewLine(emptyNew); setShowNewLine(false);
-  };
-
-  const removeLine = (i) => setLines(ls=>ls.filter((_,idx)=>idx!==i));
-  const updateLine = (i,k,v) => setLines(ls=>ls.map((l,idx)=>idx===i?{...l,[k]:v}:l));
-
-  const saveDraft = async () => {
-    const draft = { id: activeDraft?.id || Date.now().toString(), po, lines, savedAt: new Date().toISOString() };
-    const updated = drafts.filter(d=>d.id!==draft.id);
-    updated.unshift(draft);
-    await save("tpp-po-drafts", updated);
-    setDrafts(updated); setActiveDraft(draft);
-    alert("✅ Draft saved. Resume anytime from the main screen.");
-  };
-
-  const loadDraft = (draft) => {
-    setPOS(draft.po); setLines(draft.lines); setActiveDraft(draft); setView("po");
-  };
-
-  const deleteDraft = async (id) => {
-    const updated = drafts.filter(d=>d.id!==id);
-    await save("tpp-po-drafts", updated); setDrafts(updated);
-    if (activeDraft?.id===id) { setPOS(emptyPO); setLines([]); setActiveDraft(null); }
-  };
-
-  const receiveAll = async () => {
-    if (lines.length===0) { alert("Add at least one line item."); return; }
-    if (invoiceAmt > 0 && !reconciled) {
-      const proceed = confirm(`⚠️ Invoice total (${fmtMoney(invoiceAmt)}) does not match line item sum (${fmtMoney(lineTotal)}).
-
-Variance: ${fmtMoney(Math.abs(variance))} ${variance>0?"short":"over"}.
-
-Proceed anyway?`);
-      if (!proceed) return;
-    }
-    const hasPO = po.supplier.trim() || po.poRef.trim();
-    setSaving(true);
-    try {
-      let updatedProducts = [...products];
-      const receiveEntries = [];
-      const todos = await loadArr("tpp-todos");
-      const newTodos = [];
-
-      for (const line of lines) {
-        const qty = parseInt(line.qty)||0;
-        const cost = parseFloat(line.costPerUnit)||0;
-
-        if (line.isNew) {
-          // Create new product
-          const newId = `new-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-          const newProduct = { id:newId, name:line.name, category:line.category, price:parseFloat(line.price)||0, cost, stock:qty, barcode:line.barcode||"", sku:line.sku||newId, variable_price:false, purchase_pending:!hasPO };
-          updatedProducts.unshift(newProduct);
-          receiveEntries.push({ id:Date.now().toString()+Math.random(), type:"new", productId:newId, productName:line.name, qty, costPerUnit:cost, poRef:po.poRef, supplier:po.supplier, receivedDate:po.receivedDate, purchase_pending:!hasPO, createdAt:new Date().toISOString() });
-        } else {
-          // Update existing
-          updatedProducts = updatedProducts.map(p => p.id===line.productId ? {...p, stock:(p.stock||0)+qty, cost:cost||p.cost, purchase_pending:!hasPO} : p);
-          receiveEntries.push({ id:Date.now().toString()+Math.random(), type:"existing", productId:line.productId, productName:line.name, qty, costPerUnit:cost, poRef:po.poRef, supplier:po.supplier, receivedDate:po.receivedDate, purchase_pending:!hasPO, createdAt:new Date().toISOString() });
-        }
-      }
-
-      if (!hasPO) {
-        newTodos.push({ id:Date.now().toString(), text:`Add purchase details for PO received ${po.receivedDate} — ${lines.length} items, total JMD ${fmtMoney(lineTotal)}`, createdAt:new Date().toISOString(), resolved:false, source:"system", priority:"high" });
-      }
-
-      await onProductsUpdate(updatedProducts);
-      const updatedHistory = [...receiveEntries, ...history];
-      await save("tpp-stock-receives", updatedHistory);
-      setHistory(updatedHistory);
-      if (newTodos.length) await save("tpp-todos", [...newTodos, ...todos]);
-
-      // Remove draft if this was one
-      if (activeDraft) {
-        const updatedDrafts = drafts.filter(d=>d.id!==activeDraft.id);
-        await save("tpp-po-drafts", updatedDrafts); setDrafts(updatedDrafts);
-      }
-
-      // If invoiceType is phones, prompt to add to phone inventory
-      if (invoiceType === "phones" && receiveEntries.length > 0) {
-        const allCurrentPhones = allPhones ? [...allPhones] : await loadArr("tpp-phones-v1") || [];
-        const newPhoneEntries = [];
-        for (const entry of receiveEntries) {
-          for (let u = 0; u < entry.qty; u++) {
-            const imei = prompt(`Enter IMEI for unit ${u+1} of ${entry.qty}:\n${entry.productName}\n(Leave blank to skip this unit)`);
-            if (imei === null) break; // cancelled
-            const phone = {
-              id: Date.now().toString() + Math.random().toString(36).slice(2,6),
-              make: entry.make || "", model: entry.model || entry.productName,
-              storage: entry.storage || "", color: entry.color || "",
-              imei: imei.trim(), availability: "Available",
-              total_invoice: String(entry.costPerUnit||0),
-              expected_sell: "", order_number: po.poRef||"",
-              supplier: po.supplier||"", receivedDate: po.receivedDate,
-              source: "po_receive", poRef: po.poRef||"",
-              createdAt: new Date().toISOString(),
-              history: [{ status:"Available", ts:new Date().toISOString(), note:`Received via PO: ${po.poRef||"manual"}` }]
-            };
-            newPhoneEntries.push(phone);
-          }
-        }
-        if (newPhoneEntries.length > 0 && onPhonesDone) {
-          const updatedPhones = [...newPhoneEntries, ...allCurrentPhones];
-          await save("tpp-phones-v1", updatedPhones);
-          onPhonesDone(updatedPhones);
-        }
-      }
-
-      setPOS(emptyPO); setLines([]); setActiveDraft(null); setView("main");
-      setSaving(false);
-      const phoneMsg = invoiceType==="phones" ? " Phone inventory updated." : "";
-      alert(`✅ Received ${lines.length} line items across ${receiveEntries.reduce((s,e)=>s+e.qty,0)} total units.${phoneMsg}${!hasPO?" ⚠️ To-do created to add purchase details.":""}`);
-      if (onPhonesDone && invoiceType==="phones") onPhonesDone();
-    } catch(e) {
-      setSaving(false);
-      alert("Error: " + e.message);
-    }
-  };
-
-  // ── MAIN VIEW ─────────────────────────────────────────────────────────────
-  if (view === "main") return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
-    E("div", { style:{ marginBottom:20 } },
-      E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, margin:0 } }, "📥 Receive Stock"),
-      E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Log incoming stock against a purchase order. Draft and resume at any time.")
-    ),
-    drafts.length > 0 && E("div", { style:{ marginBottom:20 } },
-      E(ST, null, `Saved Drafts (${drafts.length})`),
-      E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-        drafts.map((d,i) => E(Card, { key:i, style:{ borderLeft:`3px solid ${T.amber}` } },
-          E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
-            E("div", null,
-              E("div", { style:{ fontWeight:600, fontSize:13 } }, d.po.supplier||"No supplier", d.po.poRef ? ` — ${d.po.poRef}` : ""),
-              E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } }, `${d.lines.length} line items · Saved ${fmtDate(d.savedAt)}`)
-            ),
-            E("div", { style:{ display:"flex", gap:8 } },
-              E(Btn, { style:{ fontSize:12, padding:"6px 12px" }, onClick:()=>loadDraft(d) }, "▶ Continue"),
-              E(Btn, { variant:"danger", style:{ fontSize:12, padding:"6px 12px" }, onClick:()=>deleteDraft(d.id) }, "✕")
-            )
-          )
-        ))
-      )
-    ),
-    E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 } },
-      E("button", { onClick:()=>setView("po"), style:{ background:T.card, border:`2px solid ${T.blue}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
-        E("div", { style:{ fontSize:28, marginBottom:8 } }, "📦"),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "New Purchase Order"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Receive one or many items against a PO")
-      ),
-      E("button", { onClick:()=>fileInputRef.current?.click(), style:{ background:T.card, border:`2px solid ${T.blue}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit", position:"relative" } },
-        scanning && E("div", { style:{ position:"absolute", inset:0, background:"rgba(255,255,255,0.8)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:T.blue } }, "🤖 Scanning…"),
-        E("div", { style:{ fontSize:28, marginBottom:8 } }, "🤖"),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "Scan Invoice (AI)"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, "Upload PDF or photo — AI fills the form")
-      ),
-      E("button", { onClick:()=>setView("history"), style:{ background:T.card, border:`2px solid ${T.border}`, borderRadius:12, padding:"24px 20px", textAlign:"center", cursor:"pointer", fontFamily:"inherit" } },
-        E("div", { style:{ fontSize:28, marginBottom:8 } }, "📋"),
-        E("div", { style:{ fontWeight:700, fontSize:14, color:T.text } }, "Receive History"),
-        E("div", { style:{ fontSize:12, color:T.muted, marginTop:4 } }, `${history.length} entries logged`)
-      )
-    ),
-    E("input", { ref:fileInputRef, type:"file", accept:"image/*,application/pdf", style:{ display:"none" }, onChange:e=>{ if(e.target.files[0]) scanInvoice(e.target.files[0]); e.target.value=""; } }),
-    scanError && E("div", { style:{ background:T.redLt, border:`1px solid #FECACA`, borderRadius:10, padding:"12px 14px", fontSize:13, color:T.red, marginTop:12 } }, scanError)
-  );
-
-  // ── HISTORY VIEW ──────────────────────────────────────────────────────────
-  if (view === "history") return E("div", { style:{ maxWidth:600, margin:"0 auto" } },
-    E("button", { onClick:()=>setView("main"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", marginBottom:16, padding:0 } }, "← Back"),
-    E("h2", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:20, marginBottom:16 } }, "Receive History"),
-    history.length===0 ? E("div", { style:{ textAlign:"center", padding:"40px 20px", color:T.muted } }, "No stock received yet.") :
-    E("div", { style:{ display:"flex", flexDirection:"column", gap:8 } },
-      history.slice(0,30).map((h,i) => E(Card, { key:i, style:{ borderLeft:`3px solid ${h.purchase_pending?T.amber:T.green}` } },
-        E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center" } },
-          E("div", null,
-            E("div", { style:{ fontWeight:600, fontSize:13 } }, h.productName),
-            E("div", { style:{ fontSize:11, color:T.muted, marginTop:2 } },
-              `${h.qty} units`, h.costPerUnit?` · JMD ${fmtMoney(h.costPerUnit)}/unit`:"",
-              h.supplier?` · ${h.supplier}`:"", h.poRef?` · PO: ${h.poRef}`:"",
-              ` · ${h.receivedDate||fmtDate(h.createdAt)}`
-            )
-          ),
-          h.purchase_pending && E("span", { style:{ background:T.amberLt, color:T.amber, borderRadius:6, padding:"3px 8px", fontSize:11, fontWeight:700, whiteSpace:"nowrap" } }, "⚠️ PO pending")
-        )
-      ))
-    )
-  );
-
-  // ── PO ENTRY VIEW ─────────────────────────────────────────────────────────
-  return E("div", { style:{ maxWidth:680, margin:"0 auto" } },
-    E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 } },
-      E("button", { onClick:()=>setView("main"), style:{ background:"none", border:"none", color:T.blue, fontWeight:700, fontSize:13, cursor:"pointer", padding:0 } }, "← Back"),
-      E("div", { style:{ display:"flex", gap:8 } },
-        E(Btn, { variant:"ghost", style:{ fontSize:12, padding:"7px 12px" }, onClick:saveDraft }, "💾 Save Draft"),
-        E(Btn, { style:{ fontSize:12, padding:"7px 12px" }, disabled:saving||lines.length===0, onClick:receiveAll }, saving?"Receiving…":"📥 Receive All")
-      )
-    ),
-    lines.some(l=>l.needsVerification) && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"10px 14px", fontSize:13, color:T.amber, marginBottom:16, fontWeight:600 } },
-      `⚠️ ${lines.filter(l=>l.needsVerification).length} AI-scanned item(s) need to be matched to your catalog or confirmed as new. Use the dropdown on each flagged line.`
-    ),
-    E(Card, { style:{ marginBottom:16 } },
-      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 } },
-        E(ST, { style:{ margin:0 } }, "Purchase Order Details"),
-        savedPOs.length > 0 && E("button", { onClick:()=>setShowPOPicker(s=>!s), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" } }, "📄 Load Saved PO")
-      ),
-      showPOPicker && E("div", { style:{ background:"#F9FAFB", border:`1px solid ${T.border}`, borderRadius:8, padding:12, marginBottom:12 } },
-        savedPOs.map((sp,i) => E("div", { key:i, onClick:()=>{ setPOS({ supplier:sp.supplier, poRef:sp.poRef||"", invoiceTotal:String(sp.total||""), receivedDate:sp.date||todayStr(), notes:sp.notes||"" }); setShowPOPicker(false); }, style:{ padding:"8px 12px", cursor:"pointer", background:"#fff", borderRadius:6, marginBottom:6, border:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between" } },
-          E("div", null,
-            E("div", { style:{ fontWeight:600, fontSize:13 } }, sp.supplier, sp.poRef ? ` — ${sp.poRef}` : ""),
-            E("div", { style:{ fontSize:11, color:T.muted } }, sp.date, sp.total ? ` · ${fmtMoney(sp.total)}` : "")
-          ),
-          E("span", { style:{ color:T.blue, fontSize:12, fontWeight:700 } }, "Load →")
-        ))
-      ),
-      E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 } },
-        E(Field, { label:"Supplier" }, E(Input, { placeholder:"e.g. Cell Parts JA", value:po.supplier, onChange:e=>setPO("supplier",e.target.value) })),
-        E(Field, { label:"PO / Invoice Reference" }, E(Input, { placeholder:"Invoice # or PO number", value:po.poRef, onChange:e=>setPO("poRef",e.target.value) })),
-        E(Field, { label:"Invoice Total (JMD)", hint:"For reconciliation" }, E(Input, { type:"number", placeholder:"0.00", value:po.invoiceTotal, onChange:e=>setPO("invoiceTotal",e.target.value) })),
-        E(Field, { label:"Shipping Cost (USD)" }, E(Input, { type:"number", placeholder:"0.00", value:po.shipping||"", onChange:e=>setPO("shipping",e.target.value) })),
-        E(Field, { label:"Tax Amount (USD)" }, E(Input, { type:"number", placeholder:"0.00", value:po.tax||"", onChange:e=>setPO("tax",e.target.value) })),
-        E(Field, { label:"Date Received" }, E(Input, { type:"date", value:po.receivedDate, onChange:e=>setPO("receivedDate",e.target.value) }))
-      ),
-      E(Field, { label:"Notes" }, E(Input, { placeholder:"Optional", value:po.notes, onChange:e=>setPO("notes",e.target.value) }))
-    ),
-
-    // Line items
-    E(Card, { style:{ marginBottom:16 } },
-      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 } },
-        E(ST, { style:{ margin:0 } }, `Line Items (${lines.length})`),
-        E("div", { style:{ display:"flex", gap:8 } },
-          E("button", { onClick:()=>setShowNewLine(s=>!s), style:{ background:T.blueLt, color:T.blue, border:`1px solid ${T.border}`, borderRadius:7, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" } }, showNewLine?"✕ Cancel":"✨ New Item")
-        )
-      ),
-
-      // Search existing
-      E("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
-        E(Sel, { value:catFilter, onChange:e=>setCatFilter(e.target.value), style:{ width:"auto", minWidth:140 } },
-          categories.map(c=>E("option",{key:c,value:c}, c==="all"?"All Categories":c))
-        ),
-        E(Input, { placeholder:"Search by name, SKU, barcode...", value:search, onChange:e=>setSearch(e.target.value), style:{ flex:1 } })
-      ),
-      searchResults.length>0 && E("div", { style:{ border:`1px solid ${T.border}`, borderRadius:8, overflow:"hidden", marginBottom:12 } },
-        searchResults.map((p,i)=>E("div", { key:i, onClick:()=>addExistingLine(p), style:{ padding:"9px 14px", cursor:"pointer", borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", alignItems:"center" } },
-          E("div", null,
-            E("div", { style:{ fontWeight:600, fontSize:13 } }, p.name),
-            E("div", { style:{ fontSize:11, color:T.muted } }, p.category, p.sku?` · SKU: ${p.sku}`:"", p.barcode?` · ${p.barcode}`:"", ` · Stock: ${p.stock||0}`)
-          ),
-          E("div", { style:{ color:T.blue, fontWeight:700, fontSize:12 } }, fmtMoney(p.price))
-        ))
-      ),
-
-      // New item inline form
-      showNewLine && E("div", { style:{ background:"#F9FAFB", borderRadius:10, padding:"12px 14px", marginBottom:12, border:`1px solid ${T.border}` } },
-        E(ST, null, "New Item"),
-        E("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 } },
-          E(Field, { label:"Name", required:true }, E(Input, { placeholder:"Product name", value:newLine.name, onChange:e=>setNL("name",e.target.value) })),
-          E(Field, { label:"Category" }, E(Sel, { value:newLine.category, onChange:e=>setNL("category",e.target.value) }, ["Accessory","Case","Charger","Screen Protector","Cable","Headphones","Gadget","Other"].map(c=>E("option",{key:c},c)))),
-          E(Field, { label:"Selling Price (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newLine.price, onChange:e=>setNL("price",e.target.value) })),
-          E(Field, { label:"Cost per Unit (JMD)" }, E(Input, { type:"number", placeholder:"0", value:newLine.costPerUnit, onChange:e=>setNL("costPerUnit",e.target.value) })),
-          E(Field, { label:"Quantity" }, E(Input, { type:"number", placeholder:"1", value:newLine.qty, onChange:e=>setNL("qty",e.target.value) })),
-          E(Field, { label:"Barcode / SKU" }, E(Input, { placeholder:"Optional", value:newLine.barcode, onChange:e=>setNL("barcode",e.target.value) }))
-        ),
-        E(Btn, { onClick:addNewLine, style:{ fontSize:12 } }, "+ Add to Order")
-      ),
-
-      // Line items list
-      lines.length===0 ? E("div", { style:{ textAlign:"center", padding:"24px 20px", color:T.muted, fontSize:13 } }, "Search for existing items or create new ones above to add to this order.")
-      : E("div", null,
-        lines.map((line,i) => E("div", { key:i, style:{ display:"flex", alignItems:"center", gap:8, padding:"10px 0", borderTop:`1px solid ${T.border}` } },
-          E("div", { style:{ flex:1, minWidth:0 } },
-            E("div", { style:{ fontWeight:600, fontSize:13, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", display:"flex", alignItems:"center", gap:6 } },
-              line.name,
-              line.needsVerification && E("span", { style:{ background:T.amberLt, color:T.amber, fontSize:10, fontWeight:700, borderRadius:4, padding:"1px 5px", flexShrink:0 } }, "⚠️ Unmatched"),
-              line.isNew && !line.needsVerification && E("span", { style:{ background:T.blueLt, color:T.blue, fontSize:10, fontWeight:700, borderRadius:4, padding:"1px 5px", flexShrink:0 } }, "NEW")
-            ),
-            E("div", { style:{ fontSize:11, color:T.muted } }, line.category, line.isNew ? "" : (line.sku ? ` · SKU: ${line.sku}` : ""),
-              line.aiName && line.aiName !== line.name && E("span", { style:{ color:T.amber, marginLeft:4 } }, `(AI read: "${line.aiName}")`)
-            ),
-            line.needsVerification && E("div", { style:{ marginTop:4 } },
-              E("select", { value: line.productId||"", onChange: e=>{
-                const pid = e.target.value;
-                if (pid === "__new__") {
-                  updateLine(i, "productId", null); updateLine(i, "isNew", true); updateLine(i, "needsVerification", false);
-                } else if (pid) {
-                  const match = products.find(p=>p.id===pid);
-                  if (match) {
-                    updateLine(i, "productId", pid); updateLine(i, "name", match.name); updateLine(i, "category", match.category);
-                    updateLine(i, "sku", match.sku||""); updateLine(i, "isNew", false); updateLine(i, "needsVerification", false);
-                    updateLine(i, "price", match.price||0);
-                  }
-                }
-              }, style:{ ...iS, fontSize:11, padding:"4px 6px", marginTop:2 } },
-                E("option", { value:"" }, "— Match to existing product —"),
-                products.filter(p=>{
-                  const q = (line.aiName||line.name).toLowerCase();
-                  return p.name.toLowerCase().includes(q.slice(0,8)) || q.includes(p.name.toLowerCase().slice(0,8));
-                }).slice(0,8).map(p=>E("option",{key:p.id,value:p.id}, p.name)),
-                E("option", { value:"__new__" }, "✨ Add as new product")
-              )
-            )
-          ),
-          E("div", { style:{ display:"flex", gap:6, alignItems:"center", flexShrink:0 } },
-            E("div", { style:{ display:"flex", flexDirection:"column", gap:2 } },
-              E("span", { style:{ fontSize:10, color:T.muted } }, "Qty"),
-              E("input", { type:"number", value:line.qty, onChange:e=>updateLine(i,"qty",e.target.value), style:{ ...iS, width:60, padding:"5px 8px", fontSize:13, textAlign:"center" }, min:1 })
-            ),
-            E("div", { style:{ display:"flex", flexDirection:"column", gap:2 } },
-              E("span", { style:{ fontSize:10, color:T.muted } }, "Cost/unit"),
-              E("input", { type:"number", value:line.costPerUnit, onChange:e=>updateLine(i,"costPerUnit",e.target.value), style:{ ...iS, width:90, padding:"5px 8px", fontSize:13 }, placeholder:"0" })
-            ),
-            E("div", { style:{ textAlign:"right", minWidth:72 } },
-              E("div", { style:{ fontSize:10, color:T.muted } }, "Line total"),
-              E("div", { style:{ fontWeight:700, fontSize:13, color:T.blue } }, fmtMoney((parseFloat(line.costPerUnit)||0)*(parseInt(line.qty)||0)))
-            ),
-            E("button", { onClick:()=>removeLine(i), style:{ background:T.redLt, color:T.red, border:"none", borderRadius:6, padding:"6px 8px", fontWeight:700, cursor:"pointer", fontSize:12 } }, "✕")
-          )
-        )),
-        E("div", { style:{ borderTop:`2px solid ${T.border}`, paddingTop:12, marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 } },
-          E("div", { style:{ fontSize:13, color:T.muted } }, `${lines.length} line items · ${lines.reduce((s,l)=>s+(parseInt(l.qty)||0),0)} total units`),
-          E("div", { style:{ textAlign:"right" } },
-            E("div", { style:{ fontSize:13 } }, "Lines total: ", E("strong", null, fmtMoney(lineTotal))),
-            invoiceAmt>0 && E("div", { style:{ fontSize:12, marginTop:4, color:reconciled?T.green:T.red, fontWeight:600 } },
-              reconciled ? "✅ Matches invoice total" : `⚠️ Variance: ${fmtMoney(Math.abs(variance))} ${variance>0?"short":"over"}`
-            )
-          )
-        )
-      )
-    ),
-
-    !po.supplier&&!po.poRef && E("div", { style:{ background:T.amberLt, border:`1px solid #FDE68A`, borderRadius:10, padding:"12px 16px", fontSize:12, color:T.amber, marginBottom:16, lineHeight:1.6 } },
-      "⚠️ No supplier or PO reference entered. A To Do will be created to remind you to add purchase details after receiving."
-    ),
-
-    E("div", { style:{ display:"flex", gap:10, justifyContent:"flex-end" } },
-      E(Btn, { variant:"ghost", onClick:saveDraft }, "💾 Save Draft"),
-      E(Btn, { disabled:saving||lines.length===0, onClick:receiveAll }, saving?"Receiving…":`📥 Receive All (${lines.length} items)`)
-    )
-  );
-}
-
 // ── Root ──────────────────────────────────────────────────────────────────────
 // ── To Do Tab ─────────────────────────────────────────────────────────────────
 function ToDoTab({ isOwner }) {
@@ -11186,16 +10699,21 @@ function ReceiveStockTab({ onCatalogUpdate }) {
   // Set up receive lines from a PO
   const loadPOForReceiving = (po) => {
     setSelectedPO(po);
-    setReceiveLines((po.lines||[]).map(l=>({
-      ...l,
-      receivedQty: l.qty,
-      // A line created from the AI Invoice Scanner already carries the IMEI(s) it read off the
-      // invoice (l.imeis) — pre-fill those instead of leaving staff to retype what was already extracted.
-      units: isImeiCategory(l.category) ? Array.from({length:l.qty},(_,i)=>({tempId:i,imei:(l.imeis&&l.imeis[i])||"",status:"Available"})) : [],
-      matchedProductId: null,
-      isNew: false,
-      sellPrice: "",
-    })));
+    setReceiveLines((po.lines||[]).map(l=>{
+      // Suggest which catalog product this line restocks — staff confirm or change it before
+      // committing, so attribution is always an explicit choice, never a silent string match.
+      const suggested = suggestProductMatch(catalog, l);
+      return {
+        ...l,
+        receivedQty: l.qty,
+        // A line created from the AI Invoice Scanner already carries the IMEI(s) it read off the
+        // invoice (l.imeis) — pre-fill those instead of leaving staff to retype what was already extracted.
+        units: isImeiCategory(l.category) ? Array.from({length:l.qty},(_,i)=>({tempId:i,imei:(l.imeis&&l.imeis[i])||"",status:"Available"})) : [],
+        matchedProductId: suggested ? suggested.id : null,
+        isNew: !suggested,
+        sellPrice: "",
+      };
+    }));
     setView("imei_entry");
   };
 
@@ -11225,10 +10743,9 @@ function ReceiveStockTab({ onCatalogUpdate }) {
         const sellPriceBlank = String(line.sellPrice||"").trim()==="";
 
         if (isImei) {
-          // Find or create catalog product
-          let product = updatedCatalog.find(p=>
-            p.name?.toLowerCase()===line.name.toLowerCase() && p.category===line.category
-          );
+          // Attribution is explicit now — whatever staff picked (or left as "Create New") in the
+          // "Attributing To" dropdown on this line, never a silent name/category string match.
+          let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
             product = {
               id: `prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
@@ -11259,8 +10776,8 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
           receiveHistory.push({ productName:line.name, category:line.category, qty:newUnits.length, unitCost:line.unitCost, receivedDate:today, poRef:selectedPO?.poRef||"", supplier:selectedPO?.supplier||"", createdAt:new Date().toISOString() });
         } else {
-          // Non-IMEI: just add to stock count
-          let product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
+          // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
+          let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
             product = { id:`prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, name:line.name, category:line.category, price:parseFloat(line.sellPrice)||0, cost:parseFloat(line.unitCost)||0, stock:0, units:[], variable_price:sellPriceBlank, createdAt:new Date().toISOString() };
             updatedCatalog = [product, ...updatedCatalog];
@@ -11347,6 +10864,20 @@ function ReceiveStockTab({ onCatalogUpdate }) {
             isImei&&E("div",{style:{display:"flex",gap:6}},
               E("button",{onClick:()=>{setImeiTargetLine({lineIdx:li,unitIdx:0});setShowImeiScanner(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"📷 Scan IMEI")
             )
+          ),
+          E("div",{style:{marginBottom:10}},
+            E(Field,{label:"Attributing To"},
+              E(Sel,{
+                value: line.matchedProductId||"",
+                onChange: e => { const val=e.target.value; setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,matchedProductId: val||null, isNew: !val}:l)); }
+              },
+                E("option",{value:""},"+ Create New Product"),
+                catalog.filter(p=>p.category===line.category).map(p=>E("option",{key:p.id,value:p.id},`${p.name} — current stock: ${getAvailableStock(p)}`))
+              )
+            ),
+            line.isNew
+              ? E("div",{style:{fontSize:11,color:T.amber,marginTop:4,fontWeight:600}},"⚠️ No confident match — this will create a new catalog product. Pick an existing one above if this is a restock.")
+              : E("div",{style:{fontSize:11,color:T.green,marginTop:4,fontWeight:600}},"✅ These unit(s) will be added to this existing product.")
           ),
           E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
             E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))})),
