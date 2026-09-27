@@ -181,9 +181,16 @@ const DEVICE_STORAGE = ["16GB","32GB","64GB","128GB","256GB","512GB","1TB","N/A"
 const WARRANTY_KEY = "tpp-warranty-settings";
 let WARRANTY_SETTINGS = {
   repairDays: 7,
-  repairNote: "Does not cover new or unrelated faults.",
-  phoneDays: 7,
-  phoneNote: "No warranty on water-damaged or physically damaged devices after sale.",
+  repairNote: "Covers only the specific repair performed. Does not cover unrelated faults, cosmetic flaws (including wear and tear), unintended or improper use, or water/physical damage occurring after the repair. Void if the device is opened, modified, or serviced by anyone other than The Phone Plug after the original repair.",
+  partsDays: 3,
+  partsNote: "Parts purchased but not installed by The Phone Plug must be reported and returned within this window to be eligible for exchange. The Phone Plug is not responsible for damage caused by installation, and cannot verify the cause of a defect once a part has been installed by the customer or a third party.",
+  // 30 days, not the old 7 — closer to (though still short of) the Consumer Protection Act's
+  // default 6-month implied warranty on goods sold without an explicit term (s.21(6)). The note
+  // below is worded as a scope limit (damage caused by the customer after sale), not as a blanket
+  // "no warranty" past this window, since s.41 of the Act says liability for the Sale of Goods
+  // Act's implied conditions (merchantable quality, fitness for purpose) can't be contracted away.
+  phoneDays: 30,
+  phoneNote: "Covers manufacturer's faults affecting functionality, reported within the warranty period. If the device cannot be repaired, it will be replaced with a comparable functional unit. Does not cover cosmetic flaws (including wear and tear), unintended or improper use, water damage, or physical damage. Screen issues must be reported within 3 days of purchase.",
   accessoryNote: "Non-refundable after 24 hours. Exchange only with original receipt."
 };
 const loadWarrantySettings = async () => {
@@ -305,13 +312,45 @@ ${WARRANTY_SETTINGS.repairDays}-day warranty on the specific repair performed on
 
 6. AUTHORISATION
 By signing, you confirm you are the rightful owner and have read and accept these terms.`;
-const buildWarrantyFooterText = () => `WARRANTY & TERMS
-• Repairs: ${WARRANTY_SETTINGS.repairDays}-day warranty on specific repair only. ${WARRANTY_SETTINGS.repairNote}
-• Accessories: ${WARRANTY_SETTINGS.accessoryNote}
-• Phones: ${WARRANTY_SETTINGS.phoneDays}-day warranty. ${WARRANTY_SETTINGS.phoneNote}
-• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.
-• Devices uncollected after 3 days of notification may incur storage fees.
-Thank you for choosing The Phone Plug!`;
+// Figures out which warranty categories actually apply to a sale, from what's in its cart —
+// so a receipt for a $500 screen protector doesn't also carry phone/repair warranty language
+// that has nothing to do with what was bought. Items are tagged this way at add-to-cart time:
+//  - "ticket"        → a repair-ticket deposit/balance payment           → Repairs
+//  - "product" whose id starts with "svc-" → a SERVICES_CATALOG line item → Repairs
+//  - "catalog_phone" → an IMEI-tracked phone unit sold                  → Phones
+//  - "product" with category "Parts & Components"                       → Parts
+//  - any other "product" (cases, chargers, tempered glass, etc.)        → Accessories
+const classifySaleWarranties = (sale) => {
+  const has = { repairs: false, parts: false, accessories: false, phones: false };
+  (sale?.items || []).forEach(item => {
+    if (item.type === "ticket") { has.repairs = true; return; }
+    if (item.type === "catalog_phone") { has.phones = true; return; }
+    if (item.type === "product") {
+      if (typeof item.id === "string" && item.id.startsWith("svc-")) { has.repairs = true; return; }
+      if (item.raw?.category === "Parts & Components") { has.parts = true; return; }
+      has.accessories = true;
+    }
+  });
+  return has;
+};
+// sale is optional — omit it (or pass nothing matchable) to fall back to showing every section,
+// which keeps this safe to call from anywhere that doesn't have cart-level detail on hand.
+const buildWarrantyFooterText = (sale) => {
+  const has = sale ? classifySaleWarranties(sale) : { repairs: true, parts: true, accessories: true, phones: true };
+  const anyMatched = has.repairs || has.parts || has.accessories || has.phones;
+  if (!anyMatched) has.repairs = has.parts = has.accessories = has.phones = true; // unrecognized items — show everything rather than nothing
+  const lines = ["WARRANTY & TERMS"];
+  if (has.repairs) lines.push(`• Repairs: ${WARRANTY_SETTINGS.repairDays}-day warranty on specific repair only. ${WARRANTY_SETTINGS.repairNote}`);
+  if (has.parts) lines.push(`• Parts (self-install / installed elsewhere): must be returned within ${WARRANTY_SETTINGS.partsDays} days of purchase. ${WARRANTY_SETTINGS.partsNote}`);
+  if (has.accessories) lines.push(`• Accessories: ${WARRANTY_SETTINGS.accessoryNote}`);
+  if (has.phones) lines.push(`• Phones: ${WARRANTY_SETTINGS.phoneDays}-day warranty. ${WARRANTY_SETTINGS.phoneNote}`);
+  if (has.repairs) {
+    lines.push(`• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.`);
+    lines.push(`• Devices uncollected after 3 days of notification may incur storage fees.`);
+  }
+  lines.push(`Thank you for choosing The Phone Plug!`);
+  return lines.join("\n");
+};
 
 // ── Customer field validation ────────────────────────────────────────────────
 // Phone: exactly 11 digits once formatting characters are stripped.
@@ -5947,7 +5986,7 @@ const sendReceiptEmail = async (sale, overrideEmail) => {
       scotia_transfer:sale.scotia_transfer>0?fmtMoney(sale.scotia_transfer):"—",
       other_payment:sale.other_payment>0?fmtMoney(sale.other_payment):"—",
       change:sale.change>0?fmtMoney(sale.change):"—",
-      warranty:buildWarrantyFooterText(), served_by:servedName,
+      warranty:buildWarrantyFooterText(sale), served_by:servedName,
     });
     return true;
   } catch(e){console.error("Email error:",e);return false;}
@@ -6033,7 +6072,7 @@ const printReceipt = (sale) => {
   <hr>
   <table>${payLines}</table>
   <hr>
-  <div class="warranty">${buildWarrantyFooterText()}</div>
+  <div class="warranty">${buildWarrantyFooterText(sale)}</div>
   <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
   </body></html>`;
   const w=window.open("","_blank","width=400,height=600");
@@ -10270,6 +10309,8 @@ function SettingsTab() {
       await saveWarrantySettings({
         repairDays: parseInt(warranty.repairDays)||0,
         repairNote: warranty.repairNote||"",
+        partsDays: parseInt(warranty.partsDays)||0,
+        partsNote: warranty.partsNote||"",
         phoneDays: parseInt(warranty.phoneDays)||0,
         phoneNote: warranty.phoneNote||"",
         accessoryNote: warranty.accessoryNote||""
@@ -10302,6 +10343,10 @@ function SettingsTab() {
             E("div",{style:{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:12,alignItems:"start"}},
               E(Field,{label:"Repair (days)"},E(Input,{type:"number",min:"0",value:warranty.repairDays,onChange:e=>setW("repairDays",e.target.value)})),
               E(Field,{label:"Repair warranty note"},E(Input,{value:warranty.repairNote,onChange:e=>setW("repairNote",e.target.value)}))
+            ),
+            E("div",{style:{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:12,alignItems:"start"}},
+              E(Field,{label:"Parts (days)"},E(Input,{type:"number",min:"0",value:warranty.partsDays,onChange:e=>setW("partsDays",e.target.value)})),
+              E(Field,{label:"Parts return note"},E(Input,{value:warranty.partsNote,onChange:e=>setW("partsNote",e.target.value)}))
             ),
             E("div",{style:{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:12,alignItems:"start"}},
               E(Field,{label:"Phone (days)"},E(Input,{type:"number",min:"0",value:warranty.phoneDays,onChange:e=>setW("phoneDays",e.target.value)})),
