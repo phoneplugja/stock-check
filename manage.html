@@ -8408,6 +8408,7 @@ function RedeemSpinPanel({ user }) {
     if (!q) return;
     setSearching(true);
     try {
+      await _authReady;
       const qCode = q.toUpperCase().replace(/\s+/g, "");
       const qPhone10 = q.replace(/\D/g, "").slice(-10);
       let matches = [];
