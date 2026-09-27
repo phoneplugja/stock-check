@@ -17,6 +17,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script>
     firebase.initializeApp({
       apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
@@ -27,6 +28,11 @@
       appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
     });
     const _db = firebase.firestore();
+    // Anonymous auth so Firestore rules can require request.auth != null — same pattern
+    // as manage.html. Without this, every read/write here gets rejected as "Missing or
+    // insufficient permissions" the moment the rules require a signed-in request.
+    const _auth = firebase.auth();
+    const _authReady = _auth.signInAnonymously().catch(e => console.error("Anonymous auth failed:", e));
   </script>
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -115,11 +121,14 @@
     // protecting margin on both small tickets (the % keeps payouts proportional) and large
     // ones (the cap stops a big spin from wiping out a big-ticket repair). Weighted odds;
     // order matters for the cumulative-weight pick below.
+    // Colors move along the same blue→violet→coral sweep as the rest of the site's gradient
+    // system, instead of unrelated pie-chart hues — so the wheel reads as one brand object,
+    // and the rare top prize (25%) lands on the warmest, most "special" end of the sweep.
     const PRIZES = [
-      { percent: 10, cap: 500,  weight: 50, color: "#0e88bd", colorLt: "#22c2f2" },
-      { percent: 15, cap: 750,  weight: 30, color: "#059669", colorLt: "#10b981" },
-      { percent: 20, cap: 1000, weight: 15, color: "#b45309", colorLt: "#f59e0b" },
-      { percent: 25, cap: 1500, weight: 5,  color: "#be123c", colorLt: "#e11d48" },
+      { percent: 10, cap: 500,  weight: 50, color: "#0e88bd", colorLt: "#3fc4f0" },
+      { percent: 15, cap: 750,  weight: 30, color: "#5850e0", colorLt: "#8579ff" },
+      { percent: 20, cap: 1000, weight: 15, color: "#9147e8", colorLt: "#b87bff" },
+      { percent: 25, cap: 1500, weight: 5,  color: "#e0457e", colorLt: "#ff7aa8" },
     ];
     const CODE_VALID_DAYS = 45;
 
@@ -224,21 +233,34 @@
               transform:`rotate(${rotation}deg)`,
               transition: spinning ? "transform 4.6s cubic-bezier(0.14, 0.75, 0.13, 1)" : "none"
             }}>
+            <defs>
+              {PRIZES.map(p => (
+                <radialGradient key={p.percent} id={`wheelGrad${p.percent}`} cx="50%" cy="50%" r="75%">
+                  <stop offset="0%" stopColor={p.colorLt} />
+                  <stop offset="100%" stopColor={p.color} />
+                </radialGradient>
+              ))}
+              <linearGradient id="wheelHub" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#22c2f2" />
+                <stop offset="50%" stopColor="#7c5cff" />
+                <stop offset="100%" stopColor="#fb5f8a" />
+              </linearGradient>
+            </defs>
             {SLICES.map((pct,i) => {
               const start = i*SEG, end = (i+1)*SEG, mid = start + SEG/2;
-              const c = colorFor(pct);
               const label = polar(cx, cy, r*0.62, mid);
               return (
                 <g key={i}>
-                  <path d={arcPath(cx,cy,r,start,end)} fill={i%2===0?c.color:c.colorLt} stroke="#fff" strokeWidth="1.5" />
+                  <path d={arcPath(cx,cy,r,start,end)} fill={`url(#wheelGrad${pct})`} stroke="rgba(255,255,255,0.85)" strokeWidth="2" />
                   <text x={label.x} y={label.y} fill="#fff" fontSize="14" fontWeight="800" fontFamily="'Space Grotesk',sans-serif"
-                    textAnchor="middle" dominantBaseline="middle" transform={`rotate(${mid} ${label.x} ${label.y})`}>
+                    textAnchor="middle" dominantBaseline="middle" transform={`rotate(${mid} ${label.x} ${label.y})`}
+                    style={{ textShadow:"0 1px 3px rgba(0,0,0,0.35)" }}>
                     {pct}%
                   </text>
                 </g>
               );
             })}
-            <circle cx={cx} cy={cy} r={22} fill="#0f172a" />
+            <circle cx={cx} cy={cy} r={24} fill="url(#wheelHub)" stroke="#fff" strokeWidth="3" />
             <text x={cx} y={cy+1} fill="#fff" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle" fontFamily="'Space Grotesk',sans-serif">TPP</text>
           </svg>
         </div>
@@ -348,6 +370,7 @@
 
         setTimeout(async () => {
           try {
+            await _authReady;
             // genCode() has ~1 billion possible values, but check-and-retry costs nothing
             // and guarantees no two customers ever collide on the same code/doc-id.
             let code = genCode();
@@ -457,6 +480,7 @@
             if (raw) { setLocalRecord(JSON.parse(raw)); setLocked(true); setLoading(false); return; }
           } catch(e) {}
           try {
+            await _authReady;
             const devDoc = await _db.collection(DEVICES_COL).doc(deviceId).get();
             if (devDoc.exists) setLocked(true);
           } catch(e) {}
