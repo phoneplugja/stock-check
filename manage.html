@@ -6237,6 +6237,21 @@ const getAvailableStock = (product) => {
   return product.stock || 0;
 };
 
+// The one place a brand-new catalog product gets built, so a product created from Receive Stock
+// looks exactly like one created by hand in the Catalog tab — same fields, same defaults — instead
+// of two slightly different shapes depending on which screen made it.
+const makeCatalogProduct = ({ name, category, price = 0, cost = 0, barcode = "", stock = 0, variable_price = false }) => ({
+  id: `prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+  name, category,
+  price: parseFloat(price) || 0,
+  cost: parseFloat(cost) || 0,
+  barcode: barcode || "",
+  stock: parseInt(stock) || 0,
+  variable_price: !!variable_price,
+  units: [],
+  createdAt: new Date().toISOString()
+});
+
 // Suggests which existing catalog product a PO line is restocking, so Receive Stock never has to
 // silently guess. Only ever a *suggestion* — an exact normalized-name match auto-picks it, anything
 // looser (same model but the storage/color words don't line up, a typo, a slightly different name
@@ -10747,14 +10762,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // "Attributing To" dropdown on this line, never a silent name/category string match.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = {
-              id: `prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-              name: line.name, category: line.category,
-              price: parseFloat(line.sellPrice)||0,
-              cost: parseFloat(line.unitCost)||0,
-              stock: 0, units: [],
-              variable_price: sellPriceBlank, createdAt: new Date().toISOString()
-            };
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: line.unitCost, barcode: line.barcode, variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Add units
@@ -10779,7 +10787,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = { id:`prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`, name:line.name, category:line.category, price:parseFloat(line.sellPrice)||0, cost:parseFloat(line.unitCost)||0, stock:0, units:[], variable_price:sellPriceBlank, createdAt:new Date().toISOString() };
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: line.unitCost, barcode: line.barcode, variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           product.stock = (product.stock||0) + (parseInt(line.receivedQty)||0);
@@ -10855,14 +10863,30 @@ function ReceiveStockTab({ onCatalogUpdate }) {
     E("div",{style:{display:"flex",flexDirection:"column",gap:14}},
       receiveLines.map((line,li)=>{
         const isImei = isImeiCategory(line.category);
+        // Which categories this line is allowed to switch between — kept to IMEI-tracked categories
+        // (the actual "condition" buckets: Like New Samsung, Like New iPhones, New in box, etc.) or
+        // non-IMEI ones, matching whatever the PO line already is, so switching doesn't change
+        // whether this line expects IMEIs or a plain quantity.
+        const categoryChoices = isImei ? IMEI_CATEGORIES : LOYVERSE_ALL_CATS.filter(c=>!IMEI_CATEGORIES.includes(c));
+        const setLineCategory = (newCat) => {
+          const suggested = suggestProductMatch(catalog, { ...line, category:newCat });
+          setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,category:newCat,matchedProductId:suggested?suggested.id:null,isNew:!suggested}:l));
+        };
         return E(Card,{key:li},
           E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}},
-            E("div",null,
+            E("div",{style:{flex:1}},
               E("div",{style:{fontWeight:700,fontSize:14}},line.name),
-              E("div",{style:{fontSize:12,color:T.muted}},line.category," · qty ",line.qty)
+              E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},"qty ",line.qty)
             ),
             isImei&&E("div",{style:{display:"flex",gap:6}},
               E("button",{onClick:()=>{setImeiTargetLine({lineIdx:li,unitIdx:0});setShowImeiScanner(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"📷 Scan IMEI")
+            )
+          ),
+          E("div",{style:{marginBottom:10}},
+            E(Field,{label:"Category / Condition"},
+              E(Sel,{ value: line.category, onChange: e => setLineCategory(e.target.value) },
+                categoryChoices.map(c=>E("option",{key:c,value:c},c))
+              )
             )
           ),
           E("div",{style:{marginBottom:10}},
@@ -10872,11 +10896,11 @@ function ReceiveStockTab({ onCatalogUpdate }) {
                 onChange: e => { const val=e.target.value; setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,matchedProductId: val||null, isNew: !val}:l)); }
               },
                 E("option",{value:""},"+ Create New Product"),
-                catalog.filter(p=>p.category===line.category).map(p=>E("option",{key:p.id,value:p.id},`${p.name} — current stock: ${getAvailableStock(p)}`))
+                catalog.filter(p=>p.category===line.category).map(p=>E("option",{key:p.id,value:p.id},`${p.name} (${p.category}) — stock: ${getAvailableStock(p)}`))
               )
             ),
             line.isNew
-              ? E("div",{style:{fontSize:11,color:T.amber,marginTop:4,fontWeight:600}},"⚠️ No confident match — this will create a new catalog product. Pick an existing one above if this is a restock.")
+              ? E("div",{style:{fontSize:11,color:T.amber,marginTop:4,fontWeight:600}},"⚠️ No confident match — this will create a new catalog product. Pick an existing one above if this is a restock, or change Category above if the condition is wrong.")
               : E("div",{style:{fontSize:11,color:T.green,marginTop:4,fontWeight:600}},"✅ These unit(s) will be added to this existing product.")
           ),
           E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
@@ -10977,7 +11001,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
     const isImei = isImeiCategory(form.category);
     const product = editingProduct
       ? { ...editingProduct, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
-      : { id:`prod-${Date.now()}`, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?0:parseInt(form.stock)||0, units:[], createdAt:new Date().toISOString() };
+      : { ...makeCatalogProduct({ name:form.name, category:form.category, price:form.price, cost:form.cost, barcode:form.barcode, stock:isImei?0:form.stock, variable_price:form.variable_price }) };
     const updated = editingProduct ? catalog.map(p=>p.id===editingProduct.id?product:p) : [product,...catalog];
     await saveCatalogFn(updated);
     setFormS(emptyForm()); setShowAddForm(false); setEditingProduct(null);
