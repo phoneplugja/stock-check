@@ -6257,24 +6257,69 @@ const makeCatalogProduct = ({ name, category, price = 0, cost = 0, barcode = "",
 // looser (same model but the storage/color words don't line up, a typo, a slightly different name
 // from an AI-scanned invoice) falls back to "no match" so staff have to confirm it themselves rather
 // than two different SKUs getting silently merged into one product.
+// Lowercases, strips punctuation to spaces, AND splits digit/letter boundaries ("128GB" → "128 gb")
+// so "128GB" and "128 GB" normalize identically — without this, a name written with no space before
+// the unit would never match the same name written with one, which is a very common real-world
+// formatting difference between a manual entry and an AI-scanned invoice.
+const normalizeProductName = s => (s||"")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g," ")
+  .replace(/([a-z])(\d)/g,"$1 $2")
+  .replace(/(\d)([a-z])/g,"$1 $2")
+  .replace(/\s+/g," ")
+  .trim();
+
+// How confidently two product names name the same thing, 0–1, based on word overlap in both
+// directions (so "S21 Ultra 128GB Black" vs "S21 Ultra 128GB Black Used" doesn't score 1.0 just
+// because every word of the shorter name appears in the longer one).
+const nameMatchScore = (nameA, nameB) => {
+  const a = normalizeProductName(nameA), b = normalizeProductName(nameB);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const wordsA = a.split(" ").filter(w=>w.length>1);
+  const wordsB = b.split(" ").filter(w=>w.length>1);
+  if (!wordsA.length || !wordsB.length) return 0;
+  const scoreAB = wordsA.filter(w=>b.includes(w)).length / wordsA.length;
+  const scoreBA = wordsB.filter(w=>a.includes(w)).length / wordsB.length;
+  return Math.min(scoreAB, scoreBA);
+};
+
 const suggestProductMatch = (catalog, line) => {
-  const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-  const lineName = norm(line.name);
+  const lineName = normalizeProductName(line.name);
   if (!lineName) return null;
   const sameCategory = (catalog||[]).filter(p => p.category === line.category);
-  const exact = sameCategory.find(p => norm(p.name) === lineName);
+  const exact = sameCategory.find(p => normalizeProductName(p.name) === lineName);
   if (exact) return exact;
-  const lineWords = lineName.split(" ").filter(w => w.length > 1);
-  if (!lineWords.length) return null;
   let best = null, bestScore = 0;
   sameCategory.forEach(p => {
-    const pName = norm(p.name);
-    const score = lineWords.filter(w => pName.includes(w)).length / lineWords.length;
+    const score = nameMatchScore(line.name, p.name);
     if (score > bestScore) { bestScore = score; best = p; }
   });
   // Require near-total word overlap (e.g. storage/color words all present) before auto-matching —
   // a partial match (same model, different storage/color) is exactly the case that should NOT merge.
   return bestScore >= 0.85 ? best : null;
+};
+
+// Groups existing catalog products that are very likely the same item split across multiple entries
+// — same category, and either a shared non-empty barcode/SKU (a near-certain duplicate) or a strong
+// name match. Used by the Duplicates tool to surface merge candidates; never merges anything itself.
+const findDuplicateGroups = (catalog) => {
+  const list = catalog || [];
+  const used = new Set();
+  const groups = [];
+  list.forEach((p, i) => {
+    if (used.has(p.id)) return;
+    const group = [p];
+    used.add(p.id);
+    list.forEach((q, j) => {
+      if (i === j || used.has(q.id) || p.category !== q.category) return;
+      const sameCode = (p.barcode && q.barcode && p.barcode === q.barcode) || (p.sku && q.sku && p.sku === q.sku);
+      const strongNameMatch = nameMatchScore(p.name, q.name) >= 0.85;
+      if (sameCode || strongNameMatch) { group.push(q); used.add(q.id); }
+    });
+    if (group.length > 1) groups.push(group);
+  });
+  return groups;
 };
 
 // Single place that actually creates a Purchase Order record: writes it as "Ordered" so it shows
@@ -11116,6 +11161,108 @@ const INVOICE_TYPES = [
   {id:"mixture",label:"🔀 Mixture",hint:"Mixed invoice"},
 ];
 
+// ── Duplicate Products Tool ─────────────────────────────────────────────────────
+// Finds catalog products that are very likely the same item split across multiple entries (from the
+// old exact-string-match Receive Stock behavior, before it required an explicit "Attributing To"
+// choice) and lets staff merge them — combining units/stock into one kept product and removing the
+// rest — instead of leaving the duplicates to keep confusing stock counts and Receive Stock forever.
+function DuplicateProductsTool({ catalog, onCatalogUpdate }) {
+  const E = React.createElement;
+  const [keepChoice, setKeepChoice] = useState({}); // groupIndex -> productId to keep
+  const [merging, setMerging] = useState(null);
+
+  const groups = findDuplicateGroups(catalog);
+
+  const defaultKeepId = (group) => {
+    // Default to whichever entry has the most inventory in it (fewest units lost if staff don't
+    // change the pick), falling back to the oldest entry when stock ties.
+    const sorted = [...group].sort((a,b) => {
+      const stockDiff = getAvailableStock(b) - getAvailableStock(a);
+      if (stockDiff !== 0) return stockDiff;
+      return (a.createdAt||"").localeCompare(b.createdAt||"");
+    });
+    return sorted[0].id;
+  };
+
+  const mergeGroup = async (group, keepId) => {
+    const gid = group.map(p=>p.id).join("|");
+    setMerging(gid);
+    try {
+      const keep = group.find(p=>p.id===keepId);
+      const others = group.filter(p=>p.id!==keepId);
+      let merged = { ...keep };
+      if (isImeiCategory(merged.category)) {
+        const seenImeis = new Set((merged.units||[]).map(u=>u.imei).filter(Boolean));
+        const combinedUnits = [...(merged.units||[])];
+        others.forEach(o => (o.units||[]).forEach(u => {
+          if (u.imei && seenImeis.has(u.imei)) return; // true duplicate unit — drop it, don't double-count stock
+          if (u.imei) seenImeis.add(u.imei);
+          combinedUnits.push({ ...u, history: [...(u.history||[]), { status:u.status, ts:new Date().toISOString(), note:`Merged in from duplicate product "${o.name}" (${o.id})` }] });
+        }));
+        merged.units = combinedUnits;
+        merged.stock = combinedUnits.filter(u=>u.status==="Available").length;
+      } else {
+        merged.stock = (merged.stock||0) + others.reduce((s,o)=>s+(o.stock||0),0);
+      }
+      // Backfill anything the kept product is missing from a duplicate that has it — never overwrite
+      // a value the kept product already has.
+      others.forEach(o => {
+        if (!merged.barcode && o.barcode) merged.barcode = o.barcode;
+        if (!merged.sku && o.sku) merged.sku = o.sku;
+        if (!merged.image && o.image) merged.image = o.image;
+        if (!merged.cost && o.cost) merged.cost = o.cost;
+      });
+      merged.updatedAt = new Date().toISOString();
+      const otherIds = new Set(others.map(o=>o.id));
+      const updated = catalog.filter(p=>!otherIds.has(p.id)).map(p=>p.id===merged.id?merged:p);
+      await onCatalogUpdate(updated);
+    } finally {
+      setMerging(null);
+    }
+  };
+
+  if (groups.length===0) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted,background:"#F9FAFB",borderRadius:12}},
+    E("div",{style:{fontSize:40,marginBottom:12}},"✅"),
+    E("div",{style:{fontWeight:600,fontSize:15}},"No likely duplicates found"),
+    E("div",{style:{fontSize:13,marginTop:6}},"Products are grouped as likely duplicates when they share a category and either the same barcode/SKU or a very close name match.")
+  );
+
+  return E("div",{style:{maxWidth:720,margin:"0 auto"}},
+    E("div",{style:{marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔀 Possible Duplicates"),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${groups.length} group${groups.length!==1?"s":""} found — review each before merging.`)
+    ),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:16}},
+      groups.map((group,gi)=>{
+        const gid = group.map(p=>p.id).join("|");
+        const keepId = keepChoice[gi] || defaultKeepId(group);
+        return E(Card,{key:gid},
+          E(ST,null,`Group ${gi+1} — ${group[0].category}`),
+          E("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:12}},
+            group.map(p=>E("label",{key:p.id,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,background:keepId===p.id?T.blueLt:"#F9FAFB",border:`1px solid ${keepId===p.id?T.blue:T.border}`,cursor:"pointer"}},
+              E("input",{type:"radio",name:`keep-${gid}`,checked:keepId===p.id,onChange:()=>setKeepChoice(s=>({...s,[gi]:p.id}))}),
+              E("div",{style:{flex:1}},
+                E("div",{style:{fontWeight:600,fontSize:13}},p.name),
+                E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},
+                  `Stock: ${getAvailableStock(p)}`,
+                  p.barcode?` · Barcode: ${p.barcode}`:"",
+                  p.sku?` · SKU: ${p.sku}`:"",
+                  p.createdAt?` · Added ${fmtDate(p.createdAt)}`:""
+                )
+              ),
+              keepId===p.id
+                ? E("span",{style:{fontSize:10,fontWeight:700,color:T.blue,background:"#fff",borderRadius:5,padding:"2px 8px"}},"KEEP")
+                : E("span",{style:{fontSize:10,fontWeight:700,color:T.red,background:"#fff",borderRadius:5,padding:"2px 8px"}},"MERGE IN")
+            ))
+          ),
+          E("div",{style:{fontSize:11,color:T.muted,marginBottom:10}},"Merging combines all units/stock into the product marked KEEP and removes the others. This can't be undone — each merged-in unit's full history is preserved on the kept product."),
+          E(Btn,{disabled:merging===gid,onClick:()=>{ if(confirm(`Merge ${group.length} products into "${group.find(p=>p.id===keepId)?.name}"? The others will be removed.`)) mergeGroup(group, keepId); }},merging===gid?"Merging...":`🔀 Merge Group ${gi+1}`)
+        );
+      })
+    )
+  );
+}
+
 function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, initialSubTab }) {
   const E = React.createElement;
   const [subTab, setSubTab] = useState(initialSubTab || "catalog");
@@ -11132,11 +11279,13 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   };
 
   const testingCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category) ? (p.units||[]).filter(u=>u.status==="Under Testing").length : 0), 0);
+  const duplicateCount = findDuplicateGroups(catalog).length;
 
   const subTabs=[
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
     {id:"testing",label:`🔬 Testing Queue${testingCount?` (${testingCount})`:""}`},
+    {id:"duplicates",label:`🔀 Duplicates${duplicateCount?` (${duplicateCount})`:""}`},
   ];
 
   const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12,flexWrap:"wrap"}},
@@ -11148,6 +11297,7 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
   if (subTab==="testing") return E("div",null,tabBar,E(UnitTestingQueue,{catalog,onCatalogUpdate:saveCatalogFn}));
+  if (subTab==="duplicates") return E("div",null,tabBar,E(DuplicateProductsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
 
   return null;
 }
