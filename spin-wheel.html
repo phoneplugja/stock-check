@@ -289,10 +289,10 @@
           <div style={{ padding:"24px 26px 30px", textAlign:"center" }}>
             <div style={{ display:"flex", gap:8, marginBottom:20 }}>
               <CompactNavBtn href="/book-repair.html">Book a Repair</CompactNavBtn>
-              <CompactNavBtn href="/stock-checker.html">Stock Checker</CompactNavBtn>
+              <CompactNavBtn href="/">Stock Checker</CompactNavBtn>
             </div>
             <div style={{ fontSize:14, color:T.muted, lineHeight:1.6, marginBottom: record ? 18 : 22 }}>
-              One spin per customer. {record ? "Here's your prize from before — bring your phone number to redeem in-store." : "If you think this is a mistake, our team can look it up by your phone number."}
+              One spin per customer. {record ? "Here's your prize from before. To redeem, have your discount code saved or just give us the phone number you spun with." : "If you think this is a mistake, our team can look it up by your phone number."}
             </div>
             {record && (
               <div style={{ background:T.violetSoft, border:`1px solid ${T.violetBorder}`, borderRadius:14, padding:"16px 18px", marginBottom:20 }}>
@@ -459,7 +459,7 @@
 
           <div style={{ display:"flex", gap:8, marginBottom:20 }}>
             <CompactNavBtn href="/book-repair.html">Book a Repair</CompactNavBtn>
-            <CompactNavBtn href="/stock-checker.html">Stock Checker</CompactNavBtn>
+            <CompactNavBtn href="/">Stock Checker</CompactNavBtn>
           </div>
 
           <div style={{ background:T.violetSoft, border:`1px solid ${T.violetBorder}`, borderRadius:14, padding:"18px 18px 16px", marginBottom:18 }}>
@@ -471,7 +471,7 @@
           </div>
 
           <div style={{ textAlign:"left", background:T.accentSoft, border:`1px solid ${T.accentBorder}`, borderRadius:14, padding:"16px 18px", marginBottom:20, fontSize:13.5, color:T.text, lineHeight:1.7 }}>
-            <b>How to redeem:</b> Bring your phone <b>{record.phone}</b> and this code to our shop. Staff will apply {record.percent}% off your total repair cost, up to a max of {money(record.cap)}.<br/>
+            <b>How to redeem:</b> Show this code or give us the phone number <b>{record.phone}</b> when you visit. Staff will apply {record.percent}% off your total repair cost, up to a max of {money(record.cap)}.<br/>
             <b>Valid until:</b> {expiresLabel} ({CODE_VALID_DAYS} days)
           </div>
 
