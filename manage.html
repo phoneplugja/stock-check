@@ -11233,6 +11233,66 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
   const photoInputRef = React.useRef(null);
   const photoTargetRef = React.useRef(null);
   const pickPhotoFor = (product) => { photoTargetRef.current = product; photoInputRef.current && photoInputRef.current.click(); };
+
+  // ── Per-unit status change & reattribution ──────────────────────────────────
+  // Lets staff flip a unit's status directly from the Catalog screen (not just from the Testing
+  // Queue or a sale-return flow) — e.g. marking it Returned to Supplier or sending it back to
+  // Under Testing even though it was never sold — and lets staff move a unit that got attributed
+  // to the wrong product at Receive Stock time onto the correct product, so the wrong product can
+  // then be deleted once it's empty.
+  const [moveUnit, setMoveUnit] = useState(null); // { productId, unitIdx } | null
+  const [moveTargetId, setMoveTargetId] = useState("");
+  const [busyUnit, setBusyUnit] = useState(null); // `${productId}:${unitIdx}` currently saving
+
+  const changeUnitStatus = async (product, unitIdx, newStatus) => {
+    const unit = (product.units||[])[unitIdx];
+    if (!unit || unit.status === newStatus) return;
+    const destructive = newStatus === "Returned to Supplier" || newStatus === "Damaged";
+    if (destructive && !confirm(`Mark IMEI ${unit.imei||"this unit"} (${product.name}) as "${newStatus}"?`)) return;
+    setBusyUnit(`${product.id}:${unitIdx}`);
+    try {
+      const updated = catalog.map(p=>{
+        if (p.id !== product.id) return p;
+        const units = p.units.map((u,i)=> i!==unitIdx ? u : {
+          ...u, status:newStatus,
+          history:[...(u.history||[]), { status:newStatus, ts:new Date().toISOString(), note:`Manually changed ${u.status} → ${newStatus} from Catalog` }]
+        });
+        return { ...p, stock: units.filter(u=>u.status==="Available").length, units };
+      });
+      await saveCatalogFn(updated);
+    } finally {
+      setBusyUnit(null);
+    }
+  };
+
+  const confirmMoveUnit = async () => {
+    if (!moveUnit || !moveTargetId) return;
+    const srcProduct = catalog.find(p=>p.id===moveUnit.productId);
+    const unit = srcProduct?.units?.[moveUnit.unitIdx];
+    const target = catalog.find(p=>p.id===moveTargetId);
+    if (!srcProduct || !unit || !target) return;
+    if (target.id === srcProduct.id) { setMoveUnit(null); setMoveTargetId(""); return; }
+    if (!confirm(`Move IMEI ${unit.imei||"this unit"} from "${srcProduct.name}" to "${target.name}"?\n\nThis fixes a unit that was attributed to the wrong product at Receive Stock — it keeps its cost, price, status and history.`)) return;
+    setBusyUnit(`${srcProduct.id}:${moveUnit.unitIdx}`);
+    try {
+      const movedUnit = { ...unit, history:[...(unit.history||[]), { status:unit.status, ts:new Date().toISOString(), note:`Reattributed from "${srcProduct.name}" (wrong product at receiving) to "${target.name}"` }] };
+      const updated = catalog.map(p=>{
+        if (p.id === srcProduct.id) {
+          const units = p.units.filter((_,i)=>i!==moveUnit.unitIdx);
+          return { ...p, stock: units.filter(u=>u.status==="Available").length, units };
+        }
+        if (p.id === target.id) {
+          const units = [...(p.units||[]), movedUnit];
+          return { ...p, stock: units.filter(u=>u.status==="Available").length, units };
+        }
+        return p;
+      });
+      await saveCatalogFn(updated);
+      setMoveUnit(null); setMoveTargetId("");
+    } finally {
+      setBusyUnit(null);
+    }
+  };
   const onPhotoChosen = async (file) => {
     const product = photoTargetRef.current;
     if (!file || !product) return;
@@ -11257,6 +11317,11 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
 
   const grouped = {};
   filtered.forEach(p=>{ const c=p.category||"Other"; if(!grouped[c])grouped[c]=[]; grouped[c].push(p); });
+
+  // Full IMEI-tracked product list (unfiltered by search/category) — used as the "move to" target
+  // list when reattributing a unit, so staff can find the correct product even while a search/
+  // category filter is narrowing what's shown above.
+  const imeiProducts = catalog.filter(p=>isImeiCategory(p.category)).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
 
   const saveProduct = async () => {
     if (!form.name.trim()) { alert("Name required."); return; }
@@ -11352,13 +11417,41 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                     `${(product.units||[]).length} units — ${avail} available`
                   ),
                   E("div",{style:{display:"flex",flexDirection:"column",gap:4}},
-                    (product.units||[]).slice(0,20).map((unit,ui)=>E("div",{key:ui,style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,padding:"4px 0",borderBottom:`1px dashed ${T.border}`}},
-                      E("span",{style:{fontFamily:"monospace"}},unit.imei||"No IMEI"),
-                      E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                        E("span",{style:{color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}},unit.status),
-                        unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️")
-                      )
-                    ))
+                    (product.units||[]).slice(0,20).map((unit,ui)=>{
+                      const busyKey = `${product.id}:${ui}`;
+                      const isMovingThis = moveUnit && moveUnit.productId===product.id && moveUnit.unitIdx===ui;
+                      return E("div",{key:ui,style:{padding:"6px 0",borderBottom:`1px dashed ${T.border}`}},
+                        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,gap:8}},
+                          E("span",{style:{fontFamily:"monospace"}},unit.imei||"No IMEI"),
+                          E("div",{style:{display:"flex",alignItems:"center",gap:6}},
+                            E(Sel,{
+                              value:unit.status,
+                              disabled:busyUnit===busyKey,
+                              onClick:e=>e.stopPropagation(),
+                              onChange:e=>{ e.stopPropagation(); changeUnitStatus(product, ui, e.target.value); },
+                              style:{width:"auto",fontSize:11,padding:"3px 6px",color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}
+                            }, PHONE_UNIT_STATUSES.map(s=>E("option",{key:s,value:s},s))),
+                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
+                            E("button",{
+                              onClick:e=>{ e.stopPropagation(); setMoveTargetId(""); setMoveUnit(isMovingThis?null:{productId:product.id,unitIdx:ui}); },
+                              disabled:busyUnit===busyKey,
+                              style:{background:isMovingThis?T.blue:"#F3F4F6",color:isMovingThis?"#fff":T.text,border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,fontWeight:700,cursor:"pointer"}
+                            },"🔀 Wrong product?")
+                          )
+                        ),
+                        isMovingThis && E("div",{onClick:e=>e.stopPropagation(),style:{marginTop:6,padding:"8px 10px",background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,display:"flex",flexDirection:"column",gap:6}},
+                          E("div",{style:{fontSize:11,color:T.muted}},`Move this unit (IMEI ${unit.imei||"—"}) onto the correct product — it keeps its status, cost, price and history.`),
+                          E(Sel,{value:moveTargetId,onChange:e=>setMoveTargetId(e.target.value),style:{fontSize:12}},
+                            E("option",{value:""},"Select the correct product..."),
+                            imeiProducts.filter(p=>p.id!==product.id).map(p=>E("option",{key:p.id,value:p.id},`${p.name} (${p.category})`))
+                          ),
+                          E("div",{style:{display:"flex",gap:8}},
+                            E(Btn,{style:{fontSize:11,padding:"5px 10px"},disabled:!moveTargetId||busyUnit===busyKey,onClick:confirmMoveUnit},busyUnit===busyKey?"Moving...":"✓ Move Unit"),
+                            E(Btn,{variant:"ghost",style:{fontSize:11,padding:"5px 10px"},onClick:()=>{setMoveUnit(null);setMoveTargetId("");}},"Cancel")
+                          )
+                        )
+                      );
+                    })
                   ),
                   (product.units||[]).length>20&&E("div",{style:{fontSize:11,color:T.muted,marginTop:6}},`+ ${(product.units||[]).length-20} more units`)
                 )
