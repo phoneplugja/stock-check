@@ -155,6 +155,54 @@ const logPurchaseReturn = async (unit, product, note) => {
   } catch (e) { console.error("Purchase return ledger log error:", e); }
 };
 
+// ── Currency & landed cost ───────────────────────────────────────────────────
+// The ledger and all catalog costs are kept in JMD. A non-JMD PO carries the exchange rate (JMD per 1
+// unit of its currency); landed cost spreads the invoice's shipping/tax across the lines pro rata, so
+// unit cost = line cost × (invoice total ÷ line subtotal) × fx — i.e. what the unit really cost to land.
+const poFxRate = po => (!po || !po.currency || po.currency === "JMD") ? 1 : (parseFloat(po.fxRate) || 0);
+const poLandedFactor = po => {
+  const fx = poFxRate(po) || 1; // unknown rate → leave in PO currency (flagged elsewhere) rather than zero it out
+  const sub = (po?.lines || []).reduce((s, l) => s + (parseFloat(l.unitCost) || 0) * (parseInt(l.qty) || 0), 0);
+  const total = parseFloat(po?.invoiceTotal) || sub;
+  return (sub > 0 ? total / sub : 1) * fx;
+};
+const round2 = n => Math.round((parseFloat(n) || 0) * 100) / 100;
+
+// Sets/changes the exchange rate on a PO and restates everything that was recorded in the PO's own
+// currency: ledger entries for that PO (amount = original × rate) and any of its received units that
+// still carry a raw (un-landed) cost. Used both when receiving a foreign-currency PO and from the
+// Purchases Ledger's "Set rate" button for legacy POs that never had one.
+const restatePOFx = async (poId, rate) => {
+  const fx = parseFloat(rate);
+  if (!(fx > 0)) return false;
+  const pos = await loadArr("tpp-purchase-orders");
+  const po = pos.find(p => p.id === poId);
+  if (!po) return false;
+  const updatedPO = { ...po, fxRate: fx };
+  await save("tpp-purchase-orders", pos.map(p => p.id === poId ? updatedPO : p));
+  const ledger = await loadArr("tpp-purchases-ledger");
+  await save("tpp-purchases-ledger", ledger.map(e => {
+    if (e.poId !== poId) return e;
+    if (e.category === "Purchase Return") return e; // unit-level credits are already in JMD (unit cost)
+    const orig = e.amountOriginal !== undefined ? e.amountOriginal : (parseFloat(e.amount) || 0);
+    return { ...e, amountOriginal: orig, currency: po.currency, fxRate: fx, fxMissing: false, amount: round2(orig * fx) };
+  }));
+  const factor = poLandedFactor(updatedPO);
+  const catalog = await loadCatalog();
+  let touched = false;
+  const nextCatalog = catalog.map(prod => {
+    if (!prod.units || !prod.units.some(u => u.poId === poId && u.costBasis !== "landed_jmd")) return prod;
+    touched = true;
+    const units = prod.units.map(u => (u.poId === poId && u.costBasis !== "landed_jmd")
+      ? { ...u, costRaw: u.cost, costCurrency: po.currency, cost: round2((parseFloat(u.cost) || 0) * factor), costBasis: "landed_jmd",
+          history: [...(u.history || []), { status: u.status, ts: new Date().toISOString(), note: `Cost restated to landed JMD (rate ${fx})` }] }
+      : u);
+    return { ...prod, units };
+  });
+  if (touched) await saveCatalog(nextCatalog);
+  return true;
+};
+
 // One-time, idempotent migration: before the Purchases Ledger existed, every PO (and every PO void)
 // was logged into tpp-expenses under category "Inventory Purchase". This moves those legacy rows
 // into tpp-purchases-ledger (voids become "Purchase Void Reversal", supplier/PO ref are filled in from
@@ -179,7 +227,14 @@ const migrateInventoryPurchasesToLedger = async () => {
         supplier: e.supplier || po.supplier || "",
         poRef: e.poRef || po.poRef || "",
         source: e.source || "migrated_expense",
-        migratedFromExpenses: true
+        migratedFromExpenses: true,
+        // Legacy rows were recorded in the PO's own currency. JMD POs need nothing; foreign-currency
+        // ones keep their original amount and are flagged until an exchange rate is set (Purchases
+        // Ledger → "Set rate"), at which point they're restated to JMD.
+        ...((po.currency && po.currency !== "JMD")
+          ? { currency: po.currency, amountOriginal: e.amount, fxRate: poFxRate(po) || 0, fxMissing: !poFxRate(po),
+              amount: poFxRate(po) ? round2((parseFloat(e.amount)||0) * poFxRate(po)) : e.amount }
+          : {})
       };
     }).filter(e => !have.has(sig(e)));
     // Backup first (append — never overwrite an earlier backup), then ledger, then verify, then strip.
@@ -502,6 +557,8 @@ const fmtMoney = n => {
     maximumFractionDigits: 2
   });
 };
+// fmtMoney always shows the absolute value; ledgers need the sign (credits/reversals are negative).
+const fmtSigned = n => { const v = parseFloat(n) || 0; return (v < 0 ? "−" : "") + fmtMoney(v); };
 const isRegression = (from, to) => STATUS_ORDER.indexOf(to) < STATUS_ORDER.indexOf(from);
 const currentYear = new Date().getFullYear();
 // ── Firebase ──────────────────────────────────────────────────────────────────
@@ -4844,7 +4901,19 @@ function OwnerDashboard({
   const tR = mE.reduce((s, r) => s + (parseFloat(r.totalRevenue) || 0), 0); // EOD-recorded, for reconciliation only
   const salesRevenue = mSales.reduce((s, sale) => s + (parseFloat(sale.total) || 0), 0);
   const rentalRevenue = mRentals.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const salesCOGS = mSales.filter(s => !s.isReturn).reduce((s, sale) => s + (sale.items || []).reduce((is, item) => is + itemCOGS(item) * (item.qty || 1), 0), 0);
+  // COGS = cost of what was sold, minus cost of what came back. A customer return (or the original item
+  // traded in on an exchange) puts the goods back in stock — or, if damaged, the loss is booked
+  // separately as an Inventory Write-off expense — so its cost must come out of COGS or it would be
+  // counted twice (once as COGS on the original sale, again as a write-off) or never reversed.
+  const saleItemsCost = sale => (sale.items || []).reduce((is, item) => is + itemCOGS(item) * (item.qty || 1), 0);
+  const salesCOGS = mSales.reduce((s, sale) => {
+    if (sale.isReturn) return s - saleItemsCost(sale);
+    const handedBack = (sale.exchangeHandedBack || []).reduce((hs, h) => hs + (parseFloat(h.cost) || 0) * (h.qty || 1), 0);
+    return s + saleItemsCost(sale) - handedBack;
+  }, 0);
+  // Data-quality flag: how many sold lines had no cost recorded (so their profit is overstated).
+  const isServiceItem = item => String(item.id || "").startsWith("svc-") || item.type === "ticket" || item.type === "service";
+  const zeroCostLines = mSales.filter(s => !s.isReturn).reduce((n, sale) => n + (sale.items || []).filter(item => !isServiceItem(item) && (item.type === "catalog_phone" || item.type === "product") && itemCOGS(item) <= 0).length, 0);
   const grossProfit = salesRevenue - salesCOGS;
   const eodVariance = tR - salesRevenue; // EOD entry vs. actual sales — should be near zero
   const tX = mX.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
@@ -5178,10 +5247,12 @@ function OwnerDashboard({
     sub: Math.abs(eodVariance) < 1 ? "EOD matches sales ✓" : `EOD recorded ${fmtMoney(tR)}`
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "Purchases Ledger (Net)",
-    value: fmtMoney(tPurchases),
+    value: fmtSigned(tPurchases),
     color: T.blue,
     sub: `${mPurchases.length} entr${mPurchases.length===1?"y":"ies"} — inventory bought, not an expense`
-  })), /*#__PURE__*/React.createElement("div", {
+  })), zeroCostLines > 0 && /*#__PURE__*/React.createElement("div", {
+    style: { background: T.amberLt, border: "1px solid #FDE68A", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#92400E" }
+  }, `⚠️ ${zeroCostLines} item${zeroCostLines===1?"":"s"} sold this month had no cost recorded, so their profit is overstated (COGS counted as 0). Fix costs in Products → 💲 Missing Costs.`), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -6455,7 +6526,9 @@ const findPOImpact = (catalog, stockReceiveHistory, po) => {
     let product = h.productId ? (catalog||[]).find(p=>p.id===h.productId) : null;
     if (!product) product = (catalog||[]).find(p=>p.name?.toLowerCase()===String(h.productName||"").toLowerCase() && p.category===h.category);
     if (!product || isImeiCategory(product.category)) return; // IMEI units are already covered above
-    stockByProduct.set(product.id, { product, qty: (stockByProduct.get(product.id)?.qty||0) + (parseInt(h.qty)||0) });
+    const prev = stockByProduct.get(product.id);
+    const q = parseInt(h.qty)||0;
+    stockByProduct.set(product.id, { product, qty: (prev?.qty||0) + q, rawCostTotal: (prev?.rawCostTotal||0) + q*(parseFloat(h.unitCost||h.costPerUnit)||0) });
   });
   return { units, stockAdjustments: Array.from(stockByProduct.values()) };
 };
@@ -6465,12 +6538,12 @@ const findPOImpact = (catalog, stockReceiveHistory, po) => {
 // stock into the business — a manually-entered PO or an AI-scanned invoice — should create a PO
 // through here, so every path into inventory goes PO Created → Received → Testing → Available,
 // with nothing able to skip straight to "in stock."
-async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD", shipping = 0, tax = 0, paymentMethod, notes = "", lines = [], source = "manual" }) {
+async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD", fxRate = 0, shipping = 0, tax = 0, paymentMethod, notes = "", lines = [], source = "manual" }) {
   const lineSubtotal = lines.reduce((s, l) => s + (parseFloat(l.unitCost) || 0) * (parseInt(l.qty) || 0), 0);
   const invoiceTotal = lineSubtotal + (parseFloat(shipping) || 0) + (parseFloat(tax) || 0);
   const record = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    supplier, poRef, date: date || todayStr(), currency,
+    supplier, poRef, date: date || todayStr(), currency, fxRate: currency === "JMD" ? 1 : (parseFloat(fxRate) || 0),
     shipping: parseFloat(shipping) || 0, tax: parseFloat(tax) || 0,
     paymentMethod, notes, lines, invoiceTotal,
     status: "Ordered", source, createdAt: new Date().toISOString()
@@ -6482,9 +6555,11 @@ async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD
   // (see salesCOGS in OwnerDashboard) or as an Inventory Write-off if a unit is lost/damaged.
   try {
     const existingLedger = await loadArr("tpp-purchases-ledger");
+    const fx = poFxRate(record);
     const ledgerEntry = {
       date: record.date, category: "Inventory Purchase", payment_method: paymentMethod,
-      amount: invoiceTotal, supplier, poId: record.id, poRef,
+      amount: round2(invoiceTotal * (fx || 1)), amountOriginal: invoiceTotal, currency, fxRate: fx || 0, fxMissing: !fx,
+      supplier, poId: record.id, poRef,
       details: `PO ${poRef || record.id} — ${supplier}${currency !== "JMD" ? ` (${currency})` : ""}`,
       logged_by: "", source: "purchase_order", createdAt: new Date().toISOString()
     };
@@ -6851,6 +6926,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         change,note,servedBy,
         isExchange,isReturn,isDeposit:hasTicket,
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
+        // Cost of the original item(s) handed back on an exchange (snapshot at sale time) so COGS can be
+        // reversed for them — the goods are back in stock (or written off if damaged), not sold.
+        exchangeHandedBack:isExchange?exchangeItems.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"})):undefined,
         returnOrigSaleId:returnOrigSale?.id||null,
         appliedCreditId:appliedCredit?.id||null,
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
@@ -10693,16 +10771,63 @@ const PO_CURRENCIES = ["JMD", "USD"];
 function PurchasesLedgerView({ onBack }) {
   const E = React.createElement;
   const [entries, setEntries] = useState([]);
+  const [pos, setPos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
-  useEffect(() => { loadArr("tpp-purchases-ledger").then(e => { setEntries(e||[]); setLoading(false); }); }, []);
-
-  const filtered = entries.filter(e => !monthFilter || (e.date||"").startsWith(monthFilter));
-  const byCategory = {};
-  filtered.forEach(e => { byCategory[e.category] = (byCategory[e.category]||0) + (parseFloat(e.amount)||0); });
-  const net = filtered.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
-
+  const [statusTab, setStatusTab] = useState("all");
+  useEffect(() => {
+    Promise.all([loadArr("tpp-purchases-ledger"), loadArr("tpp-purchase-orders")]).then(([e,p]) => { setEntries(e||[]); setPos(p||[]); setLoading(false); });
+  }, []);
   if (loading) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading purchases ledger...");
+
+  const amt = e => parseFloat(e.amount)||0;
+  const poById = new Map(pos.map(p => [p.id, p]));
+  // Every ledger entry inherits the status of the PO it belongs to, so the ledger can be cut the same
+  // way as the Purchases tab (Pending / Received / Voided). Entries with no PO link (e.g. a unit
+  // returned that never carried a PO id) are grouped as "unlinked" so nothing silently disappears.
+  const poStatusOf = e => { const po = poById.get(e.poId); return po ? (po.status==="Voided" ? "voided" : po.status==="Received" ? "received" : "pending") : "unlinked"; };
+  const inMonth = e => !monthFilter || (e.date||"").startsWith(monthFilter);
+  const monthEntries = entries.filter(e => !e.voided && inMonth(e));
+  const counts = { all:monthEntries.length };
+  const nets = { all: monthEntries.reduce((s,e)=>s+amt(e),0) };
+  ["pending","received","voided","unlinked"].forEach(k => {
+    const list = monthEntries.filter(e => poStatusOf(e)===k);
+    counts[k] = list.length; nets[k] = list.reduce((s,e)=>s+amt(e),0);
+  });
+  const shown = monthEntries.filter(e => statusTab==="all" || poStatusOf(e)===statusTab);
+  const byCategory = {};
+  shown.forEach(e => { byCategory[e.category] = (byCategory[e.category]||0) + amt(e); });
+  const net = shown.reduce((s,e)=>s+amt(e),0);
+
+  // ── Reconciliation (all time, not month-scoped) ─────────────────────────────
+  // A sound ledger must agree with the purchase orders themselves (everything in JMD): for every PO
+  // still standing (Pending or Received) the ledger's net should equal its invoice total less any unit
+  // returns credited against it; for a Voided PO it should equal only the cost deliberately kept on
+  // hand (zero if everything went back). Foreign-currency POs with no exchange rate are flagged
+  // separately — their amounts can't be trusted until a rate is set.
+  const invoiceJMD = po => round2((po.invoiceTotal||0) * (poFxRate(po)||1));
+  const issues = [];
+  pos.forEach(po => {
+    const poEntries = entries.filter(e=>!e.voided && e.poId===po.id);
+    const ledgerNet = poEntries.reduce((s,e)=>s+amt(e),0);
+    const returnsCredited = poEntries.filter(e=>e.category==="Purchase Return").reduce((s,e)=>s+amt(e),0);
+    if (poFxRate(po)===0) { issues.push({ po, needsRate:true, ledgerNet, expected:null, note:`${po.currency} PO has no exchange rate — amounts are unconverted` }); return; }
+    const expected = po.status==="Voided" ? (po.voidRetainedCost||0) : invoiceJMD(po) + returnsCredited;
+    if (!poEntries.length) { if (po.status!=="Voided") issues.push({ po, ledgerNet:0, expected, note:"No ledger entry for this PO" }); }
+    else if (Math.abs(ledgerNet - expected) > 0.05)
+      issues.push({ po, ledgerNet, expected, note: po.status==="Voided" ? "Voided PO net doesn't match the cost kept on hand" : "Ledger net differs from PO invoice total" });
+  });
+  const standingTotal = round2(pos.filter(p=>p.status!=="Voided").reduce((s,p)=>s+invoiceJMD(p),0));
+  const ledgerPoLinkedNet = round2(entries.filter(e=>!e.voided && e.poId).reduce((s,e)=>s+amt(e),0));
+  const setRate = async (po) => {
+    const r = prompt(`Exchange rate for this ${po.currency} PO (JMD per 1 ${po.currency}):`);
+    if (!(parseFloat(r) > 0)) return;
+    await restatePOFx(po.id, r);
+    const [e,p] = await Promise.all([loadArr("tpp-purchases-ledger"), loadArr("tpp-purchase-orders")]);
+    setEntries(e||[]); setPos(p||[]);
+  };
+
+  const tabs = [["all","All"],["pending","⏳ Pending"],["received","✅ Received"],["voided","🚫 Voided"]].concat(counts.unlinked ? [["unlinked","Unlinked"]] : []);
 
   return E("div",{style:{maxWidth:760,margin:"0 auto"}},
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
@@ -10710,33 +10835,46 @@ function PurchasesLedgerView({ onBack }) {
       E("button",{onClick:onBack,style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
     ),
     E("div",{style:{background:T.blueLt,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:T.blue}},
-      "Inventory purchases, supplier returns, and PO void reversals — tracked here as a balance-sheet/AP ledger, separate from Expenses. Buying inventory doesn't reduce profit; it only hits the P&L later as Cost of Goods Sold (when a unit sells) or as an Inventory Write-off (if a unit is damaged/lost)."
+      "Inventory purchases, supplier returns, and PO void reversals — a balance-sheet/AP ledger, separate from Expenses. Buying inventory doesn't reduce profit; it hits the P&L later as Cost of Goods Sold (when a unit sells) or as an Inventory Write-off (if damaged/lost). A voided PO shows its original purchase and an offsetting reversal, so it nets to zero."
     ),
-    E("div",{style:{marginBottom:16}},
+    E("div",{style:{background:issues.length?T.amberLt:T.greenLt,border:`1px solid ${issues.length?"#FDE68A":"#A7F3D0"}`,borderRadius:10,padding:"12px 16px",marginBottom:16}},
+      E("div",{style:{fontWeight:700,fontSize:13,color:issues.length?"#92400E":T.green}},issues.length?`⚠️ Reconciliation: ${issues.length} PO${issues.length!==1?"s":""} don't match the ledger`:"✓ Reconciled with purchase orders"),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`All-time: standing POs (Pending + Received) ${fmtSigned(standingTotal)} · ledger net on PO-linked entries ${fmtSigned(ledgerPoLinkedNet)} (difference = unit-level supplier returns)`),
+      issues.slice(0,12).map((x,i)=>E("div",{key:i,style:{fontSize:12,marginTop:4,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
+        E("span",null,`${x.po.supplier||"—"}${x.po.poRef?` — ${x.po.poRef}`:""} (${x.po.status||"Ordered"}): ${x.note}${x.expected!==null?` — ledger ${fmtSigned(x.ledgerNet)}, expected ${fmtSigned(x.expected)}`:""}`),
+        x.needsRate&&E("button",{onClick:()=>setRate(x.po),style:{background:T.blue,color:"#fff",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}},"Set rate")))
+    ),
+    E("div",{style:{marginBottom:12}},
       E(Input,{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{width:"auto"}})
     ),
+    E("div",{style:{display:"flex",gap:0,background:"#F3F4F6",borderRadius:10,padding:4,marginBottom:16}},
+      tabs.map(([key,label])=>E("button",{key,onClick:()=>setStatusTab(key),style:{flex:1,background:statusTab===key?"#fff":"transparent",border:"none",borderRadius:8,padding:"10px 6px",cursor:"pointer",fontFamily:"inherit",fontWeight:statusTab===key?700:500,fontSize:12,color:statusTab===key?"#111":"#6B7280",boxShadow:statusTab===key?"0 1px 4px rgba(0,0,0,0.1)":"none"}},
+        label," (",counts[key]||0,")"))
+    ),
     E(R2,null,
-      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`Net Purchases (${filtered.length} entries)`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(net))),
+      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`Net ${statusTab==="all"?"Purchases":statusTab[0].toUpperCase()+statusTab.slice(1)} (${shown.length} entries)`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtSigned(net))),
       E(Card,null,
         E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},"By Category"),
         Object.entries(byCategory).length===0
           ? E("div",{style:{fontSize:12,color:T.muted}},"—")
-          : Object.entries(byCategory).map(([cat,amt])=>E("div",{key:cat,style:{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:2}},E("span",null,cat),E("span",{style:{fontWeight:700,color:amt<0?T.green:T.text}},fmtMoney(amt))))
+          : Object.entries(byCategory).map(([cat,a])=>E("div",{key:cat,style:{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:2}},E("span",null,cat),E("span",{style:{fontWeight:700,color:a<0?T.green:T.text}},fmtSigned(a))))
       )
     ),
+    statusTab==="all" && E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Monthly view is by entry date: a PO bought in one month and voided in a later month shows the purchase in the first and the reversal in the second."),
     E("div",{style:{marginTop:16}},
-      filtered.length===0
-        ? E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchases ledger entries for this month.")
+      shown.length===0
+        ? E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchases ledger entries for this view.")
         : E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
-            [...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||"")).map((e,i)=>
-              E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
+            [...shown].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||"")).map((e,i)=>{
+              const st = poStatusOf(e);
+              return E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,opacity:st==="voided"?0.75:1}},
                 E("div",{style:{minWidth:0}},
-                  E("div",{style:{fontWeight:600,fontSize:13}},e.category,e.supplier?` — ${e.supplier}`:"",e.poRef?` (${e.poRef})`:""),
+                  E("div",{style:{fontWeight:600,fontSize:13}},e.category,e.supplier?` — ${e.supplier}`:"",e.poRef?` (${e.poRef})`:"",st!=="unlinked"&&E("span",{style:{marginLeft:8,fontSize:10,fontWeight:700,color:st==="voided"?T.red:st==="received"?T.green:T.blue}},st.toUpperCase())),
                   E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},e.date,e.payment_method?` · ${e.payment_method}`:"",e.details?` · ${e.details}`:"")
                 ),
-                E("div",{style:{fontWeight:700,flexShrink:0,color:(parseFloat(e.amount)||0)<0?T.green:T.text}},fmtMoney(parseFloat(e.amount)||0))
-              )
-            )
+                E("div",{style:{fontWeight:700,flexShrink:0,color:amt(e)<0?T.green:T.text}},fmtSigned(amt(e)))
+              );
+            })
           )
     )
   );
@@ -10758,7 +10896,7 @@ function PurchasesTab() {
 
   // New PO form
   const emptyPO = () => ({
-    supplier:"", poRef:"", date:todayStr(), currency:"JMD",
+    supplier:"", poRef:"", date:todayStr(), currency:"JMD", fxRate:"",
     shipping:"", shippingPct:false,
     tax:"", taxPct:false,
     paymentMethod:"Cash",
@@ -10793,8 +10931,9 @@ function PurchasesTab() {
     if (!po.supplier.trim()) { alert("Supplier required."); return; }
     if (!po.lines?.length) { alert("Add at least one line item."); return; }
     if (!po.paymentMethod) { alert("Select a payment method."); return; }
+    if (po.currency !== "JMD" && !(parseFloat(po.fxRate) > 0)) { alert(`Enter the exchange rate (JMD per 1 ${po.currency}) — the books and unit costs are kept in JMD.`); return; }
     const record = await createPurchaseOrder({
-      supplier: po.supplier, poRef: po.poRef, date: po.date, currency: po.currency,
+      supplier: po.supplier, poRef: po.poRef, date: po.date, currency: po.currency, fxRate: po.fxRate,
       shipping: shippingAmt, tax: taxAmt, paymentMethod: po.paymentMethod, notes: po.notes,
       lines: po.lines, source: "manual"
     });
@@ -10805,7 +10944,32 @@ function PurchasesTab() {
 
   // Actually performs the void: applies whatever inventory changes were chosen (none, if the PO
   // was never received or staff chose to skip), flags the PO Voided, and logs the expense reversal.
-  const executeVoidPO = async (target, reason, { unitIdsToReturn = [], stockEdits = {} } = {}) => {
+  const executeVoidPO = async (target0, reason, { unitIdsToReturn = [], stockEdits = {} } = {}) => {
+    let target = target0;
+    // Never void (and reverse) the same PO twice — a second pass would credit the ledger again.
+    if (target.status === "Voided") { alert("This purchase order is already voided."); return; }
+    // The ledger is in JMD — a foreign-currency PO with no rate on file needs one before it can be reversed.
+    if (poFxRate(target) === 0) {
+      const r = prompt(`This PO is in ${target.currency}. Enter the exchange rate (JMD per 1 ${target.currency}) so the reversal is recorded in JMD:`);
+      if (!(parseFloat(r) > 0)) { alert("Void cancelled — an exchange rate is required for a foreign-currency PO."); return; }
+      await restatePOFx(target.id, r);
+      target = { ...target, fxRate: parseFloat(r) };
+    }
+    // What stays on hand after this void keeps its purchase cost on the books: units/stock the user does
+    // NOT send back (including units already sold — their cost has gone to COGS) remain "purchased".
+    // Only the cost of what actually goes back to the supplier (or was never received) is reversed.
+    const impact = target.status === "Received" ? findPOImpact(catalog, history, target) : { units: [], stockAdjustments: [] };
+    const returnIds = new Set(unitIdsToReturn);
+    const retainedUnitCost = impact.units
+      .filter(({ unit }) => !returnIds.has(unit.id) && unit.status !== "Returned to Supplier")
+      .reduce((s, { unit }) => s + (parseFloat(unit.cost) || 0), 0);
+    const factor = poLandedFactor(target);
+    const retainedStockCost = impact.stockAdjustments.reduce((s, a) => {
+      const keptQty = Math.max(0, a.qty - (parseInt(stockEdits[a.product.id]) || 0));
+      const avgRaw = a.qty > 0 ? a.rawCostTotal / a.qty : 0;
+      return s + keptQty * avgRaw * factor;
+    }, 0);
+    const retainedCost = round2(retainedUnitCost + retainedStockCost);
     if (unitIdsToReturn.length || Object.keys(stockEdits).length) {
       const unitIdSet = new Set(unitIdsToReturn);
       const updatedCatalog = catalog.map(product => {
@@ -10827,7 +10991,7 @@ function PurchasesTab() {
       });
       await saveCatalog(updatedCatalog); setCatalog(updatedCatalog);
     }
-    const updated = pos.map(p=>p.id===target.id?{...p,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
+    const updated = pos.map(p=>p.id===target.id?{...p,fxRate:target.fxRate,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString(),voidRetainedCost:retainedCost}:p);
     await save("tpp-purchase-orders", updated); setPos(updated);
     if (viewingPO?.id===target.id) setViewingPO(updated.find(p=>p.id===target.id));
     // Voiding shouldn't leave the original spend sitting in the Purchases Ledger forever — log an
@@ -10838,9 +11002,18 @@ function PurchasesTab() {
     // an inventory purchase, not an operating expense.
     try {
       const existingLedger = await loadArr("tpp-purchases-ledger");
+      // Units from this PO may already have been credited one-by-one as "Purchase Return" entries
+      // (Catalog / Testing Queue). Reverse only what's still outstanding, otherwise the same cost would
+      // be credited twice and the PO's net ledger balance would go negative.
+      const alreadyCredited = existingLedger
+        .filter(e => !e.voided && e.poId === target.id && (e.category === "Purchase Return" || e.category === "Purchase Void Reversal"))
+        .reduce((s, e) => s + Math.abs(parseFloat(e.amount) || 0), 0);
+      const fx = poFxRate(target) || 1;
+      const invoiceJMD = round2((target.invoiceTotal || 0) * fx);
+      const outstanding = Math.max(0, round2(invoiceJMD - alreadyCredited - retainedCost));
       const reversal = {
         date: todayStr(), category: "Purchase Void Reversal", payment_method: target.paymentMethod,
-        amount: -(target.invoiceTotal || 0), supplier: target.supplier, poId: target.id, poRef: target.poRef,
+        amount: -outstanding, amountOriginal: -round2(outstanding / fx), currency: target.currency || "JMD", fxRate: fx, retainedCost, supplier: target.supplier, poId: target.id, poRef: target.poRef,
         details: `Void reversal — PO ${target.poRef || target.id} — ${target.supplier}${target.currency && target.currency !== "JMD" ? ` (${target.currency})` : ""} — ${reason}`,
         logged_by: "", source: "purchase_order_void", createdAt: new Date().toISOString()
       };
@@ -10985,6 +11158,7 @@ function PurchasesTab() {
         E(Field,{label:"PO / Invoice Reference"},E(Input,{placeholder:"Invoice # or PO number",value:po.poRef,onChange:e=>setPO("poRef",e.target.value)})),
         E(Field,{label:"Date"},E(Input,{type:"date",value:po.date,onChange:e=>setPO("date",e.target.value)})),
         E(Field,{label:"Currency"},E(Sel,{value:po.currency,onChange:e=>setPO("currency",e.target.value)},PO_CURRENCIES.map(c=>E("option",{key:c,value:c},c)))),
+        po.currency!=="JMD"&&E(Field,{label:`Exchange rate (JMD per 1 ${po.currency})`,required:true},E(Input,{type:"number",placeholder:"e.g. 157",value:po.fxRate,onChange:e=>setPO("fxRate",e.target.value)})),
         E(Field,{label:"Payment Method",required:true},E(Sel,{value:po.paymentMethod,onChange:e=>setPO("paymentMethod",e.target.value)},PAYMENT_METHODS.map(m=>E("option",{key:m,value:m},m))))
       ),
       E("div",{style:{display:"grid",gridTemplateColumns:"1fr auto 1fr auto",gap:8,alignItems:"flex-end",marginBottom:12}},
@@ -11041,7 +11215,7 @@ function PurchasesTab() {
     received: pos.filter(p=>p.status==="Received"&&p.status!=="Voided"),
     voided: pos.filter(p=>p.status==="Voided"),
   };
-  const poTotal = (group) => group.reduce((s,p)=>s+(p.invoiceTotal||0),0);
+  const poTotal = (group) => group.reduce((s,p)=>s+(p.invoiceTotal||0)*(poFxRate(p)||1),0); // JMD
 
   return E("div",{style:{maxWidth:720,margin:"0 auto"}},
     E(PODetail,null),
@@ -11184,6 +11358,20 @@ function ReceiveStockTab({ onCatalogUpdate }) {
 
   // Commit the received stock to catalog
   const commitReceive = async () => {
+    // A foreign-currency PO must have an exchange rate before it lands in inventory — unit costs are
+    // kept in JMD (and landed with the PO's shipping/tax), otherwise COGS would mix currencies.
+    let receivingPO = selectedPO;
+    if (receivingPO && poFxRate(receivingPO) === 0) {
+      const r = prompt(`This PO is in ${receivingPO.currency}. Enter the exchange rate (JMD per 1 ${receivingPO.currency}) so costs are recorded in JMD:`);
+      if (!(parseFloat(r) > 0)) { alert("Receiving cancelled — an exchange rate is required for a foreign-currency PO."); return; }
+      await restatePOFx(receivingPO.id, r);
+      receivingPO = { ...receivingPO, fxRate: parseFloat(r) };
+      setSelectedPO(receivingPO);
+    }
+    const landedFactor = receivingPO ? poLandedFactor(receivingPO) : 1;
+    const landed = raw => round2((parseFloat(raw) || 0) * landedFactor);
+    const missingCost = receiveLines.filter(l => !(parseFloat(l.unitCost) > 0));
+    if (missingCost.length) { alert(`Every line needs a unit cost greater than 0 (it drives COGS and margins). Missing on: ${missingCost.map(l=>l.name).join(", ")}`); return; }
     setSaving(true);
     try {
       let updatedCatalog = [...catalog];
@@ -11205,14 +11393,14 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // "Attributing To" dropdown on this line, never a silent name/category string match.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: line.unitCost, barcode: line.barcode, variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode, variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Add units
           const newUnits = units.filter(u=>u.imei).map(u=>({
             id: `unit-${Date.now()}-${u.imei||Math.random().toString(36).slice(2,8)}`,
             imei: u.imei, status: u.status||"Available",
-            cost: parseFloat(line.unitCost)||0,
+            cost: landed(line.unitCost), costBasis: "landed_jmd", costRaw: parseFloat(line.unitCost)||0, costCurrency: receivingPO?.currency||"JMD",
             sellPrice: parseFloat(line.sellPrice)||0,
             receivedDate: today,
             poId: selectedPO?.id||"",
@@ -11222,7 +11410,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           }));
           product.units = [...(product.units||[]), ...newUnits];
           product.stock = product.units.filter(u=>u.status==="Available").length;
-          product.cost = parseFloat(line.unitCost)||product.cost;
+          product.cost = landed(line.unitCost)||product.cost;
           if (sellPriceBlank) { product.variable_price = true; }
           else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
@@ -11233,11 +11421,18 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: line.unitCost, barcode: line.barcode, variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode, variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
-          product.stock = (product.stock||0) + (parseInt(line.receivedQty)||0);
-          if (parseFloat(line.unitCost)) product.cost = parseFloat(line.unitCost);
+          // Weighted-average cost across what's already on hand and what just arrived, rather than
+          // overwriting the old cost — otherwise one pricier/cheaper batch silently re-costs all stock.
+          const recvQty = parseInt(line.receivedQty)||0, onHand = product.stock||0, oldCost = parseFloat(product.cost)||0;
+          if (parseFloat(line.unitCost)) {
+            product.cost = (onHand > 0 && oldCost > 0 && recvQty > 0)
+              ? round2((onHand*oldCost + recvQty*landed(line.unitCost)) / (onHand+recvQty))
+              : landed(line.unitCost);
+          }
+          product.stock = onHand + recvQty;
           if (sellPriceBlank) { product.variable_price = true; }
           else if (parseFloat(line.sellPrice)) { product.price = parseFloat(line.sellPrice); product.variable_price = false; }
           updatedCatalog = updatedCatalog.map(p=>p.id===product.id?product:p);
@@ -11513,6 +11708,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
 
   const saveProduct = async () => {
     if (!form.name.trim()) { alert("Name required."); return; }
+    if (!(parseFloat(form.cost) > 0)) { alert("Cost is required (greater than 0) — it drives COGS, margins and inventory valuation."); return; }
     const isImei = isImeiCategory(form.category);
     const product = editingProduct
       ? { ...editingProduct, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
@@ -11659,6 +11855,91 @@ const INVOICE_TYPES = [
   {id:"mixture",label:"🔀 Mixture",hint:"Mixed invoice"},
 ];
 
+// ── Missing Costs Tool ──────────────────────────────────────────────────────────
+// Stock that was entered before cost was mandatory sits at cost 0. Left alone, selling it books 100%
+// profit (COGS = 0) and Inventory Valuation understates the asset. This lets staff backfill a cost on
+// everything still in stock — an actual invoice cost where known, or an estimate from selling price
+// (clearly flagged as an estimate on the unit/product) where not. It only fixes FUTURE sales and the
+// valuation: already-sold items keep the cost they were sold with, and nothing here touches the
+// Purchases Ledger — the original purchase was a past event (and was never booked at a cost), so
+// backfilling cost is a re-valuation of opening stock, not a new purchase.
+function MissingCostsTool({ catalog, onCatalogUpdate }) {
+  const E = React.createElement;
+  const [inputs, setInputs] = useState({});   // productId -> cost string
+  const [pct, setPct] = useState("70");       // estimate = selling price × pct%
+  const [saving, setSaving] = useState(false);
+  const [asEstimate, setAsEstimate] = useState(true);
+
+  const imeiRows = catalog.filter(p=>isImeiCategory(p.category)).map(p=>({
+    product:p, zero:(p.units||[]).filter(u=>(parseFloat(u.cost)||0)<=0 && u.status!=="Sold" && u.status!=="Returned to Supplier")
+  })).filter(r=>r.zero.length);
+  const stockRows = catalog.filter(p=>!isImeiCategory(p.category) && (p.stock||0)>0 && !(parseFloat(p.cost)>0)).map(p=>({product:p,zero:null}));
+  const rows = [...imeiRows, ...stockRows];
+  const setIn = (id,v)=>setInputs(s=>({...s,[id]:v}));
+
+  const estimateAll = () => {
+    const f = (parseFloat(pct)||0)/100;
+    if (!(f>0)) return;
+    const next = {...inputs};
+    rows.forEach(({product})=>{
+      if (!product.variable_price && (parseFloat(product.price)||0) > 0) next[product.id] = String(round2(product.price*f));
+    });
+    setInputs(next);
+  };
+
+  const applyAll = async () => {
+    const todo = rows.filter(({product})=>parseFloat(inputs[product.id])>0);
+    if (!todo.length) { alert("Enter a cost for at least one product first."); return; }
+    if (!confirm(`Apply costs to ${todo.length} product(s)? ${asEstimate?"They'll be flagged as estimates.":""}`)) return;
+    setSaving(true);
+    try {
+      const byId = new Map(todo.map(r=>[r.product.id, round2(inputs[r.product.id])]));
+      const source = asEstimate ? "backfilled_estimate" : "backfilled_actual";
+      const now = new Date().toISOString();
+      const updated = catalog.map(p=>{
+        if (!byId.has(p.id)) return p;
+        const cost = byId.get(p.id);
+        if (isImeiCategory(p.category)) {
+          const units = (p.units||[]).map(u => ((parseFloat(u.cost)||0)<=0 && u.status!=="Sold" && u.status!=="Returned to Supplier")
+            ? {...u, cost, costBasis:source, history:[...(u.history||[]),{status:u.status,ts:now,note:`Cost backfilled: ${cost} (${asEstimate?"estimate":"actual"})`}]}
+            : u);
+          return {...p, units, cost: (parseFloat(p.cost)>0 ? p.cost : cost), costBasis: source, updatedAt: now};
+        }
+        return {...p, cost, costBasis: source, updatedAt: now};
+      });
+      await onCatalogUpdate(updated);
+      setInputs({});
+    } finally { setSaving(false); }
+  };
+
+  if (rows.length===0) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted,background:"#F9FAFB",borderRadius:12}},
+    E("div",{style:{fontSize:40,marginBottom:12}},"✅"),
+    E("div",{style:{fontWeight:600,fontSize:15}},"Every item in stock has a cost"),
+    E("div",{style:{fontSize:13,marginTop:6}},"COGS and Inventory Valuation can be trusted for what's on hand."));
+
+  return E("div",{style:{maxWidth:760,margin:"0 auto"}},
+    E("div",{style:{marginBottom:12}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💲 Missing Costs"),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${rows.length} product${rows.length!==1?"s":""} in stock with no cost — selling them currently books 100% profit.`)),
+    E("div",{style:{background:T.blueLt,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:T.blue}},
+      "Best: enter the real cost from the supplier invoice. If that's gone, estimate from selling price. Either way this only corrects future sales and inventory valuation — items already sold keep the cost they were sold with, and nothing is added to the Purchases Ledger (it's a re-valuation of existing stock, not a new purchase)."),
+    E(Card,{style:{marginBottom:12}},
+      E("div",{style:{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}},
+        E("span",{style:{fontSize:12}},"Estimate cost as"),
+        E(Input,{type:"number",value:pct,onChange:e=>setPct(e.target.value),style:{width:70}}),
+        E("span",{style:{fontSize:12}},"% of selling price"),
+        E(Btn,{variant:"ghost",style:{fontSize:12,padding:"6px 12px"},onClick:estimateAll},"Fill estimates"),
+        E("label",{style:{display:"flex",alignItems:"center",gap:6,fontSize:12,marginLeft:"auto",cursor:"pointer"}},
+          E("input",{type:"checkbox",checked:asEstimate,onChange:e=>setAsEstimate(e.target.checked)}),"Flag as estimate"))),
+    E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+      rows.map(({product,zero})=>E("div",{key:product.id,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
+        E("div",{style:{minWidth:0}},
+          E("div",{style:{fontWeight:600,fontSize:13}},product.name),
+          E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},zero?`${zero.length} unit${zero.length!==1?"s":""} at cost 0`:`${product.stock} in stock at cost 0`,` · ${product.variable_price?"Variable price":`Price ${fmtMoney(product.price||0)}`}`)),
+        E(Input,{type:"number",placeholder:"Cost / unit",value:inputs[product.id]||"",onChange:e=>setIn(product.id,e.target.value),style:{width:120}})))),
+    E("div",{style:{marginTop:14}},E(Btn,{onClick:applyAll,disabled:saving},saving?"Saving...":"✓ Apply Costs")));
+}
+
 // ── Duplicate Products Tool ─────────────────────────────────────────────────────
 // Finds catalog products that are very likely the same item split across multiple entries (from the
 // old exact-string-match Receive Stock behavior, before it required an explicit "Attributing To"
@@ -11778,12 +12059,16 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
 
   const testingCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category) ? (p.units||[]).filter(u=>u.status==="Under Testing").length : 0), 0);
   const duplicateCount = findDuplicateGroups(catalog).length;
+  const missingCostCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category)
+    ? (p.units||[]).filter(u=>(parseFloat(u.cost)||0)<=0 && u.status!=="Sold" && u.status!=="Returned to Supplier").length
+    : ((p.stock||0)>0 && !(parseFloat(p.cost)>0) ? 1 : 0)), 0);
 
   const subTabs=[
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
     {id:"testing",label:`🔬 Testing Queue${testingCount?` (${testingCount})`:""}`},
     {id:"duplicates",label:`🔀 Duplicates${duplicateCount?` (${duplicateCount})`:""}`},
+    {id:"costs",label:`💲 Missing Costs${missingCostCount?` (${missingCostCount})`:""}`},
   ];
 
   const tabBar = E("div",{style:{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${T.border}`,paddingBottom:12,flexWrap:"wrap"}},
@@ -11796,6 +12081,7 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
   if (subTab==="testing") return E("div",null,tabBar,E(UnitTestingQueue,{catalog,onCatalogUpdate:saveCatalogFn}));
   if (subTab==="duplicates") return E("div",null,tabBar,E(DuplicateProductsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
+  if (subTab==="costs") return E("div",null,tabBar,E(MissingCostsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
 
   return null;
 }
