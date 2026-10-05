@@ -236,7 +236,8 @@ const migrateInventoryPurchasesToLedger = async () => {
               amount: poFxRate(po) ? round2((parseFloat(e.amount)||0) * poFxRate(po)) : e.amount }
           : {})
       };
-    }).filter(e => !have.has(sig(e)));
+    }).filter(e => !have.has(sig(e)))
+      .filter(e => e.category !== "Inventory Purchase" || !e.poId || !ledger.some(l => !l.voided && l.category === "Inventory Purchase" && l.poId === e.poId));
     // Backup first (append — never overwrite an earlier backup), then ledger, then verify, then strip.
     const prevBackup = await loadArr("tpp-expenses-inventory-purchase-backup");
     await save("tpp-expenses-inventory-purchase-backup", [...legacy, ...prevBackup]);
@@ -558,6 +559,8 @@ const fmtMoney = n => {
   });
 };
 // fmtMoney always shows the absolute value; ledgers need the sign (credits/reversals are negative).
+// PO amounts are in the PO's own currency — fmtMoney already prefixes "JMD ", so only non-JMD POs get their own code.
+const fmtPO = (n, cur) => (!cur || cur === "JMD") ? fmtMoney(n) : `${cur} ${(parseFloat(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const fmtSigned = n => { const v = parseFloat(n) || 0; return (v < 0 ? "−" : "") + fmtMoney(v); };
 const isRegression = (from, to) => STATUS_ORDER.indexOf(to) < STATUS_ORDER.indexOf(from);
 const currentYear = new Date().getFullYear();
@@ -3906,11 +3909,12 @@ Return ONLY a JSON array of objects like: [{"description":"S20 Ultra 128GB Black
     const poRef = phones.find(p=>p.order_number)?.order_number || "";
     const date = phones.find(p=>p.date)?.date || todayStr();
     const paymentMethod = phones.find(p=>p.payment_method)?.payment_method || "Other";
-    await createPurchaseOrder({
+    const created = await createPurchaseOrder({
       supplier, poRef, date, currency: "JMD", paymentMethod,
       notes: "Created automatically from the AI Invoice Scanner.",
       lines, source: "ai-scan"
     });
+    if (!created) { setStage("reviewing"); return; }
     alert(`✅ Purchase Order created for ${phones.length} phone(s).\n\nGo to Purchases → Receive Stock to receive it into inventory — that's also where you can flag the units for testing before they go on sale.`);
     onDone();
   };
@@ -4867,8 +4871,10 @@ function OwnerDashboard({
   const [sales, setSales] = useState([]);
   const [rentals, setRentals] = useState([]);
   const [purchasesLedger, setPurchasesLedger] = useState([]);
+  const [poStatusById, setPoStatusById] = useState({});
   useEffect(() => {
     (async () => {
+      setPoStatusById(Object.fromEntries((await loadArr("tpp-purchase-orders")).map(p => [p.id, p.status])));
       setSales(await loadArr("tpp-sales"));
       setRentals(await loadArr("tpp-rental-income"));
       setPurchasesLedger(await loadArr("tpp-purchases-ledger"));
@@ -4885,7 +4891,12 @@ function OwnerDashboard({
   // split, so old months don't keep double-counting inventory cost as both an expense and COGS.
   const mX = expenses.filter(e => inM(e.date || e.createdAt) && !e.voided && e.category !== "Inventory Purchase");
   const mD = deposits.filter(d => inM(d.date || d.createdAt) && !d.voided);
-  const mPurchases = purchasesLedger.filter(e => inM(e.date || e.createdAt) && !e.voided);
+  // A voided PO never really happened as a purchase — both its original entry and its reversal are left
+  // out of the month's purchase totals so they match the Purchases tab (which drops voided POs), instead
+  // of the purchase showing in one month and its reversal landing in another. They stay in the ledger
+  // itself and in the Excel export (with the PO's status) for the audit trail.
+  const mPurchasesAll = purchasesLedger.filter(e => inM(e.date || e.createdAt) && !e.voided);
+  const mPurchases = mPurchasesAll.filter(e => poStatusById[e.poId] !== "Voided");
   const mSales = sales.filter(s => inM(s.date || s.createdAt) && !s.voided);
   const mRentals = rentals.filter(r => inM(r.date || r.createdAt) && !r.voided);
   // Cost of the specific unit/product sold, read from the snapshot of the catalog stored on the
@@ -4981,7 +4992,7 @@ function OwnerDashboard({
       // the full history even though OwnerDashboard doesn't otherwise hold these in state.
       const allPOs = await loadArr("tpp-purchase-orders");
       const srcPOs = scope === "month" ? allPOs.filter(p => inM(p.date || p.receivedDate || p.createdAt) && p.status !== "Voided") : allPOs;
-      const srcPurchasesLedger = scope === "month" ? mPurchases : purchasesLedger;
+      const srcPurchasesLedger = scope === "month" ? mPurchasesAll : purchasesLedger;
       const allCredits = await loadArr("tpp-store-credits");
       const srcCredits = scope === "month" ? allCredits.filter(c => inM(c.issuedAt)) : allCredits;
       const allDebts = await loadArr("tpp-debts");
@@ -5071,7 +5082,7 @@ function OwnerDashboard({
       // ── Sheet: Purchases Ledger ──────────────────────────────────────────────
       // Inventory purchases, returns, and void reversals — a balance-sheet/AP ledger, kept separate
       // from Expenses because buying inventory isn't a P&L expense (see summary sheet note below).
-      addSheet("Purchases Ledger", ["Date", "Category", "Supplier", "PO Ref", "Payment Method", "Amount (JMD)", "Details"], [...srcPurchasesLedger].sort((a, b) => a.date > b.date ? 1 : -1).map(e => [e.date, e.category, e.supplier || "", e.poRef || "", e.payment_method || "", parseFloat(e.amount) || 0, e.details || ""]));
+      addSheet("Purchases Ledger", ["Date", "Category", "Supplier", "PO Ref", "PO Status", "Payment Method", "Amount (JMD)", "Details"], [...srcPurchasesLedger].sort((a, b) => a.date > b.date ? 1 : -1).map(e => [e.date, e.category, e.supplier || "", e.poRef || "", poStatusById[e.poId] || "", e.payment_method || "", parseFloat(e.amount) || 0, e.details || ""]));
 
       // ── Sheet: Store Credits ─────────────────────────────────────────────────
       addSheet("Store Credits", ["Customer", "Phone", "Amount (JMD)", "Issued", "Expires", "Used", "Source Sale"], [...srcCredits].sort((a, b) => (a.issuedAt || "") > (b.issuedAt || "") ? 1 : -1).map(c => [c.customerName || "", c.customerPhone || "", parseFloat(c.amount) || 0, c.issuedAt ? new Date(c.issuedAt).toLocaleDateString("en-GB") : "", c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("en-GB") : "", c.used ? "Used" : "Outstanding", c.sourceSaleId || ""]));
@@ -6549,6 +6560,10 @@ async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD
     status: "Ordered", source, createdAt: new Date().toISOString()
   };
   const existingPOs = await loadArr("tpp-purchase-orders");
+  // The same supplier invoice entered twice (double-click, or scanned twice) would be booked as two
+  // purchases. Make that an explicit choice rather than a silent duplicate.
+  const dupe = poRef && existingPOs.find(x => x.status !== "Voided" && x.supplier === supplier && x.poRef === poRef);
+  if (dupe && !confirm(`A purchase order for ${supplier} — ${poRef} already exists (${dupe.status || "Ordered"}). Create another anyway? Entering the same invoice twice double-counts the purchase.`)) return null;
   await save("tpp-purchase-orders", [record, ...existingPOs]);
   // Logged to the Purchases Ledger, not Expenses — buying inventory swaps cash/AP for an Inventory
   // asset, it doesn't reduce profit yet. It only hits the P&L later, as COGS when each unit sells
@@ -10774,7 +10789,7 @@ function PurchasesLedgerView({ onBack }) {
   const [pos, setPos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
-  const [statusTab, setStatusTab] = useState("all");
+  const [statusTab, setStatusTab] = useState("active");
   useEffect(() => {
     Promise.all([loadArr("tpp-purchases-ledger"), loadArr("tpp-purchase-orders")]).then(([e,p]) => { setEntries(e||[]); setPos(p||[]); setLoading(false); });
   }, []);
@@ -10788,16 +10803,27 @@ function PurchasesLedgerView({ onBack }) {
   const poStatusOf = e => { const po = poById.get(e.poId); return po ? (po.status==="Voided" ? "voided" : po.status==="Received" ? "received" : "pending") : "unlinked"; };
   const inMonth = e => !monthFilter || (e.date||"").startsWith(monthFilter);
   const monthEntries = entries.filter(e => !e.voided && inMonth(e));
-  const counts = { all:monthEntries.length };
+  const counts = { all:monthEntries.length, active: monthEntries.filter(e=>poStatusOf(e)!=="voided").length };
   const nets = { all: monthEntries.reduce((s,e)=>s+amt(e),0) };
   ["pending","received","voided","unlinked"].forEach(k => {
     const list = monthEntries.filter(e => poStatusOf(e)===k);
     counts[k] = list.length; nets[k] = list.reduce((s,e)=>s+amt(e),0);
   });
-  const shown = monthEntries.filter(e => statusTab==="all" || poStatusOf(e)===statusTab);
+  const shown = monthEntries.filter(e => statusTab==="all" || (statusTab==="active" ? poStatusOf(e)!=="voided" : poStatusOf(e)===statusTab));
   const byCategory = {};
   shown.forEach(e => { byCategory[e.category] = (byCategory[e.category]||0) + amt(e); });
   const net = shown.reduce((s,e)=>s+amt(e),0);
+
+  // Duplicate detection: a PO should have exactly one live "Inventory Purchase" entry.
+  const dupIdx = new Set();
+  { const seen = new Map();
+    entries.forEach((e,i) => { if (e.voided || e.category!=="Inventory Purchase" || !e.poId) return;
+      if (seen.has(e.poId)) dupIdx.add(i); else seen.set(e.poId, i); }); }
+  const removeDuplicates = async () => {
+    if (!confirm(`Mark ${dupIdx.size} duplicate purchase entr${dupIdx.size!==1?"ies":"y"} as voided? Nothing is deleted.`)) return;
+    const next = entries.map((e,i) => dupIdx.has(i) ? { ...e, voided:true, voidedReason:"duplicate", voidedAt:new Date().toISOString() } : e);
+    await save("tpp-purchases-ledger", next); setEntries(next);
+  };
 
   // ── Reconciliation (all time, not month-scoped) ─────────────────────────────
   // A sound ledger must agree with the purchase orders themselves (everything in JMD): for every PO
@@ -10827,7 +10853,7 @@ function PurchasesLedgerView({ onBack }) {
     setEntries(e||[]); setPos(p||[]);
   };
 
-  const tabs = [["all","All"],["pending","⏳ Pending"],["received","✅ Received"],["voided","🚫 Voided"]].concat(counts.unlinked ? [["unlinked","Unlinked"]] : []);
+  const tabs = [["active","Active"],["pending","⏳ Pending"],["received","✅ Received"],["voided","🚫 Voided"],["all","All"]].concat(counts.unlinked ? [["unlinked","Unlinked"]] : []);
 
   return E("div",{style:{maxWidth:760,margin:"0 auto"}},
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
@@ -10839,6 +10865,9 @@ function PurchasesLedgerView({ onBack }) {
     ),
     E("div",{style:{background:issues.length?T.amberLt:T.greenLt,border:`1px solid ${issues.length?"#FDE68A":"#A7F3D0"}`,borderRadius:10,padding:"12px 16px",marginBottom:16}},
       E("div",{style:{fontWeight:700,fontSize:13,color:issues.length?"#92400E":T.green}},issues.length?`⚠️ Reconciliation: ${issues.length} PO${issues.length!==1?"s":""} don't match the ledger`:"✓ Reconciled with purchase orders"),
+      dupIdx.size>0 && E("div",{style:{fontSize:12,marginTop:4,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
+        E("span",null,`${dupIdx.size} duplicate purchase entr${dupIdx.size!==1?"ies":"y"} (same PO recorded more than once)`),
+        E("button",{onClick:removeDuplicates,style:{background:T.blue,color:"#fff",border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}},"Remove duplicates")),
       E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`All-time: standing POs (Pending + Received) ${fmtSigned(standingTotal)} · ledger net on PO-linked entries ${fmtSigned(ledgerPoLinkedNet)} (difference = unit-level supplier returns)`),
       issues.slice(0,12).map((x,i)=>E("div",{key:i,style:{fontSize:12,marginTop:4,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
         E("span",null,`${x.po.supplier||"—"}${x.po.poRef?` — ${x.po.poRef}`:""} (${x.po.status||"Ordered"}): ${x.note}${x.expected!==null?` — ledger ${fmtSigned(x.ledgerNet)}, expected ${fmtSigned(x.expected)}`:""}`),
@@ -10852,7 +10881,7 @@ function PurchasesLedgerView({ onBack }) {
         label," (",counts[key]||0,")"))
     ),
     E(R2,null,
-      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`Net ${statusTab==="all"?"Purchases":statusTab[0].toUpperCase()+statusTab.slice(1)} (${shown.length} entries)`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtSigned(net))),
+      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`Net ${statusTab==="all"?"Purchases (incl. voided)":statusTab[0].toUpperCase()+statusTab.slice(1)} (${shown.length} entries)`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtSigned(net))),
       E(Card,null,
         E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},"By Category"),
         Object.entries(byCategory).length===0
@@ -10860,7 +10889,7 @@ function PurchasesLedgerView({ onBack }) {
           : Object.entries(byCategory).map(([cat,a])=>E("div",{key:cat,style:{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:2}},E("span",null,cat),E("span",{style:{fontWeight:700,color:a<0?T.green:T.text}},fmtSigned(a))))
       )
     ),
-    statusTab==="all" && E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Monthly view is by entry date: a PO bought in one month and voided in a later month shows the purchase in the first and the reversal in the second."),
+    (statusTab==="all"||statusTab==="voided") && E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Monthly view is by entry date: a PO bought in one month and voided in a later month shows the purchase in the first and the reversal in the second."),
     E("div",{style:{marginTop:16}},
       shown.length===0
         ? E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchases ledger entries for this view.")
@@ -10937,6 +10966,7 @@ function PurchasesTab() {
       shipping: shippingAmt, tax: taxAmt, paymentMethod: po.paymentMethod, notes: po.notes,
       lines: po.lines, source: "manual"
     });
+    if (!record) return;
     setPos([record, ...pos]);
     setPOS(emptyPO()); setView("pos");
     alert(`✅ Purchase Order saved — ${fmtMoney(record.invoiceTotal)} ${po.currency}`);
@@ -11070,13 +11100,13 @@ function PurchasesTab() {
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Currency"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.currency||"JMD")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Payment Method"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.paymentMethod||"—")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Status"),E("div",{style:{fontWeight:700,color:viewingPO.status==="Voided"?T.red:viewingPO.status==="Received"?T.green:T.blue,marginTop:2}},viewingPO.status)),
-        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},fmtMoney(viewingPO.invoiceTotal||0)," ",viewingPO.currency||"JMD"))
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},fmtPO(viewingPO.invoiceTotal||0,viewingPO.currency)))
       ),
       (viewingPO.lines||[]).length>0 && E("div", { style:{ marginBottom:14 } },
         E(ST, null, "Line Items"),
         (viewingPO.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:`1px dashed ${T.border}`}},
           E("div",null,E("div",{style:{fontWeight:500}},l.name),E("div",{style:{color:T.muted}},l.category," · qty ",l.qty)),
-          E("div",{style:{fontWeight:600}},fmtMoney((l.unitCost||0)*(l.qty||1))," ",viewingPO.currency||"JMD")
+          E("div",{style:{fontWeight:600}},fmtPO((l.unitCost||0)*(l.qty||1),viewingPO.currency))
         ))
       ),
       E("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 } }, E("span",{style:{color:T.muted}},"Shipping"), E("span",null,fmtMoney(viewingPO.shipping||0))),
@@ -11194,7 +11224,7 @@ function PurchasesTab() {
                 E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",fmtMoney(l.unitCost))
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                E("div",{style:{fontWeight:700,fontSize:13}},fmtMoney(l.unitCost*l.qty)," ",po.currency),
+                E("div",{style:{fontWeight:700,fontSize:13}},fmtPO(l.unitCost*l.qty,po.currency)),
                 E("button",{onClick:()=>setPO("lines",(po.lines||[]).filter((_,j)=>j!==i)),style:{background:T.redLt,color:T.red,border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}},"✕")
               )
             ))
@@ -11203,7 +11233,7 @@ function PurchasesTab() {
         E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Subtotal"),E("span",null,fmtMoney(lineSubtotal))),
         shippingAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Shipping"),E("span",null,fmtMoney(shippingAmt))),
         taxAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Tax"),E("span",null,fmtMoney(taxAmt))),
-        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue}},fmtMoney(invoiceTotal)," ",po.currency))
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue}},fmtPO(invoiceTotal,po.currency)))
       )
     ),
     E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},"💾 Save Purchase Order")
@@ -11261,7 +11291,7 @@ function PurchasesTab() {
                 p.receivedAt&&E("div",{style:{fontSize:11,color:T.green,marginTop:2}},"Received: ",fmtDate(p.receivedAt))
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                E("div",{style:{fontWeight:700,color:p.status==="Voided"?T.red:T.blue}},fmtMoney(p.invoiceTotal||0)," ",p.currency||"JMD"),
+                E("div",{style:{fontWeight:700,color:p.status==="Voided"?T.red:T.blue}},fmtPO(p.invoiceTotal||0,p.currency)),
                 E("button",{onClick:()=>setViewingPO(p),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"View")
               )
             )
