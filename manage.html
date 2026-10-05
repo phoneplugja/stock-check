@@ -11402,6 +11402,31 @@ function ReceiveStockTab({ onCatalogUpdate }) {
     const landed = raw => round2((parseFloat(raw) || 0) * landedFactor);
     const missingCost = receiveLines.filter(l => !(parseFloat(l.unitCost) > 0));
     if (missingCost.length) { alert(`Every line needs a unit cost greater than 0 (it drives COGS and margins). Missing on: ${missingCost.map(l=>l.name).join(", ")}`); return; }
+    if (saving) return;
+    // Never add an IMEI that's already in the catalog. If every phone on this PO is already there (a
+    // previous receive saved the units but froze before the PO was marked Received), just finish the job.
+    const existingImeis = new Map();
+    catalog.forEach(p => (p.units||[]).forEach(u => { if (u.imei) existingImeis.set(String(u.imei).trim(), u); }));
+    const incoming = receiveLines.filter(l => isImeiCategory(l.category)).flatMap(l => l.units.filter(u=>u.imei).map(u=>String(u.imei).trim()));
+    const already = incoming.filter(i => existingImeis.has(i));
+    if (already.length) {
+      const allFromThisPO = receivingPO && already.length===incoming.length && already.every(i => existingImeis.get(i).poId===receivingPO.id);
+      if (allFromThisPO && receiveLines.every(l => isImeiCategory(l.category))) {
+        if (confirm("These phones were already added to the catalog by an earlier (interrupted) receive.\n\nOK = just mark the PO as Received, without adding the phones again.")) {
+          setSaving(true);
+          try {
+            const allPOs = await loadArr("tpp-purchase-orders");
+            await save("tpp-purchase-orders", allPOs.map(p=>p.id===receivingPO.id?{...p,status:"Received",receivedAt:new Date().toISOString()}:p));
+            alert("✅ PO marked Received. No duplicate phones were added.");
+            setView("choose"); setSelectedPO(null); setReceiveLines([]); setFlagAllTesting(false);
+          } finally { setSaving(false); }
+        }
+        return;
+      }
+      alert(`These IMEIs are already in the catalog, so they can't be received again:\n${[...new Set(already)].slice(0,8).join(", ")}${already.length>8?" …":""}`);
+      return;
+    }
+    if (new Set(incoming).size !== incoming.length) { alert("The same IMEI appears more than once in this receive. Please fix the duplicates."); return; }
     setSaving(true);
     try {
       let updatedCatalog = [...catalog];
@@ -11970,111 +11995,9 @@ function MissingCostsTool({ catalog, onCatalogUpdate }) {
     E("div",{style:{marginTop:14}},E(Btn,{onClick:applyAll,disabled:saving},saving?"Saving...":"✓ Apply Costs")));
 }
 
-// ── Duplicate Products Tool ─────────────────────────────────────────────────────
-// Finds catalog products that are very likely the same item split across multiple entries (from the
-// old exact-string-match Receive Stock behavior, before it required an explicit "Attributing To"
-// choice) and lets staff merge them — combining units/stock into one kept product and removing the
-// rest — instead of leaving the duplicates to keep confusing stock counts and Receive Stock forever.
-function DuplicateProductsTool({ catalog, onCatalogUpdate }) {
-  const E = React.createElement;
-  const [keepChoice, setKeepChoice] = useState({}); // groupIndex -> productId to keep
-  const [merging, setMerging] = useState(null);
-
-  const groups = findDuplicateGroups(catalog);
-
-  const defaultKeepId = (group) => {
-    // Default to whichever entry has the most inventory in it (fewest units lost if staff don't
-    // change the pick), falling back to the oldest entry when stock ties.
-    const sorted = [...group].sort((a,b) => {
-      const stockDiff = getAvailableStock(b) - getAvailableStock(a);
-      if (stockDiff !== 0) return stockDiff;
-      return (a.createdAt||"").localeCompare(b.createdAt||"");
-    });
-    return sorted[0].id;
-  };
-
-  const mergeGroup = async (group, keepId) => {
-    const gid = group.map(p=>p.id).join("|");
-    setMerging(gid);
-    try {
-      const keep = group.find(p=>p.id===keepId);
-      const others = group.filter(p=>p.id!==keepId);
-      let merged = { ...keep };
-      if (isImeiCategory(merged.category)) {
-        const seenImeis = new Set((merged.units||[]).map(u=>u.imei).filter(Boolean));
-        const combinedUnits = [...(merged.units||[])];
-        others.forEach(o => (o.units||[]).forEach(u => {
-          if (u.imei && seenImeis.has(u.imei)) return; // true duplicate unit — drop it, don't double-count stock
-          if (u.imei) seenImeis.add(u.imei);
-          combinedUnits.push({ ...u, history: [...(u.history||[]), { status:u.status, ts:new Date().toISOString(), note:`Merged in from duplicate product "${o.name}" (${o.id})` }] });
-        }));
-        merged.units = combinedUnits;
-        merged.stock = combinedUnits.filter(u=>u.status==="Available").length;
-      } else {
-        merged.stock = (merged.stock||0) + others.reduce((s,o)=>s+(o.stock||0),0);
-      }
-      // Backfill anything the kept product is missing from a duplicate that has it — never overwrite
-      // a value the kept product already has.
-      others.forEach(o => {
-        if (!merged.barcode && o.barcode) merged.barcode = o.barcode;
-        if (!merged.sku && o.sku) merged.sku = o.sku;
-        if (!merged.image && o.image) merged.image = o.image;
-        if (!merged.cost && o.cost) merged.cost = o.cost;
-      });
-      merged.updatedAt = new Date().toISOString();
-      const otherIds = new Set(others.map(o=>o.id));
-      const updated = catalog.filter(p=>!otherIds.has(p.id)).map(p=>p.id===merged.id?merged:p);
-      await onCatalogUpdate(updated);
-    } finally {
-      setMerging(null);
-    }
-  };
-
-  if (groups.length===0) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted,background:"#F9FAFB",borderRadius:12}},
-    E("div",{style:{fontSize:40,marginBottom:12}},"✅"),
-    E("div",{style:{fontWeight:600,fontSize:15}},"No likely duplicates found"),
-    E("div",{style:{fontSize:13,marginTop:6}},"Products are grouped as likely duplicates when they share a category and either the same barcode/SKU or a very close name match.")
-  );
-
-  return E("div",{style:{maxWidth:720,margin:"0 auto"}},
-    E("div",{style:{marginBottom:20}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔀 Possible Duplicates"),
-      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${groups.length} group${groups.length!==1?"s":""} found — review each before merging.`)
-    ),
-    E("div",{style:{display:"flex",flexDirection:"column",gap:16}},
-      groups.map((group,gi)=>{
-        const gid = group.map(p=>p.id).join("|");
-        const keepId = keepChoice[gi] || defaultKeepId(group);
-        return E(Card,{key:gid},
-          E(ST,null,`Group ${gi+1} — ${group[0].category}`),
-          E("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:12}},
-            group.map(p=>E("label",{key:p.id,style:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,background:keepId===p.id?T.blueLt:"#F9FAFB",border:`1px solid ${keepId===p.id?T.blue:T.border}`,cursor:"pointer"}},
-              E("input",{type:"radio",name:`keep-${gid}`,checked:keepId===p.id,onChange:()=>setKeepChoice(s=>({...s,[gi]:p.id}))}),
-              E("div",{style:{flex:1}},
-                E("div",{style:{fontWeight:600,fontSize:13}},p.name),
-                E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},
-                  `Stock: ${getAvailableStock(p)}`,
-                  p.barcode?` · Barcode: ${p.barcode}`:"",
-                  p.sku?` · SKU: ${p.sku}`:"",
-                  p.createdAt?` · Added ${fmtDate(p.createdAt)}`:""
-                )
-              ),
-              keepId===p.id
-                ? E("span",{style:{fontSize:10,fontWeight:700,color:T.blue,background:"#fff",borderRadius:5,padding:"2px 8px"}},"KEEP")
-                : E("span",{style:{fontSize:10,fontWeight:700,color:T.red,background:"#fff",borderRadius:5,padding:"2px 8px"}},"MERGE IN")
-            ))
-          ),
-          E("div",{style:{fontSize:11,color:T.muted,marginBottom:10}},"Merging combines all units/stock into the product marked KEEP and removes the others. This can't be undone — each merged-in unit's full history is preserved on the kept product."),
-          E(Btn,{disabled:merging===gid,onClick:()=>{ if(confirm(`Merge ${group.length} products into "${group.find(p=>p.id===keepId)?.name}"? The others will be removed.`)) mergeGroup(group, keepId); }},merging===gid?"Merging...":`🔀 Merge Group ${gi+1}`)
-        );
-      })
-    )
-  );
-}
-
 function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, initialSubTab }) {
   const E = React.createElement;
-  const [subTab, setSubTab] = useState(initialSubTab || "catalog");
+  const [subTab, setSubTab] = useState(initialSubTab && initialSubTab!=="duplicates" ? initialSubTab : "catalog");
   const [catalog, setCatalogState] = useState([]);
   const [catalogLoaded, setCatalogLoaded] = useState(false);
 
@@ -12088,7 +12011,6 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   };
 
   const testingCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category) ? (p.units||[]).filter(u=>u.status==="Under Testing").length : 0), 0);
-  const duplicateCount = findDuplicateGroups(catalog).length;
   const missingCostCount = catalog.reduce((n,p)=> n + (isImeiCategory(p.category)
     ? (p.units||[]).filter(u=>(parseFloat(u.cost)||0)<=0 && u.status!=="Sold" && u.status!=="Returned to Supplier").length
     : ((p.stock||0)>0 && !(parseFloat(p.cost)>0) ? 1 : 0)), 0);
@@ -12097,7 +12019,6 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
     {id:"testing",label:`🔬 Testing Queue${testingCount?` (${testingCount})`:""}`},
-    {id:"duplicates",label:`🔀 Duplicates${duplicateCount?` (${duplicateCount})`:""}`},
     {id:"costs",label:`💲 Missing Costs${missingCostCount?` (${missingCostCount})`:""}`},
   ];
 
@@ -12110,7 +12031,6 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
   if (subTab==="testing") return E("div",null,tabBar,E(UnitTestingQueue,{catalog,onCatalogUpdate:saveCatalogFn}));
-  if (subTab==="duplicates") return E("div",null,tabBar,E(DuplicateProductsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
   if (subTab==="costs") return E("div",null,tabBar,E(MissingCostsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
 
   return null;
@@ -12152,6 +12072,44 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
       });
     });
     return rows;
+  };
+  // Duplicate IMEIs: the same physical phone entered twice (e.g. a receive that froze partway and was
+  // repeated). The original (a Sold unit if any, otherwise the earliest received) is kept; extras that
+  // haven't been sold are removed. Sold extras are never touched.
+  const unitTs = u => (u.history&&u.history[0]&&u.history[0].ts) || u.receivedDate || "";
+  const dupGroups = (() => {
+    const byImei = new Map();
+    catalog.forEach(product => { if (!isImeiCategory(product.category)) return;
+      (product.units||[]).forEach(unit => { if (!unit.imei) return;
+        const k = String(unit.imei).trim(); if (!byImei.has(k)) byImei.set(k, []);
+        byImei.get(k).push({ product, unit }); }); });
+    return [...byImei.entries()].filter(([,l]) => l.length>1).map(([imei,list]) => {
+      const sorted = [...list].sort((a,b) => (a.unit.status==="Sold"?0:1)-(b.unit.status==="Sold"?0:1) || unitTs(a.unit).localeCompare(unitTs(b.unit)));
+      return { imei, keep: sorted[0], extras: sorted.slice(1).filter(x => x.unit.status!=="Sold") };
+    }).filter(g => g.extras.length);
+  })();
+  const removeDupUnits = async () => {
+    const n = dupGroups.reduce((s,g)=>s+g.extras.length,0);
+    if (!confirm(`Remove ${n} duplicate unit${n!==1?"s":""} (${dupGroups.length} IMEI${dupGroups.length!==1?"s":""})? The original unit and its history are kept.`)) return;
+    const drop = new Set(dupGroups.flatMap(g => g.extras.map(x => x.unit.id)));
+    const perPO = {}; // poId|productId -> removed count
+    dupGroups.forEach(g => g.extras.forEach(x => { const k=`${x.unit.poId||""}|${x.product.id}`; perPO[k]=(perPO[k]||0)+1; }));
+    const updated = catalog.map(p => {
+      if (!(p.units||[]).some(u => drop.has(u.id))) return p;
+      const units = p.units.filter(u => !drop.has(u.id));
+      return { ...p, units, stock: units.filter(u=>u.status==="Available").length };
+    });
+    await persist(updated);
+    // The repeated receive also wrote a second receive-history row; trim it so a later PO void doesn't double-count.
+    try {
+      const hist = (await loadArr("tpp-stock-receives")).map(h=>({...h}));
+      Object.entries(perPO).forEach(([k,c]) => { const [poId,productId]=k.split("|"); if(!poId) return;
+        let left=c;
+        hist.filter(h=>h.poId===poId&&h.productId===productId).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).forEach(h=>{
+          if(left<=0) return; const take=Math.min(left,h.qty||0); h.qty=(h.qty||0)-take; left-=take; });
+      });
+      await save("tpp-stock-receives", hist.filter(h=>h.qty!==0 || !h.poId));
+    } catch(e) { console.error("receive-history trim error:", e); }
   };
   const queue = collect("Under Testing");
   const needsRepair = collect("Needs Repair");
@@ -12224,6 +12182,11 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔬 Testing Queue"),
       E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},`${queue.length} unit${queue.length!==1?"s":""} awaiting testing`)
     ),
+    dupGroups.length>0 && E("div",{style:{background:T.amberLt,border:"1px solid #FDE68A",borderRadius:10,padding:"12px 16px",marginBottom:16}},
+      E("div",{style:{fontWeight:700,fontSize:13,color:"#92400E"}},`⚠️ ${dupGroups.reduce((s,g)=>s+g.extras.length,0)} duplicate unit${dupGroups.reduce((s,g)=>s+g.extras.length,0)!==1?"s":""} found (same IMEI entered more than once)`),
+      E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Usually caused by receiving the same PO twice. The original unit is kept; the extra copies are removed."),
+      E("div",{style:{fontSize:11,color:T.muted,marginTop:6}},dupGroups.slice(0,8).map(g=>`${g.keep.product.name} — ${g.imei}`).join(" · ")+(dupGroups.length>8?` · +${dupGroups.length-8} more`:"")),
+      E(Btn,{style:{marginTop:10,fontSize:12},onClick:removeDupUnits},"Remove duplicates")),
     queue.length===0
       ?E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted,background:"#F9FAFB",borderRadius:12}},
           E("div",{style:{fontSize:40,marginBottom:12}},"🔬"),
