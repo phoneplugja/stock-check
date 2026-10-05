@@ -11405,8 +11405,10 @@ function ReceiveStockTab({ onCatalogUpdate }) {
     if (saving) return;
     // Never add an IMEI that's already in the catalog. If every phone on this PO is already there (a
     // previous receive saved the units but froze before the PO was marked Received), just finish the job.
+    // Units that were returned to the supplier or belong to a voided PO don't count — re-entering those is legitimate.
+    const voidedIds = new Set((await loadArr("tpp-purchase-orders")).filter(x=>x.status==="Voided").map(x=>x.id));
     const existingImeis = new Map();
-    catalog.forEach(p => (p.units||[]).forEach(u => { if (u.imei) existingImeis.set(String(u.imei).trim(), u); }));
+    catalog.forEach(p => (p.units||[]).forEach(u => { if (u.imei && u.status!=="Returned to Supplier" && !(u.poId && voidedIds.has(u.poId))) existingImeis.set(String(u.imei).trim(), u); }));
     const incoming = receiveLines.filter(l => isImeiCategory(l.category)).flatMap(l => l.units.filter(u=>u.imei).map(u=>String(u.imei).trim()));
     const already = incoming.filter(i => existingImeis.has(i));
     if (already.length) {
@@ -12056,6 +12058,10 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
   }, [catalogProp]);
 
   const catalog = catalogProp || localCatalog;
+  // Units from a Voided PO, or already returned to the supplier, are history — not live stock — so
+  // they never count as duplicates of a phone that was re-entered afterwards.
+  const [voidedPOIds, setVoidedPOIds] = useState(new Set());
+  useEffect(() => { loadArr("tpp-purchase-orders").then(p => setVoidedPOIds(new Set((p||[]).filter(x=>x.status==="Voided").map(x=>x.id)))); }, []);
 
   const persist = async (updated) => {
     setLocalCatalog(updated);
@@ -12081,6 +12087,7 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
     const byImei = new Map();
     catalog.forEach(product => { if (!isImeiCategory(product.category)) return;
       (product.units||[]).forEach(unit => { if (!unit.imei) return;
+        if (unit.status==="Returned to Supplier" || (unit.poId && voidedPOIds.has(unit.poId))) return;
         const k = String(unit.imei).trim(); if (!byImei.has(k)) byImei.set(k, []);
         byImei.get(k).push({ product, unit }); }); });
     return [...byImei.entries()].filter(([,l]) => l.length>1).map(([imei,list]) => {
