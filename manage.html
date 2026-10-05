@@ -127,7 +127,89 @@ const sendTicketEmail = async (ticket, type = "auto") => {
 };
 
 // ── Expense categories ────────────────────────────────────────────────────────
-const EXPENSE_CATEGORIES = ["Advertising / IG Ads", "Accounting", "Bank Fees", "Bearer", "Credit Card Bill", "Digicel", "Flow", "Fixtures", "Garbage Disposal", "Informal Labour", "JPS", "Labour", "Loan / Loan Recovery", "Maintenance", "NWC", "Owner's Withdrawal", "Refund / Refund Fees", "Rent", "Repairs", "Security", "Shipping", "Shipping - Nova", "Supplies (cleaning etc)", "Toiletries", "Transportation", "Other"];
+const EXPENSE_CATEGORIES = ["Advertising / IG Ads", "Accounting", "Bank Fees", "Bearer", "Credit Card Bill", "Digicel", "Flow", "Fixtures", "Garbage Disposal", "Informal Labour", "Inventory Write-off", "JPS", "Labour", "Loan / Loan Recovery", "Maintenance", "NWC", "Owner's Withdrawal", "Refund / Refund Fees", "Rent", "Repairs", "Security", "Shipping", "Shipping - Nova", "Supplies (cleaning etc)", "Toiletries", "Transportation", "Other"];
+
+// ── Purchases ledger categories ─────────────────────────────────────────────
+// Inventory purchases are a balance-sheet event (cash/AP → Inventory asset), not a P&L operating
+// expense — so they live in their own ledger (tpp-purchases-ledger), separate from tpp-expenses.
+// Cost only hits the P&L as COGS when a unit actually sells (see salesCOGS in OwnerDashboard) or as
+// an "Inventory Write-off" expense if a unit is damaged/lost rather than sold or returned.
+const PURCHASE_LEDGER_CATEGORIES = ["Inventory Purchase", "Purchase Return", "Purchase Void Reversal"];
+
+// Logs a unit-level return to the supplier (from the Catalog tab, Testing Queue, or a partial PO
+// void) as a "Purchase Return" ledger entry — a credit against that unit's original purchase cost,
+// not an expense. Kept out of the EOD same-day cash check since a per-unit return isn't assumed to
+// be an immediate cash refund; a full PO void (which does log cash back same-day) is handled
+// separately by executeVoidPO's own reversal entry.
+const logPurchaseReturn = async (unit, product, note) => {
+  const cost = parseFloat(unit?.cost) || 0;
+  try {
+    const existing = await loadArr("tpp-purchases-ledger");
+    const entry = {
+      date: todayStr(), category: "Purchase Return", payment_method: "Non-Cash",
+      amount: -cost, supplier: unit?.supplier || "", poId: unit?.poId || "", poRef: unit?.poRef || "",
+      details: `${product?.name || "Unit"}${unit?.imei ? ` (IMEI ${unit.imei})` : ""} — ${note}`,
+      logged_by: "", source: "unit_return", createdAt: new Date().toISOString()
+    };
+    await save("tpp-purchases-ledger", [entry, ...existing]);
+  } catch (e) { console.error("Purchase return ledger log error:", e); }
+};
+
+// One-time, idempotent migration: before the Purchases Ledger existed, every PO (and every PO void)
+// was logged into tpp-expenses under category "Inventory Purchase". This moves those legacy rows
+// into tpp-purchases-ledger (voids become "Purchase Void Reversal", supplier/PO ref are filled in from
+// the PO record) so existing purchase orders are categorized correctly without re-entering them.
+// Safe to run on every load: it does nothing once no legacy rows remain, writes a backup of the
+// original rows first, and only removes them from Expenses after confirming the ledger write landed.
+const migrateInventoryPurchasesToLedger = async () => {
+  try {
+    const expenses = await loadArr("tpp-expenses");
+    const legacy = expenses.filter(e => e.category === "Inventory Purchase");
+    if (!legacy.length) return false;
+    const [ledger, pos] = await Promise.all([loadArr("tpp-purchases-ledger"), loadArr("tpp-purchase-orders")]);
+    const poById = new Map(pos.map(p => [p.id, p]));
+    const sig = e => `${e.source||""}|${e.poId||""}|${e.createdAt||""}|${e.amount}`;
+    const have = new Set(ledger.map(sig));
+    const converted = legacy.map(e => {
+      const po = poById.get(e.poId) || {};
+      const isReversal = e.source === "purchase_order_void" || (parseFloat(e.amount) < 0) || /^Void reversal/i.test(e.details || "");
+      return {
+        ...e,
+        category: isReversal ? "Purchase Void Reversal" : "Inventory Purchase",
+        supplier: e.supplier || po.supplier || "",
+        poRef: e.poRef || po.poRef || "",
+        source: e.source || "migrated_expense",
+        migratedFromExpenses: true
+      };
+    }).filter(e => !have.has(sig(e)));
+    // Backup first (append — never overwrite an earlier backup), then ledger, then verify, then strip.
+    const prevBackup = await loadArr("tpp-expenses-inventory-purchase-backup");
+    await save("tpp-expenses-inventory-purchase-backup", [...legacy, ...prevBackup]);
+    if (converted.length) await save("tpp-purchases-ledger", [...converted, ...ledger]);
+    const verify = new Set((await loadArr("tpp-purchases-ledger")).map(sig));
+    if (!converted.every(e => verify.has(sig(e)))) { console.error("Purchases ledger migration: ledger write not confirmed, expenses left untouched."); return false; }
+    await save("tpp-expenses", expenses.filter(e => e.category !== "Inventory Purchase"));
+    console.log(`Migrated ${converted.length} legacy Inventory Purchase expense row(s) to the Purchases Ledger.`);
+    return true;
+  } catch (e) { console.error("Purchases ledger migration error:", e); return false; }
+};
+
+// Logs a unit-level write-off (Damaged, or otherwise a total loss) as a real "Inventory Write-off"
+// expense — unlike a return to supplier, this cost is NOT recoverable, so it genuinely belongs on
+// the P&L, mirroring the existing damaged-handback logic in StaffPOS's reconcileHandedBackItems.
+const logInventoryWriteOff = async (unit, product, note) => {
+  const cost = parseFloat(unit?.cost) || 0;
+  if (cost <= 0) return;
+  try {
+    const existing = await loadArr("tpp-expenses");
+    const entry = {
+      date: todayStr(), category: "Inventory Write-off", payment_method: "Non-Cash", amount: cost,
+      details: `${product?.name || "Unit"}${unit?.imei ? ` (IMEI ${unit.imei})` : ""} — ${note}`,
+      logged_by: "", source: "unit_writeoff", createdAt: new Date().toISOString()
+    };
+    await save("tpp-expenses", [entry, ...existing]);
+  } catch (e) { console.error("Inventory write-off expense log error:", e); }
+};
 const PAYMENT_METHODS = ["Cash", "Debit Card", "Credit Card", "NCB Bank Transfer", "NCB Auto Debit", "Scotia Bank Transfer", "Scotia Auto Debit", "PayPal", "Other"];
 const BANKS = ["NCB", "Scotia", "Sagicor", "JN", "Other"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -2747,16 +2829,24 @@ function EodForm({
         return;
       }
     }
-    // ── Cash balance check (expenses tab + inline EOD expenses) ───────────────
+    // ── Cash balance check (expenses tab + inline EOD expenses + cash-paid purchases) ─────────
+    // Inventory purchases live in the Purchases Ledger, not Expenses (see PURCHASE_LEDGER_CATEGORIES
+    // comment) — but if one was paid in cash today, that cash still left the till today, so it still
+    // has to be folded into this same-day Cash Out check. Only "Inventory Purchase" and "Purchase
+    // Void Reversal" count here (an actual cash movement); a per-unit "Purchase Return" is a
+    // bookkeeping credit against cost, not assumed to be same-day cash in hand.
     const allExp = await loadArr("tpp-expenses");
+    const allPurchasesLedger = await loadArr("tpp-purchases-ledger");
     const existingCashExp = allExp.filter(e => !e.voided && e.date === f.date && e.payment_method === "Cash").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-    const totalCashExpenses = existingCashExp + eodExpTotal;
+    const existingCashPurchases = allPurchasesLedger.filter(e => !e.voided && e.date === f.date && e.payment_method === "Cash" && (e.category === "Inventory Purchase" || e.category === "Purchase Void Reversal")).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+    const totalCashExpenses = existingCashExp + existingCashPurchases + eodExpTotal;
     const cashOut = n("cash_out");
     if (Math.abs(cashOut - totalCashExpenses) > 0.01) {
       const diff = cashOut - totalCashExpenses;
+      const breakdown = `${fmtMoney(existingCashExp)} on Expenses tab${existingCashPurchases ? ` + ${fmtMoney(existingCashPurchases)} cash inventory purchases` : ""} + ${fmtMoney(eodExpTotal)} entered here = ${fmtMoney(totalCashExpenses)}`;
       setBalErr(diff > 0
-        ? `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(diff)} more than total cash expenses for ${f.date} (${fmtMoney(existingCashExp)} on Expenses tab + ${fmtMoney(eodExpTotal)} entered here = ${fmtMoney(totalCashExpenses)}). Add the missing expense below or adjust Cash Out.`
-        : `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(Math.abs(diff))} less than total cash expenses for ${f.date} (${fmtMoney(existingCashExp)} on Expenses tab + ${fmtMoney(eodExpTotal)} entered here = ${fmtMoney(totalCashExpenses)}). Correct Cash Out or remove an expense entry.`);
+        ? `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(diff)} more than total cash expenses for ${f.date} (${breakdown}). Add the missing expense below or adjust Cash Out.`
+        : `⚠️ Cash Out (${fmtMoney(cashOut)}) is ${fmtMoney(Math.abs(diff))} less than total cash expenses for ${f.date} (${breakdown}). Correct Cash Out or remove an expense entry.`);
       return;
     }
     // Save inline expenses to the expenses collection
@@ -4719,10 +4809,12 @@ function OwnerDashboard({
   // from actual itemized records rather than manually-typed EOD fields.
   const [sales, setSales] = useState([]);
   const [rentals, setRentals] = useState([]);
+  const [purchasesLedger, setPurchasesLedger] = useState([]);
   useEffect(() => {
     (async () => {
       setSales(await loadArr("tpp-sales"));
       setRentals(await loadArr("tpp-rental-income"));
+      setPurchasesLedger(await loadArr("tpp-purchases-ledger"));
     })();
   }, []);
   const inM = iso => {
@@ -4731,8 +4823,12 @@ function OwnerDashboard({
     return d.getMonth() === sm && d.getFullYear() === sy;
   };
   const mE = eod.filter(r => inM(r.date || r.createdAt) && !r.voided);
-  const mX = expenses.filter(e => inM(e.date || e.createdAt) && !e.voided);
+  // Inventory purchases belong in the Purchases Ledger, not here — excluding the category defends
+  // against any legacy "Inventory Purchase" rows still sitting in tpp-expenses from before this
+  // split, so old months don't keep double-counting inventory cost as both an expense and COGS.
+  const mX = expenses.filter(e => inM(e.date || e.createdAt) && !e.voided && e.category !== "Inventory Purchase");
   const mD = deposits.filter(d => inM(d.date || d.createdAt) && !d.voided);
+  const mPurchases = purchasesLedger.filter(e => inM(e.date || e.createdAt) && !e.voided);
   const mSales = sales.filter(s => inM(s.date || s.createdAt) && !s.voided);
   const mRentals = rentals.filter(r => inM(r.date || r.createdAt) && !r.voided);
   // Cost of the specific unit/product sold, read from the snapshot of the catalog stored on the
@@ -4753,7 +4849,12 @@ function OwnerDashboard({
   const eodVariance = tR - salesRevenue; // EOD entry vs. actual sales — should be near zero
   const tX = mX.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const tD = mD.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
-  const np = salesRevenue + rentalRevenue - tX;
+  const tPurchases = mPurchases.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0); // net of returns/void reversals
+  // Net Profit = Gross Profit (Sales − COGS, cost recognized only when a unit sells) + Rental −
+  // Operating Expenses. Inventory purchases themselves are excluded — they're a Purchases Ledger
+  // event (cash/AP → Inventory asset), not a P&L expense; they only hit profit later as COGS, or as
+  // an Inventory Write-off if a unit is damaged/lost instead of sold.
+  const np = grossProfit + rentalRevenue - tX;
   const bC = {};
   mX.forEach(e => {
     bC[e.category] = (bC[e.category] || 0) + (parseFloat(e.amount) || 0);
@@ -4811,6 +4912,7 @@ function OwnerDashboard({
       // the full history even though OwnerDashboard doesn't otherwise hold these in state.
       const allPOs = await loadArr("tpp-purchase-orders");
       const srcPOs = scope === "month" ? allPOs.filter(p => inM(p.date || p.receivedDate || p.createdAt) && p.status !== "Voided") : allPOs;
+      const srcPurchasesLedger = scope === "month" ? mPurchases : purchasesLedger;
       const allCredits = await loadArr("tpp-store-credits");
       const srcCredits = scope === "month" ? allCredits.filter(c => inM(c.issuedAt)) : allCredits;
       const allDebts = await loadArr("tpp-debts");
@@ -4897,6 +4999,11 @@ function OwnerDashboard({
       // ── Sheet: Purchase Orders ──────────────────────────────────────────────
       addSheet("Purchase Orders", ["PO Ref", "Supplier", "Date", "Status", "Payment Method", "Invoice Total", "Shipping", "Tax", "Notes"], [...srcPOs].sort((a, b) => (a.date || a.receivedDate || "") > (b.date || b.receivedDate || "") ? 1 : -1).map(p => [p.poRef || "", p.supplier || "", p.date || p.receivedDate || "", p.status || "", p.paymentMethod || "", parseFloat(p.invoiceTotal) || 0, parseFloat(p.shipping) || 0, parseFloat(p.tax) || 0, p.notes || ""]));
 
+      // ── Sheet: Purchases Ledger ──────────────────────────────────────────────
+      // Inventory purchases, returns, and void reversals — a balance-sheet/AP ledger, kept separate
+      // from Expenses because buying inventory isn't a P&L expense (see summary sheet note below).
+      addSheet("Purchases Ledger", ["Date", "Category", "Supplier", "PO Ref", "Payment Method", "Amount (JMD)", "Details"], [...srcPurchasesLedger].sort((a, b) => a.date > b.date ? 1 : -1).map(e => [e.date, e.category, e.supplier || "", e.poRef || "", e.payment_method || "", parseFloat(e.amount) || 0, e.details || ""]));
+
       // ── Sheet: Store Credits ─────────────────────────────────────────────────
       addSheet("Store Credits", ["Customer", "Phone", "Amount (JMD)", "Issued", "Expires", "Used", "Source Sale"], [...srcCredits].sort((a, b) => (a.issuedAt || "") > (b.issuedAt || "") ? 1 : -1).map(c => [c.customerName || "", c.customerPhone || "", parseFloat(c.amount) || 0, c.issuedAt ? new Date(c.issuedAt).toLocaleDateString("en-GB") : "", c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("en-GB") : "", c.used ? "Used" : "Outstanding", c.sourceSaleId || ""]));
 
@@ -4913,8 +5020,9 @@ function OwnerDashboard({
         const summaryRows = [["Period", `${MONTHS[sm]} ${sy}`], [""],
           ["REVENUE (from Sales ledger)", ""], ["Retail/Repair Sales Revenue (JMD)", salesRevenue], ["Cost of Goods Sold (JMD)", -salesCOGS], ["Gross Profit (JMD)", grossProfit], ["Rental Income (JMD)", rentalRevenue], [""],
           ["EOD RECONCILIATION", ""], ["EOD-Recorded Revenue (JMD)", tR], ["Variance vs. Sales Ledger (JMD)", eodVariance], [""],
-          ["EXPENSES", ""], ["Total Expenses (JMD)", tX], [""], ...cS.map(([cat, amt]) => ["  " + cat, amt]), [""],
-          ["NET PROFIT (Sales + Rental − Expenses) (JMD)", np], [""],
+          ["EXPENSES (operating costs — excludes inventory purchases)", ""], ["Total Expenses (JMD)", tX], [""], ...cS.map(([cat, amt]) => ["  " + cat, amt]), [""],
+          ["NET PROFIT (Gross Profit + Rental − Expenses) (JMD)", np], [""],
+          ["PURCHASES LEDGER (inventory bought — not a P&L expense; see Purchases Ledger sheet)", ""], ["Net Purchases This Period (JMD)", tPurchases], ["Purchase/Return/Reversal Entries", mPurchases.length], [""],
           ["CASH DEPOSITS", ""], ["Total Deposited (JMD)", tD], [""],
           ["LIABILITIES (as of today)", ""], ["Outstanding Store Credits (JMD)", outstandingCredits], ["Outstanding Debt Balances (JMD)", totalDebtBalance], [""],
           ["OTHER", ""], ["EOD Days Recorded", mE.length], ["Sales Entries", mSales.length], ["Expense Entries", mX.length], ["Deposit Entries", mD.length], ["Repair Tickets (this month)", srcTix.length]];
@@ -5054,7 +5162,7 @@ function OwnerDashboard({
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: "1fr 1fr 1fr",
       gap: 12,
       marginBottom: 16
     }
@@ -5068,6 +5176,11 @@ function OwnerDashboard({
     value: fmtMoney(eodVariance),
     color: Math.abs(eodVariance) < 1 ? T.green : T.amber,
     sub: Math.abs(eodVariance) < 1 ? "EOD matches sales ✓" : `EOD recorded ${fmtMoney(tR)}`
+  }), /*#__PURE__*/React.createElement(StatCard, {
+    label: "Purchases Ledger (Net)",
+    value: fmtMoney(tPurchases),
+    color: T.blue,
+    sub: `${mPurchases.length} entr${mPurchases.length===1?"y":"ies"} — inventory bought, not an expense`
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -6364,16 +6477,19 @@ async function createPurchaseOrder({ supplier, poRef = "", date, currency = "JMD
   };
   const existingPOs = await loadArr("tpp-purchase-orders");
   await save("tpp-purchase-orders", [record, ...existingPOs]);
+  // Logged to the Purchases Ledger, not Expenses — buying inventory swaps cash/AP for an Inventory
+  // asset, it doesn't reduce profit yet. It only hits the P&L later, as COGS when each unit sells
+  // (see salesCOGS in OwnerDashboard) or as an Inventory Write-off if a unit is lost/damaged.
   try {
-    const allExp = await loadArr("tpp-expenses");
-    const expEntry = {
+    const existingLedger = await loadArr("tpp-purchases-ledger");
+    const ledgerEntry = {
       date: record.date, category: "Inventory Purchase", payment_method: paymentMethod,
-      amount: invoiceTotal,
+      amount: invoiceTotal, supplier, poId: record.id, poRef,
       details: `PO ${poRef || record.id} — ${supplier}${currency !== "JMD" ? ` (${currency})` : ""}`,
-      logged_by: "", source: "purchase_order", poId: record.id, createdAt: new Date().toISOString()
+      logged_by: "", source: "purchase_order", createdAt: new Date().toISOString()
     };
-    await save("tpp-expenses", [expEntry, ...allExp]);
-  } catch (e) { console.error("PO expense log error:", e); }
+    await save("tpp-purchases-ledger", [ledgerEntry, ...existingLedger]);
+  } catch (e) { console.error("PO purchases-ledger log error:", e); }
   return record;
 }
 
@@ -8304,6 +8420,7 @@ function OwnerShell({
   const [loading, setLoading] = useState(true);
   const [pv, setPv] = useState("list");
   const fetchAll = async () => {
+    await migrateInventoryPurchasesToLedger();
     const [e, x, d, p] = await Promise.all([loadArr("tpp-eod"), loadArr("tpp-expenses"), loadArr("tpp-deposits"), loadArr("tpp-phones")]);
     setData({
       eod: e,
@@ -10568,6 +10685,63 @@ function ImeiScanner({onDetected, onClose}) {
 
 const PO_CURRENCIES = ["JMD", "USD"];
 
+// ── Purchases Ledger View ─────────────────────────────────────────────────────
+// Read-only view of tpp-purchases-ledger: every inventory purchase, unit-level return to supplier,
+// and PO void reversal. This is the accounting record for "how is a return accounted for
+// financially" — a credit here, not an expense entry — kept separate from Expense History, which is
+// operating costs only (COGS/write-offs hit the P&L; purchases and returns hit this ledger).
+function PurchasesLedgerView({ onBack }) {
+  const E = React.createElement;
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
+  useEffect(() => { loadArr("tpp-purchases-ledger").then(e => { setEntries(e||[]); setLoading(false); }); }, []);
+
+  const filtered = entries.filter(e => !monthFilter || (e.date||"").startsWith(monthFilter));
+  const byCategory = {};
+  filtered.forEach(e => { byCategory[e.category] = (byCategory[e.category]||0) + (parseFloat(e.amount)||0); });
+  const net = filtered.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
+
+  if (loading) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading purchases ledger...");
+
+  return E("div",{style:{maxWidth:760,margin:"0 auto"}},
+    E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📒 Purchases Ledger"),
+      E("button",{onClick:onBack,style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
+    ),
+    E("div",{style:{background:T.blueLt,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:T.blue}},
+      "Inventory purchases, supplier returns, and PO void reversals — tracked here as a balance-sheet/AP ledger, separate from Expenses. Buying inventory doesn't reduce profit; it only hits the P&L later as Cost of Goods Sold (when a unit sells) or as an Inventory Write-off (if a unit is damaged/lost)."
+    ),
+    E("div",{style:{marginBottom:16}},
+      E(Input,{type:"month",value:monthFilter,onChange:e=>setMonthFilter(e.target.value),style:{width:"auto"}})
+    ),
+    E(R2,null,
+      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`Net Purchases (${filtered.length} entries)`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(net))),
+      E(Card,null,
+        E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},"By Category"),
+        Object.entries(byCategory).length===0
+          ? E("div",{style:{fontSize:12,color:T.muted}},"—")
+          : Object.entries(byCategory).map(([cat,amt])=>E("div",{key:cat,style:{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:2}},E("span",null,cat),E("span",{style:{fontWeight:700,color:amt<0?T.green:T.text}},fmtMoney(amt))))
+      )
+    ),
+    E("div",{style:{marginTop:16}},
+      filtered.length===0
+        ? E("div",{style:{textAlign:"center",padding:"30px",color:T.muted}},"No purchases ledger entries for this month.")
+        : E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+            [...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||"")).map((e,i)=>
+              E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
+                E("div",{style:{minWidth:0}},
+                  E("div",{style:{fontWeight:600,fontSize:13}},e.category,e.supplier?` — ${e.supplier}`:"",e.poRef?` (${e.poRef})`:""),
+                  E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},e.date,e.payment_method?` · ${e.payment_method}`:"",e.details?` · ${e.details}`:"")
+                ),
+                E("div",{style:{fontWeight:700,flexShrink:0,color:(parseFloat(e.amount)||0)<0?T.green:T.text}},fmtMoney(parseFloat(e.amount)||0))
+              )
+            )
+          )
+    )
+  );
+}
+
 function PurchasesTab() {
   const E = React.createElement;
   const [pos, setPos] = useState([]);
@@ -10656,20 +10830,22 @@ function PurchasesTab() {
     const updated = pos.map(p=>p.id===target.id?{...p,status:"Voided",voidReason:reason,voidedAt:new Date().toISOString()}:p);
     await save("tpp-purchase-orders", updated); setPos(updated);
     if (viewingPO?.id===target.id) setViewingPO(updated.find(p=>p.id===target.id));
-    // Voiding shouldn't leave the original spend sitting in Expenses/EOD math forever — log an
+    // Voiding shouldn't leave the original spend sitting in the Purchases Ledger forever — log an
     // offsetting reversal (negative amount) tied to the same PO, rather than editing or deleting
-    // the original "Inventory Purchase" expense, so the ledger still shows both the original charge
-    // and that it was later voided, instead of silently erasing history.
+    // the original "Inventory Purchase" entry, so the ledger still shows both the original charge
+    // and that it was later voided, instead of silently erasing history. This lives in the
+    // Purchases Ledger (not Expenses) for the same reason the original entry does — it's reversing
+    // an inventory purchase, not an operating expense.
     try {
-      const allExp = await loadArr("tpp-expenses");
+      const existingLedger = await loadArr("tpp-purchases-ledger");
       const reversal = {
-        date: todayStr(), category: "Inventory Purchase", payment_method: target.paymentMethod,
-        amount: -(target.invoiceTotal || 0),
+        date: todayStr(), category: "Purchase Void Reversal", payment_method: target.paymentMethod,
+        amount: -(target.invoiceTotal || 0), supplier: target.supplier, poId: target.id, poRef: target.poRef,
         details: `Void reversal — PO ${target.poRef || target.id} — ${target.supplier}${target.currency && target.currency !== "JMD" ? ` (${target.currency})` : ""} — ${reason}`,
-        logged_by: "", source: "purchase_order_void", poId: target.id, createdAt: new Date().toISOString()
+        logged_by: "", source: "purchase_order_void", createdAt: new Date().toISOString()
       };
-      await save("tpp-expenses", [reversal, ...allExp]);
-    } catch (e) { console.error("PO void expense reversal error:", e); }
+      await save("tpp-purchases-ledger", [reversal, ...existingLedger]);
+    } catch (e) { console.error("PO void purchases-ledger reversal error:", e); }
     setVoidReview(null);
   };
 
@@ -10789,6 +10965,13 @@ function PurchasesTab() {
     )
   );
 
+  // ── Purchases Ledger ─────────────────────────────────────────────────────────
+  // Every inventory purchase, per-unit return-to-supplier, and PO void reversal — tracked here as
+  // its own accounting ledger (cash/AP ↔ Inventory asset), separate from Expenses (operating P&L
+  // costs). This is what actually answers "how is a return accounted for financially" — a purchase
+  // return shows up here as a credit, not as an expense reversal.
+  if (view==="ledger") return E(PurchasesLedgerView, { onBack:()=>setView("pos") });
+
   // ── New PO Form ─────────────────────────────────────────────────────────────
   if (view==="new") return E("div", { style:{ maxWidth:640, margin:"0 auto" } },
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
@@ -10876,6 +11059,7 @@ function PurchasesTab() {
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💸 Purchases"),
       E("div",{style:{display:"flex",gap:8}},
+        E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("ledger")},"📒 Purchases Ledger"),
         E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("ai")},"🤖 AI Invoice"),
         E(Btn,{onClick:()=>setView("new")},"+ New PO")
       )
@@ -11260,6 +11444,10 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
         return { ...p, stock: units.filter(u=>u.status==="Available").length, units };
       });
       await saveCatalogFn(updated);
+      // Book the financial side of the status change — a return credits back against the original
+      // purchase (Purchases Ledger), a write-off is a real, unrecoverable loss (Expenses).
+      if (newStatus === "Returned to Supplier") await logPurchaseReturn(unit, product, "Manually returned from Catalog");
+      else if (newStatus === "Damaged") await logInventoryWriteOff(unit, product, "Manually marked Damaged from Catalog");
     } finally {
       setBusyUnit(null);
     }
@@ -11654,6 +11842,7 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
   const returned = collect("Returned to Supplier");
 
   const updateUnitStatus = async (product, unitIdx, newStatus, note) => {
+    const unit = (product.units||[])[unitIdx];
     const updated = catalog.map(p => {
       if (p.id !== product.id) return p;
       const units = (p.units||[]).map((u,i) => i!==unitIdx ? u : {
@@ -11663,6 +11852,10 @@ function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
       return { ...p, units, stock: units.filter(u=>u.status==="Available").length };
     });
     await persist(updated);
+    // Book the financial side — a return credits back against the original purchase (Purchases
+    // Ledger), a write-off is a real, unrecoverable loss (Expenses).
+    if (unit && newStatus === "Returned to Supplier") await logPurchaseReturn(unit, product, note);
+    else if (unit && newStatus === "Damaged") await logInventoryWriteOff(unit, product, note);
   };
 
   const runTest = async (product, unit, unitIdx) => {
