@@ -491,12 +491,17 @@ const buildWarrantyFooterText = (sale) => {
 };
 
 // ── Customer field validation ────────────────────────────────────────────────
-// Phone: exactly 11 digits once formatting characters are stripped.
+// Phone: a Jamaican number is accepted with or without the leading 1 (876-490-5515 or 1-876-490-5515).
+// normalizePhone() gives the canonical 11-digit form used for matching customers.
+const normalizePhone = (phone) => {
+  const d = String(phone || "").replace(/\D/g, "");
+  return d.length === 10 ? "1" + d : d;
+};
 const validatePhone = (phone) => {
   const digits = String(phone || "").replace(/\D/g, "");
   if (!digits) return "Phone is required.";
-  if (digits.length !== 11) return `Phone must be 11 digits (currently ${digits.length}).`;
-  return "";
+  if (digits.length === 10 || (digits.length === 11 && digits[0] === "1")) return "";
+  return `Phone must be 10 digits, or 11 starting with 1 (currently ${digits.length}).`;
 };
 // Email: standard format check. Optional field — only validated if something was typed.
 const validateEmail = (email) => {
@@ -509,7 +514,7 @@ const validateEmail = (email) => {
 const validateCustomerName = (name) => {
   const v = String(name || "").trim();
   if (!v) return "Name is required.";
-  if (!/^[A-Za-z\s-]+$/.test(v)) return "Name can only contain letters, spaces, and hyphens.";
+  if (!/^[\p{L}\s.'’-]+$/u.test(v)) return "Name can only contain letters, spaces, hyphens, apostrophes and full stops.";
   return "";
 };
 
@@ -6873,21 +6878,31 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const saveCustomer=async(name,phone,email,opts={})=>{
     const strict=!!opts.strict;
     if(!name&&!phone&&!email)return null;
-    const errors={ name:validateCustomerName(name), phone:validatePhone(phone), email:validateEmail(email) };
+    // Strict (the explicit "Save Customer" button): name + phone required. At checkout only what was typed
+    // is checked, and a customer is stored only when there's a name plus a phone or email to identify them.
+    const errors={
+      name:(strict||name)?validateCustomerName(name):"",
+      phone:(strict||phone)?validatePhone(phone):"",
+      email:validateEmail(email)
+    };
     if(errors.name||errors.phone||errors.email){
       if(strict)return{errors};
       return null;
     }
-    const dup=customers.find(c=>{
-      const samePhone=phone&&c.phone===phone;
-      const sameEmail=email&&c.email?.toLowerCase()===email.toLowerCase();
-      const sameName=name&&c.name&&(()=>{const a=name.trim().split(" "),b=c.name.trim().split(" ");return a[0]?.toLowerCase()===b[0]?.toLowerCase()&&a[1]?.[0]?.toLowerCase()===b[1]?.[0]?.toLowerCase();})();
-      return samePhone||sameEmail||sameName;
-    });
-    if(dup)return dup;
-    const customer={id:Date.now().toString(),name,phone,email,createdAt:new Date().toISOString()};
-    const updated=[customer,...customers];
-    await save("tpp-customers",updated);setCustomers(updated);
+    if(!strict&&(!name||(!phone&&!email)))return null;
+    // Work from the latest saved list (not the copy loaded when POS opened) so customers added on another
+    // device aren't overwritten, and match duplicates by phone number or email only — never by name.
+    let fresh;
+    try{ fresh=(await loadStrict("tpp-customers"))||[]; }
+    catch(e){ console.error("saveCustomer load failed:",e); if(strict)alert("⚠️ Couldn't reach the customer list. Customer NOT saved — try again."); return null; }
+    const np=normalizePhone(phone);
+    const dup=fresh.find(c=>(np&&normalizePhone(c.phone)===np)||(email&&c.email&&c.email.toLowerCase()===email.toLowerCase()));
+    if(dup){ if(fresh.length!==customers.length)setCustomers(fresh); return dup; }
+    const customer={id:Date.now().toString(),name:name.trim(),phone,email,createdAt:new Date().toISOString()};
+    const updated=[customer,...fresh];
+    const ok=await save("tpp-customers",updated);
+    if(!ok){ alert("⚠️ Customer could NOT be saved (the sale itself is unaffected). Please re-add them from the customer box."); return null; }
+    setCustomers(updated);
     return customer;
   };
 
@@ -6978,6 +6993,12 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   // Cancelling out of the refund-method modal never calls checkout(), so nothing is saved.
   const checkout=async(exchangeRefundMethod)=>{
     if(!canCheckout)return;
+    // Tell staff up front if the customer details typed can't be saved, instead of silently dropping them.
+    if(customerName||customerPhone||customerEmail){
+      const probs=[customerName?validateCustomerName(customerName):"",customerPhone?validatePhone(customerPhone):"",validateEmail(customerEmail)].filter(Boolean);
+      if(probs.length&&!confirm(`⚠️ The customer won't be saved:\n${probs.join("\n")}\n\nOK = complete the sale anyway.\nCancel = go back and fix it.`))return;
+      if(!probs.length&&customerName&&!customerPhone&&!customerEmail&&!confirm("No phone or email was entered, so this customer won't be saved to your customer list.\n\nOK = complete the sale anyway.\nCancel = go back and add a phone number."))return;
+    }
     const diff = Math.abs(exchDiff);
     if(isExchange && exchDiff < 0){
       if(!exchangeRefundMethod){alert("Select how the store is refunding the customer.");return;}
