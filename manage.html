@@ -6408,6 +6408,9 @@ const getLabelSize = () => {
     };
   } catch { return { w: 70, h: 32 }; }
 };
+// Variable-price items (price set at the till) print with no price on the label unless this is switched on.
+const getLabelShowVariablePrice = () => { try { return window.localStorage.getItem("tpp_label_showvar") === "1"; } catch { return false; } };
+const setLabelShowVariablePrice = on => { try { window.localStorage.setItem("tpp_label_showvar", on ? "1" : "0"); } catch {} };
 const setLabelSize = (w, h) => {
   try { window.localStorage.setItem("tpp_label_w", w); window.localStorage.setItem("tpp_label_h", h); } catch {}
 };
@@ -6423,16 +6426,26 @@ const setOrderTemplateId = (id) => {
 const printBarcodeLabels = (items) => {
   if (!items || !items.length) return;
   const { w: widthMm, h: heightMm } = getLabelSize();
+  const showVarPrice = getLabelShowVariablePrice();
   const labelsHtml = items.map(it => {
     let barcodeSvg = "";
     try {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      JsBarcode(svg, String(it.code || ""), { format: "CODE128", width: 1.6, height: 30, displayValue: true, fontSize: 9, margin: 0 });
-      barcodeSvg = new XMLSerializer().serializeToString(svg);
+      JsBarcode(svg, String(it.code || ""), { format: "CODE128", width: 2, height: 40, displayValue: true, fontSize: 14, margin: 0 });
+      // Scale the barcode to fit the label: give the SVG a viewBox from its natural size and let CSS size it
+      // to the label's width, instead of the fixed pixel width that ran off the edge of long codes.
+      let str = new XMLSerializer().serializeToString(svg);
+      const wM = str.match(/\swidth="([\d.]+)(px)?"/), hM = str.match(/\sheight="([\d.]+)(px)?"/);
+      if (wM && hM && !/viewBox=/.test(str)) str = str.replace("<svg", `<svg viewBox="0 0 ${wM[1]} ${hM[1]}" preserveAspectRatio="xMidYMid meet"`).replace(/\swidth="[\d.]+(px)?"/, "").replace(/\sheight="[\d.]+(px)?"/, "");
+      barcodeSvg = str;
     } catch (e) { barcodeSvg = `<div style="font-size:8px">${it.code || ""}</div>`; }
+    // No "JMD 0.00" on a label: a variable-price item (or anything with no price) shows no price line unless
+    // the "show price on variable-price labels" setting is on and there is a price to show.
+    const priceNum = parseFloat(it.price) || 0;
+    const showPrice = priceNum > 0 && (!it.variable || showVarPrice);
     return `<div class="label">
       <div class="lname">${(it.name || "").replace(/</g,"&lt;")}</div>
-      <div class="lprice">${fmtMoney(it.price || 0)}</div>
+      ${showPrice ? `<div class="lprice">${fmtMoney(priceNum)}</div>` : ""}
       <div class="lbarcode">${barcodeSvg}</div>
       ${it.sub ? `<div class="lsub">${it.sub}</div>` : ""}
     </div>`;
@@ -6448,7 +6461,8 @@ const printBarcodeLabels = (items) => {
     .label:last-of-type{break-after:auto;page-break-after:auto;}
     .lname{font-size:8px;font-weight:700;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .lprice{font-size:11px;font-weight:800;margin:1px 0;}
-    .lbarcode svg{max-width:100%;height:auto;}
+    .lbarcode{width:100%;display:flex;justify-content:center;}
+    .lbarcode svg{width:100%;max-height:${Math.max(8,heightMm*0.45)}mm;height:auto;}
     .lsub{font-size:8px;font-weight:700;margin-top:1px;}
   </style></head><body>
   ${labelsHtml}
@@ -10400,6 +10414,7 @@ function SettingsTab() {
     setLabelSize(w, h); setLabelSizeState({w,h});
     setLabelSaved(true); setTimeout(()=>setLabelSaved(false),2500);
   };
+  const [showVarPrice, setShowVarPriceState] = useState(()=>getLabelShowVariablePrice());
   const saveOrderTplId = () => {
     setOrderTemplateId(orderTplId.trim());
     setOrderTplSaved(true); setTimeout(()=>setOrderTplSaved(false),2500);
@@ -10501,7 +10516,10 @@ function SettingsTab() {
         E(Field,{label:"Height (mm)"},E(Input,{type:"number",value:labelSize.h,onChange:e=>setLabelSizeState(s=>({...s,h:e.target.value}))})),
         E(Btn,{onClick:saveLabelSize},"Save")
       ),
-      labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!")
+      labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!"),
+      E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,marginTop:12,cursor:"pointer"}},
+        E("input",{type:"checkbox",checked:showVarPrice,onChange:e=>{setShowVarPriceState(e.target.checked);setLabelShowVariablePrice(e.target.checked);}}),
+        "Show the price on labels for variable-price items (off = no price printed)")
     ),
     E(Card,{style:{marginBottom:20}},
       E(ST,null,"🖼️ Product Photos (Cloudinary)"),
@@ -11682,13 +11700,13 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           const isImei = isImeiCategory(line.category);
           if (isImei) {
             line.units.filter(u=>u.imei).forEach(u => {
-              labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, code: u.imei, sub: `IMEI •${u.imei.slice(-4)}` });
+              labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, variable: String(line.sellPrice||"").trim()==="", code: u.imei, sub: `IMEI •${u.imei.slice(-4)}` });
             });
           } else {
             const product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
             const code = product?.barcode || product?.sku || product?.id || line.name;
             const qty = parseInt(line.receivedQty)||0;
-            for (let i=0;i<qty;i++) labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, code });
+            for (let i=0;i<qty;i++) labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, variable: String(line.sellPrice||"").trim()==="", code });
           }
         });
         printBarcodeLabels(labelItems);
@@ -12007,7 +12025,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                         code=product.id;
                         await saveCatalogFn(catalog.map(p=>p.id===product.id?{...p,barcode:code}:p));
                       }
-                      const items=Array.from({length:qty},()=>({name:product.name,price:product.price||0,code}));
+                      const items=Array.from({length:qty},()=>({name:product.name,price:product.price||0,variable:!!product.variable_price,code}));
                       printBarcodeLabels(items);
                     },style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🏷️"),
                     E("button",{onClick:e=>{e.stopPropagation();pickPhotoFor(product);},disabled:uploadingPhotoFor===product.id,style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},uploadingPhotoFor===product.id?"⏳":"📷"),
@@ -12035,7 +12053,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                               onChange:e=>{ e.stopPropagation(); changeUnitStatus(product, ui, e.target.value); },
                               style:{width:"auto",fontSize:11,padding:"3px 6px",color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}
                             }, PHONE_UNIT_STATUSES.map(s=>E("option",{key:s,value:s},s))),
-                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
+                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,variable:!!product.variable_price,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
                             E("button",{
                               onClick:e=>{ e.stopPropagation(); setMoveTargetId(""); setMoveUnit(isMovingThis?null:{productId:product.id,unitIdx:ui}); },
                               disabled:busyUnit===busyKey,
@@ -12436,5 +12454,3 @@ function App() {
   </script>
 </body>
 </html>
-
-  
