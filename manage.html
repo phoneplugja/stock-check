@@ -567,22 +567,67 @@ const currentYear = new Date().getFullYear();
 // ── Firebase ──────────────────────────────────────────────────────────────────
 // firebase init in HTML
 // _db set globally
-const load = async key => {
-  try {
-    const s = await _db.collection('tpp').doc(key).get();
-    return s.exists ? s.data().v : null;
-  } catch (e) {
-    console.error("FB load:", e);
-    return null;
+// A Firestore document is capped at 1 MB. Big lists (the sales ledger especially) are split across
+// several documents transparently: the main doc holds a { __chunked: n } marker and the pieces live
+// in `${key}__c0`, `${key}__c1`… — callers keep using load/save/loadArr exactly as before.
+const CHUNK_CHARS = 600000;
+const loadStrict = async key => {
+  const s = await _db.collection('tpp').doc(key).get();
+  if (!s.exists) return null;
+  const v = s.data().v;
+  if (v && typeof v === "object" && !Array.isArray(v) && v.__chunked) {
+    const parts = await Promise.all(Array.from({ length: v.__chunked }, (_, i) => _db.collection('tpp').doc(`${key}__c${i}`).get()));
+    const all = [];
+    parts.forEach((d, i) => { if (!d.exists || !Array.isArray(d.data().v)) throw new Error(`${key}: chunk ${i} missing`); all.push(...d.data().v); });
+    return all;
   }
+  return v;
 };
+const load = async key => {
+  try { return await loadStrict(key); }
+  catch (e) { console.error("FB load:", e); return null; }
+};
+// Returns true only if the write really landed (it used to swallow failures silently).
 const save = async (key, val) => {
   try {
+    if (Array.isArray(val)) {
+      const json = JSON.stringify(val);
+      if (json.length > CHUNK_CHARS) {
+        const chunks = []; let cur = [], size = 0;
+        val.forEach(item => { const n = JSON.stringify(item).length + 1; if (cur.length && size + n > CHUNK_CHARS) { chunks.push(cur); cur = []; size = 0; } cur.push(item); size += n; });
+        if (cur.length) chunks.push(cur);
+        for (let i = 0; i < chunks.length; i++) await _db.collection('tpp').doc(`${key}__c${i}`).set({ v: chunks[i], ts: Date.now() });
+        await _db.collection('tpp').doc(key).set({ v: { __chunked: chunks.length }, ts: Date.now() });
+        return true;
+      }
+    }
     await _db.collection('tpp').doc(key).set({ v: val, ts: Date.now() });
+    return true;
   } catch (e) {
     console.error("FB save:", e);
+    return false;
   }
 };
+
+// Sales store only what receipts, returns and COGS need from each cart item. The full catalog product
+// (every unit it has ever had, plus its photo) used to be copied into every sale — that's what bloated
+// the sales ledger past Firestore's size limit.
+const slimSaleItem = it => {
+  if (!it || !it.raw) return it;
+  const r = it.raw, img = (typeof r.image === "string" && r.image.length < 500) ? r.image : undefined;
+  if (it.type === "catalog_phone") {
+    const p = r.product || {}, u = r.unit || {};
+    return { ...it, raw: { product: { id: p.id, name: p.name, category: p.category, cost: p.cost, ...(p.image && p.image.length < 500 ? { image: p.image } : {}) }, unit: { id: u.id, imei: u.imei, cost: u.cost, costBasis: u.costBasis, sellPrice: u.sellPrice } } };
+  }
+  if (it.type === "ticket") return { ...it, raw: { id: r.id, customerName: r.customerName, deviceBrand: r.deviceBrand, deviceModel: r.deviceModel, status: r.status } };
+  return { ...it, raw: { id: r.id, name: r.name, category: r.category, cost: r.cost, price: r.price, ...(img ? { image: img } : {}) } };
+};
+// Read the sales ledger for a read-modify-write: if it can't be read, stop rather than save over it with [].
+const loadSalesForWrite = async () => {
+  try { return (await loadStrict("tpp-sales")) || []; }
+  catch (e) { console.error("sales load failed:", e); alert("⚠️ Couldn't read the sales ledger, so nothing was changed. Check the connection and try again."); throw e; }
+};
+const slimSale = s => (s && Array.isArray(s.items)) ? { ...s, items: s.items.map(slimSaleItem) } : s;
 const loadArr = async key => {
   const v = await load(key);
   return Array.isArray(v) ? v : [];
@@ -1844,7 +1889,7 @@ function TicketDetail({
     if (!cancelReason.trim()) { setCancelErr("Please enter a reason."); return; }
 
     // Check for linked receipts (deposits paid against this ticket)
-    const allSales = await loadArr("tpp-sales");
+    const allSales = await loadSalesForWrite();
     const linkedReceipts = allSales.filter(s => s.items?.some(i=>i.ticketId===ticket.id) && !s.voided);
     if (linkedReceipts.length > 0) {
       const totalPaid = linkedReceipts.reduce((sum,s)=>sum+(s.total||0),0);
@@ -4872,8 +4917,17 @@ function OwnerDashboard({
   const [rentals, setRentals] = useState([]);
   const [purchasesLedger, setPurchasesLedger] = useState([]);
   const [poStatusById, setPoStatusById] = useState({});
+  const [catalogUnits, setCatalogUnits] = useState({ available: 0, sold: 0 });
   useEffect(() => {
     (async () => {
+      // Phone counts come from the catalog's units (the same records POS, Receive Stock and the Testing
+      // Queue use), not the old tpp-phones list.
+      try {
+        const cat = await loadCatalog();
+        let available = 0, sold = 0;
+        (cat || []).forEach(p => { if (!isImeiCategory(p.category)) return; (p.units || []).forEach(u => { if (u.status === "Available") available++; else if (u.status === "Sold") sold++; }); });
+        setCatalogUnits({ available, sold });
+      } catch (e) { console.error("dashboard phone counts:", e); }
       setPoStatusById(Object.fromEntries((await loadArr("tpp-purchase-orders")).map(p => [p.id, p.status])));
       setSales(await loadArr("tpp-sales"));
       setRentals(await loadArr("tpp-rental-income"));
@@ -5272,11 +5326,11 @@ function OwnerDashboard({
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "Phones Available",
-    value: phones.filter(p => p.availability === "Available").length,
+    value: catalogUnits.available,
     color: T.amber
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "Phones Sold (all time)",
-    value: phones.filter(p => p.availability === "Sold").length,
+    value: catalogUnits.sold,
     color: T.green
   })), rentalRevenue > 0 && /*#__PURE__*/React.createElement("div", {
     style: { marginBottom: 16 }
@@ -6243,56 +6297,72 @@ const sendOrderEmail = async (sale, overrideEmail) => {
 };
 
 const printReceipt = (sale) => {
-  const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("");
-  const itemLines = (sale.items||[]).map(i=>
-    `<tr><td>${i.name}${i.note?`<br><span style="font-size:9px;color:#666">${i.note}</span>`:""}${i.imei?`<br><span style="font-size:9px;color:#666">IMEI:${i.imei}</span>`:""}</td><td style="text-align:right;white-space:nowrap">${fmtMoney(i.price*(i.qty||1))}</td></tr>`
-    +(i.qty>1?`<tr><td style="font-size:10px;color:#666">  x${i.qty} @ ${fmtMoney(i.price)}</td><td></td></tr>`:"")
-  ).join("");
+  // Thermal-friendly layout modelled on the shop's Loyverse receipt: solid black sans-serif text (no
+  // grey, no thin monospace — those print faint on thermal paper), generous spacing, J$ prices,
+  // employee/customer block, itemised lines, big bold total, centred policy text, receipt # and date at the bottom.
+  const esc = v => String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const J = n => "J$" + (parseFloat(n)||0).toLocaleString("en-JM",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const JS = n => (n<0?"-":"") + J(Math.abs(n));
+  const when = (()=>{ try{ const d=new Date(sale.createdAt||Date.now()); return d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}); }catch{ return ""; } })();
+  const itemLines = (sale.items||[]).map(i=>{
+    const qty=i.qty||1, line=(parseFloat(i.price)||0)*qty;
+    return `<div class="item"><div class="row"><span class="nm">${esc(i.name)}</span><span class="amt">${J(line)}</span></div>
+      <div class="sub">${qty} x ${J(i.price)}</div>
+      ${i.imei?`<div class="sub it">IMEI: ${esc(i.imei)}</div>`:""}
+      ${i.note?`<div class="sub it">${esc(i.note)}</div>`:""}</div>`;
+  }).join("");
   const discountLines = (sale.discounts||[]).filter(d=>d.amount>0).map(d=>
-    `<tr><td style="color:#888">Discount (${d.type})</td><td style="text-align:right;color:#888">-${fmtMoney(d.amount)}</td></tr>`
+    `<div class="row"><span class="nm">${esc(d.label||d.reason||(d.type?d.type+" discount":"Discount"))}</span><span class="amt">-${J(d.amount)}</span></div>`
   ).join("");
-  const payLines = [
-    sale.cash>0?`<tr><td>Cash</td><td style="text-align:right">${fmtMoney(sale.cash)}</td></tr>`:"",
-    sale.debit_card>0?`<tr><td>Debit Card</td><td style="text-align:right">${fmtMoney(sale.debit_card)}</td></tr>`:"",
-    sale.credit_card>0?`<tr><td>Credit Card</td><td style="text-align:right">${fmtMoney(sale.credit_card)}</td></tr>`:"",
-    sale.ncb_transfer>0?`<tr><td>NCB Transfer</td><td style="text-align:right">${fmtMoney(sale.ncb_transfer)}</td></tr>`:"",
-    sale.scotia_transfer>0?`<tr><td>Scotia Transfer</td><td style="text-align:right">${fmtMoney(sale.scotia_transfer)}</td></tr>`:"",
-    sale.other_payment>0?`<tr><td>Other</td><td style="text-align:right">${fmtMoney(sale.other_payment)}</td></tr>`:"",
-    sale.change>0?`<tr><td>Change</td><td style="text-align:right">${fmtMoney(sale.change)}</td></tr>`:"",
-  ].join("");
-  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  const pays = [["Cash",sale.cash],["Debit Card",sale.debit_card],["Credit Card",sale.credit_card],["NCB Transfer",sale.ncb_transfer],["Scotia Transfer",sale.scotia_transfer],["Other",sale.other_payment]]
+    .filter(([,v])=>parseFloat(v)>0).map(([l,v])=>`<div class="row"><span class="nm">${l}</span><span class="amt">${J(v)}</span></div>`).join("");
+  const changeLine = sale.change>0?`<div class="row"><span class="nm">Change</span><span class="amt">${J(sale.change)}</span></div>`:"";
+  const badges = [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).map(t=>`<div class="c"><span class="badge">${t}</span></div>`).join("");
+  // First name + last initial (e.g. "Roselyn H.") for staff privacy.
+  const employee = (() => { const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean); return parts.length ? esc(parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "")) : "—"; })();
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${esc(sale.id)}</title>
   <style>
-    @media print{@page{margin:2mm;size:80mm auto;}}
-    body{font-family:'Courier New',monospace;font-size:12px;width:76mm;margin:0 auto;padding:4px}
-    h1{font-size:14px;text-align:center;margin:4px 0 2px}
-    .sub{font-size:10px;text-align:center;color:#444;margin:0}
-    hr{border:none;border-top:1px dashed #000;margin:6px 0}
-    table{width:100%;border-collapse:collapse}
-    td{padding:2px 0;vertical-align:top}
-    .total td{font-weight:bold;font-size:13px;border-top:1px solid #000;padding-top:4px}
-    .warranty{font-size:8px;color:#444;margin-top:6px;white-space:pre-wrap}
-    .ref{font-size:10px;text-align:center;color:#444}
-    .badge{background:#000;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px}
+    @page{margin:0;size:80mm auto;}
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;background:#fff;}
+    body{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:600;line-height:1.35;color:#000;width:72mm;margin:0 auto;padding:3mm 1mm 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .c{text-align:center;}
+    .store{font-size:16px;font-weight:800;text-align:center;margin-top:2px;}
+    .hdr{text-align:center;font-size:12px;font-weight:600;}
+    .gap{height:8px;}
+    .meta{font-size:12.5px;font-weight:600;}
+    .dots{border-top:2px dotted #000;margin:8px 0;}
+    .row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+    .row .nm{flex:1;min-width:0;word-break:break-word;}
+    .row .amt{white-space:nowrap;text-align:right;}
+    .item{margin-bottom:7px;}
+    .sub{font-size:12px;font-weight:600;padding-left:2px;}
+    .it{font-style:italic;}
+    .total{font-size:18px;font-weight:800;margin:4px 0 6px;}
+    .pol{text-align:center;font-size:11.5px;font-weight:600;line-height:1.35;white-space:pre-wrap;margin-top:4px;}
+    .foot{display:flex;justify-content:space-between;align-items:flex-end;font-size:12px;font-weight:600;margin-top:10px;}
+    .badge{display:inline-block;background:#000;color:#fff;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:800;margin:2px 0;}
   </style></head><body>
-  <h1>THE PHONE PLUG</h1>
-  <p class="sub">Shop 5D Hagley Park Plaza, Half Way Tree</p>
-  <p class="sub">876-490-5515 | @phoneplug_ja</p>
-  <hr>
-  <p class="ref">${sale.isDeposit?'<span class="badge">DEPOSIT RECEIPT</span><br>':''}${sale.isReturn?'<span class="badge">RETURN</span><br>':''}${sale.isExchange?'<span class="badge">EXCHANGE</span><br>':''}</p>
-  <p class="ref">Receipt: ${sale.id} | ${fmtDate(sale.createdAt)}</p>
-  ${sale.customerName?`<p class="ref">Customer: ${sale.customerName}${sale.customerPhone?" · "+sale.customerPhone:""}</p>`:""}
-  ${servedName?`<p class="ref">Served by: ${servedName}</p>`:""}
-  ${sale.deliveryZone&&sale.deliveryZone!=="None"?`<p class="ref">Delivery: ${sale.deliveryZone}${sale.deliveryAddress?" — "+sale.deliveryAddress:""}</p>`:""}
-  <hr>
-  <table>${itemLines}</table>
-  <hr>
-  ${discountLines?`<table>${discountLines}</table><hr>`:""}
-  <table class="total"><tr><td>TOTAL</td><td style="text-align:right">${fmtMoney(sale.total)}</td></tr></table>
-  ${sale.isDeposit&&sale.ticketId?`<p class="ref">Ticket: ${sale.ticketId} | Balance due on collection</p>`:""}
-  <hr>
-  <table>${payLines}</table>
-  <hr>
-  <div class="warranty">${buildWarrantyFooterText(sale)}</div>
+  <div class="store">The Phone Plug</div>
+  <div class="hdr">Shop 5D Hagley Park Plaza, Half Way Tree</div>
+  <div class="hdr">Instagram: @phoneplug_ja</div>
+  <div class="hdr">876-490-5515 or 876-672-2442</div>
+  <div class="hdr">support@phoneplugja.com</div>
+  ${badges?`<div class="gap"></div>${badges}`:""}
+  <div class="gap"></div>
+  <div class="meta">Employee: ${employee}</div>
+  ${sale.customerName||sale.customerPhone?`<div class="gap"></div><div class="meta">${sale.customerName?`Customer: ${esc(sale.customerName)}`:""}${sale.customerPhone?`<br>${esc(sale.customerPhone)}`:""}</div>`:""}
+  ${sale.deliveryZone&&sale.deliveryZone!=="None"?`<div class="meta">Delivery: ${esc(sale.deliveryZone)}${sale.deliveryAddress?" — "+esc(sale.deliveryAddress):""}</div>`:""}
+  <div class="dots"></div>
+  ${itemLines}
+  ${discountLines?`<div class="dots"></div>${discountLines}`:""}
+  <div class="dots"></div>
+  <div class="row total"><span>Total</span><span>${JS(sale.total)}</span></div>
+  ${sale.isDeposit&&sale.ticketId?`<div class="meta">Ticket: ${esc(sale.ticketId)} | Balance due on collection</div>`:""}
+  ${pays}${changeLine}
+  <div class="dots"></div>
+  <div class="pol">${esc(buildWarrantyFooterText(sale))}</div>
+  <div class="foot"><span>${esc(when)}</span><span>#${esc(sale.id)}</span></div>
   <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
   </body></html>`;
   const w=window.open("","_blank","width=400,height=600");
@@ -6343,10 +6413,13 @@ const printBarcodeLabels = (items) => {
   }).join("");
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Labels</title>
   <style>
-    @media print{@page{margin:1mm;size:${widthMm}mm ${heightMm}mm;}}
+    @page{margin:0;size:${widthMm}mm ${heightMm}mm;}
     *{box-sizing:border-box;}
-    body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:0;}
-    .label{width:${widthMm}mm;height:${heightMm}mm;padding:1mm 1.5mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;page-break-after:always;overflow:hidden;}
+    html,body{margin:0;padding:0;}
+    body{font-family:Arial,Helvetica,sans-serif;}
+    /* Label is a hair shorter than the page so rounding never spills onto a blank 2nd sheet; every label but the last forces a new page. */
+    .label{width:${widthMm}mm;height:${heightMm-0.6}mm;padding:1mm 1.5mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;break-after:page;page-break-after:always;overflow:hidden;}
+    .label:last-of-type{break-after:auto;page-break-after:auto;}
     .lname{font-size:8px;font-weight:700;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .lprice{font-size:11px;font-weight:800;margin:1px 0;}
     .lbarcode svg{max-width:100%;height:auto;}
@@ -6926,7 +6999,10 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     }
     setProcessing(true);
     try{
-      const existing=await loadArr("tpp-sales");
+      // Strict read: if the sales ledger can't be read, stop — never save over it with a partial list.
+      let existing;
+      try{ existing=(await loadStrict("tpp-sales"))||[]; }
+      catch(e){ console.error("checkout: sales load failed",e); alert("⚠️ Couldn't reach the sales ledger, so this sale was NOT recorded and inventory was NOT changed. Check the connection and try again."); return; }
       const hasTicket=cart.some(i=>i.type==="ticket");
       const prefix=hasTicket?"DEP":"RCP";
       const saleId=genSaleId(existing.map(s=>s.id),prefix);
@@ -6949,7 +7025,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
         createdAt:new Date().toISOString(),date:todayStr()
       };
-      await save("tpp-sales",[sale,...existing]);setSales(prev=>[sale,...prev]);
+      const saleSaved=await save("tpp-sales",[slimSale(sale),...existing.map(slimSale)]);
+      if(!saleSaved){ alert("⚠️ The sale could NOT be saved, so no receipt was recorded and inventory was NOT changed. Please try again — and tell the owner if it keeps happening."); return; }
+      setSales(prev=>[sale,...prev]);
 
       // Update inventory — non-blocking, runs after sale is saved
       try {
@@ -7010,7 +7088,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const voidSale=async(sale)=>{
     const reason=prompt("Reason for voiding?");
     if(!reason)return;
-    const allSales=await loadArr("tpp-sales");
+    const allSales=await loadSalesForWrite();
     const updated=allSales.map(s=>s.id===sale.id?{...s,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:s);
     await save("tpp-sales",updated);setSales(updated);
     if(selectedSale?.id===sale.id)setSelectedSale({...sale,voided:true,voidReason:reason});
@@ -7054,7 +7132,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       await save("tpp-store-credits",[credit,...allCredits]);
     }
     // Log return
-    const existing=await loadArr("tpp-sales");
+    const existing=await loadSalesForWrite();
     const returnSale={id:genSaleId(existing.map(s=>s.id),"RCP"),customerName,customerPhone,customerEmail,items:selected.map(i=>({...i,price:-Math.abs(i.price),qty:i.returnQty||1})),subtotal:-refundTotal,discounts:[],totalDiscount:0,total:-refundTotal,refundType:returnCredit,refundAmount:refundTotal,returnOrigSaleId:returnOrigSale.id,isReturn:true,servedBy:user?.name||"",createdAt:new Date().toISOString(),date:todayStr()};
     await save("tpp-sales",[returnSale,...existing]);setSales(prev=>[returnSale,...prev]);
     alert(`↩ Return processed — ${fmtMoney(refundTotal)}\n${returnCredit==="store_credit"?"🏪 Store credit issued (valid 1 year).":returnCredit==="bank_transfer"?"🏦 Bank transfer refund to be processed.":"💵 Cash refund to be given."}\n${selected.filter(i=>i.type==="catalog_phone"&&(i.condition||"resellable")==="resellable").length>0?"📱 Resellable phones sent to testing queue.":""}${selected.some(i=>i.condition==="damaged")?"\n📝 Damaged item(s) logged as inventory write-off.":""}`);
@@ -10403,11 +10481,14 @@ function InventoryValuation({ phones }) {
     })();
   },[]);
   if (loading) return E("div",{style:{textAlign:"center",padding:"60px 20px",color:T.muted}},"Loading...");
-  const avail = (phones||[]).filter(p=>!p.voided&&p.availability==="Available");
-  const phoneCost = avail.reduce((s,p)=>s+(parseFloat(p.total_invoice)||0),0);
-  const phoneRetail = avail.reduce((s,p)=>s+(parseFloat(p.expected_sell)||0),0);
+  // Phones are valued from the catalog's Available units (landed cost per unit; sell price from the unit
+  // or its product) so this matches the catalog, POS and Testing Queue — not the old tpp-phones list.
+  const avail = [];
+  products.filter(p=>isImeiCategory(p.category)).forEach(p=>(p.units||[]).forEach(u=>{ if(u.status==="Available") avail.push({p,u}); }));
+  const phoneCost = avail.reduce((s,x)=>s+(parseFloat(x.u.cost)||parseFloat(x.p.cost)||0),0);
+  const phoneRetail = avail.reduce((s,x)=>s+(parseFloat(x.u.sellPrice)||parseFloat(x.p.price)||0),0);
   const catGroups = {};
-  products.filter(p=>(p.stock||0)>0).forEach(p=>{
+  products.filter(p=>!isImeiCategory(p.category)&&(p.stock||0)>0).forEach(p=>{
     const cat=p.category||"Other"; if(!catGroups[cat])catGroups[cat]={items:[],cost:0,retail:0};
     const cost=(parseFloat(p.cost)||0)*(p.stock||0); const retail=(parseFloat(p.price)||0)*(p.stock||0);
     catGroups[cat].items.push({...p,costVal:cost,retailVal:retail}); catGroups[cat].cost+=cost; catGroups[cat].retail+=retail;
