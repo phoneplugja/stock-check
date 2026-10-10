@@ -164,6 +164,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script>
     firebase.initializeApp({
       apiKey: "AIzaSyB6WlaYxrA2eEYUztSOYs5HiLD9PTOswlQ",
@@ -174,6 +175,9 @@
       appId: "1:847520590345:web:fb544f0b517e6a55f6e6d8"
     });
     const _db = firebase.firestore();
+    // Firestore rules require a signed-in (anonymous) session — without this every booking write is
+    // rejected with "permission denied" at the final Confirm step.
+    const _authReady = firebase.auth().signInAnonymously().catch(e => { console.error("Anonymous auth failed:", e); });
   </script>
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -216,12 +220,13 @@
     const genRef         = () => "BK-" + Array.from({length:6},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join("");
 
     const save = async (key, val) => {
-      try { await _db.collection("tpp").doc(key).set({ v: val, ts: Date.now() }); }
+      try { await _authReady; await _db.collection("tpp").doc(key).set({ v: val, ts: Date.now() }); }
       catch(e) { console.error("save:", e); throw e; }
     };
 
     const loadArr = async (key) => {
       try {
+        await _authReady;
         const s = await _db.collection("tpp").doc(key).get();
         return s.exists && Array.isArray(s.data().v) ? s.data().v : [];
       } catch(e) { return []; }
@@ -383,14 +388,20 @@
             createdAt: new Date().toISOString()
           };
 
-          // Load existing bookings and prepend
-          const existing = await loadArr("tpp-bookings");
-          await save("tpp-bookings", [ticket, ...existing]);
+          // Add to the bookings list atomically (a transaction) so two people booking at once can't
+          // overwrite each other, and a failed read can never wipe the existing bookings.
+          await _authReady;
+          const bkRef = _db.collection("tpp").doc("tpp-bookings");
+          await _db.runTransaction(async (tx) => {
+            const snap = await tx.get(bkRef);
+            const existing = snap.exists && Array.isArray(snap.data().v) ? snap.data().v : [];
+            tx.set(bkRef, { v: [ticket, ...existing], ts: Date.now() });
+          });
 
           setBookRef(ref);
           setStep(3);
         } catch(e) {
-          alert("Something went wrong. Please try again or contact us directly.\n\n" + e.message);
+          console.error("booking submit:", e); alert("Something went wrong. Please try again or contact us directly.\n\n" + (e.code ? e.code + " — " : "") + e.message);
         } finally {
           setSaving(false);
         }
