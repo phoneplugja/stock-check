@@ -6408,6 +6408,10 @@ const getLabelSize = () => {
     };
   } catch { return { w: 70, h: 32 }; }
 };
+// Phone labels carry a short barcode — the first 4 and last 4 digits of the IMEI — so the bars stay compact.
+// A scan of either the short code or the full IMEI finds the unit (see unitMatchesCode).
+const imeiShortCode = imei => { const d = String(imei || "").trim(); return d.length > 8 ? d.slice(0, 4) + d.slice(-4) : d; };
+const unitMatchesCode = (u, code) => !!(u && u.imei) && !!code && (String(u.imei).trim() === code || imeiShortCode(u.imei) === code);
 // Variable-price items (price set at the till) print with no price on the label unless this is switched on.
 const getLabelShowVariablePrice = () => { try { return window.localStorage.getItem("tpp_label_showvar") === "1"; } catch { return false; } };
 const setLabelShowVariablePrice = on => { try { window.localStorage.setItem("tpp_label_showvar", on ? "1" : "0"); } catch {} };
@@ -6837,11 +6841,19 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   useEffect(()=>{
     if(!search.trim()){setSearchResults([]);return;}
     const q=search.toLowerCase();
+    // A phone label's short code (8 digits) or a full IMEI (15) — typed, or sent by a USB scanner — adds that
+    // exact unit straight to the cart when it matches one Available phone.
+    const codeQ=search.trim();
+    if(/^\d{8}$|^\d{15}$/.test(codeQ)){
+      const hits=[];
+      products.forEach(p=>(p.units||[]).forEach(u=>{ if(u.status==="Available"&&unitMatchesCode(u,codeQ)) hits.push({p,u}); }));
+      if(hits.length===1){ addUnitToCart(hits[0].p,hits[0].u); setSearch(""); setSearchResults([]); return; }
+    }
     // Search unified catalog — IMEI products show available units, others show stock count
     const catalogRes=products
       .filter(p=>{
         if(!p.name) return false;
-        return p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search);
+        return p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search)||(/^\d{4,15}$/.test(codeQ)&&(p.units||[]).some(u=>u.status==="Available"&&u.imei&&(u.imei.endsWith(codeQ)||unitMatchesCode(u,codeQ))));
       })
       .slice(0,10).map(p=>{
         const isImei=isImeiCategory(p.category);
@@ -6883,7 +6895,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   };
 
   const addUnitToCart=(product,unit)=>{
-    setCart(c=>[...c,{type:"catalog_phone",id:unit.id,name:product.name,price:unit.sellPrice||parseFloat(product.price)||0,qty:1,imei:unit.imei,note:"",raw:{product,unit}}]);
+    setCart(c=>c.some(ci=>ci.type==="catalog_phone"&&ci.id===unit.id)?c:[...c,{type:"catalog_phone",id:unit.id,name:product.name,price:unit.sellPrice||parseFloat(product.price)||0,qty:1,imei:unit.imei,note:"",raw:{product,unit}}]);
     setUnitPicker(null);
   };
 
@@ -7446,7 +7458,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   // ── Main POS ──────────────────────────────────────────────────────────────────
   return E("div",{style:{maxWidth:680,margin:"0 auto"}},
-    showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);let foundUnit=null,foundProduct=null;for(const p of products){if(p.units&&p.units.length){const u=p.units.find(u=>u.imei===code&&u.status==="Available");if(u){foundUnit=u;foundProduct=p;break;}}}if(foundUnit){addUnitToCart(foundProduct,foundUnit);}else{const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}}},onClose:()=>setShowScanner(false)}),
+    showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);let foundUnit=null,foundProduct=null;for(const p of products){if(p.units&&p.units.length){const u=p.units.find(u=>unitMatchesCode(u,code)&&u.status==="Available");if(u){foundUnit=u;foundProduct=p;break;}}}if(foundUnit){const dupes=products.reduce((n,p)=>n+(p.units||[]).filter(u=>unitMatchesCode(u,code)&&u.status==="Available").length,0);if(dupes>1){alert(`${dupes} phones share the code ${code}. Pick the right one by its IMEI.`);setSearch(code);}else addUnitToCart(foundProduct,foundUnit);}else{const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}}},onClose:()=>setShowScanner(false)}),
 
     // Photo preview — tap 👁️ next to any item to see its photo; closes on tap-away
     photoPreview&&E("div",{onClick:()=>setPhotoPreview(null),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"pointer"}},
@@ -11700,7 +11712,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           const isImei = isImeiCategory(line.category);
           if (isImei) {
             line.units.filter(u=>u.imei).forEach(u => {
-              labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, variable: String(line.sellPrice||"").trim()==="", code: u.imei, sub: `IMEI •${u.imei.slice(-4)}` });
+              labelItems.push({ name: line.name, price: parseFloat(line.sellPrice)||0, variable: String(line.sellPrice||"").trim()==="", code: imeiShortCode(u.imei), sub: `IMEI •${u.imei.slice(-4)}` });
             });
           } else {
             const product = updatedCatalog.find(p=>p.name?.toLowerCase()===line.name.toLowerCase()&&p.category===line.category);
@@ -12053,7 +12065,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                               onChange:e=>{ e.stopPropagation(); changeUnitStatus(product, ui, e.target.value); },
                               style:{width:"auto",fontSize:11,padding:"3px 6px",color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}
                             }, PHONE_UNIT_STATUSES.map(s=>E("option",{key:s,value:s},s))),
-                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,variable:!!product.variable_price,code:unit.imei,sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
+                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,variable:!!product.variable_price,code:imeiShortCode(unit.imei),sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
                             E("button",{
                               onClick:e=>{ e.stopPropagation(); setMoveTargetId(""); setMoveUnit(isMovingThis?null:{productId:product.id,unitIdx:ui}); },
                               disabled:busyUnit===busyKey,
