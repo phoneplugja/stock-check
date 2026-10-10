@@ -613,12 +613,14 @@ const save = async (key, val) => {
     // Firestore rejects `undefined` field values outright — strip them and retry once.
     if (/undefined/i.test(String(e && e.message))) {
       try { await _db.collection('tpp').doc(key).set({ v: JSON.parse(JSON.stringify(val === undefined ? null : val)), ts: Date.now() }); return true; }
-      catch (e2) { console.error("FB save (retry):", e2); return false; }
+      catch (e2) { console.error("FB save (retry):", e2); window.__lastSaveError = (e2 && (e2.code ? e2.code + ": " : "")) + (e2 && e2.message); return false; }
     }
     console.error("FB save:", e);
+    window.__lastSaveError = (e && (e.code ? e.code + ": " : "")) + (e && e.message);
     return false;
   }
 };
+console.log("manage.html build 2026-10-09-d (chunked saves, undefined-safe)");
 
 // Sales store only what receipts, returns and COGS need from each cart item. The full catalog product
 // (every unit it has ever had, plus its photo) used to be copied into every sale — that's what bloated
@@ -4975,7 +4977,20 @@ function OwnerDashboard({
   // Total Revenue — computed from the actual sales ledger (source of truth), not typed EOD fields.
   // Returns already carry a negative total, so they net out automatically.
   const tR = mE.reduce((s, r) => s + (parseFloat(r.totalRevenue) || 0), 0); // EOD-recorded, for reconciliation only
-  const salesRevenue = mSales.reduce((s, sale) => s + (parseFloat(sale.total) || 0), 0);
+  // Revenue effect of one receipt. An exchange receipt's total is the full price of the NEW item(s), but the
+  // customer already paid for the original on its own receipt (which stays in the ledger) — so the exchange
+  // adds only the difference (positive = customer paid more, negative = refunded/credited). Without this the
+  // original item's price would be counted twice.
+  const salesById = new Map(sales.map(x => [x.id, x]));
+  const saleRevenue = sale => {
+    const t = parseFloat(sale.total) || 0;
+    if (sale.isExchange && sale.exchangeOrigSaleId) {
+      const o = salesById.get(sale.exchangeOrigSaleId);
+      return t - (o && !o.voided ? parseFloat(o.total) || 0 : 0);
+    }
+    return t;
+  };
+  const salesRevenue = mSales.reduce((s, sale) => s + saleRevenue(sale), 0);
   const rentalRevenue = mRentals.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
   // COGS = cost of what was sold, minus cost of what came back. A customer return (or the original item
   // traded in on an exchange) puts the goods back in stock — or, if damaged, the loss is booked
@@ -5050,7 +5065,7 @@ function OwnerDashboard({
       const srcEod = scope === "month" ? mE : eod;
       const srcExp = scope === "month" ? mX : expenses;
       const srcDep = scope === "month" ? mD : deposits;
-      const srcSales = scope === "month" ? mSales : sales;
+      const srcSales = scope === "month" ? sales.filter(x => inM(x.date || x.createdAt)) : sales; // includes voided (flagged) so the export is a complete audit trail
       const srcRentals = scope === "month" ? mRentals : rentals;
       const srcPh = phones;
       // Purchase Orders, Store Credits, Debt Ledger — loaded fresh so "Export All Data" always has
@@ -5136,7 +5151,7 @@ function OwnerDashboard({
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
       // ── Sheet: Sales Ledger ────────────────────────────────────────────────
-      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No"]));
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s)]));
 
       // ── Sheet: Rental Income ──────────────────────────────────────────────
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
@@ -7053,7 +7068,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         createdAt:new Date().toISOString(),date:todayStr()
       };
       const saleSaved=await save("tpp-sales",[slimSale(sale),...existing.map(slimSale)]);
-      if(!saleSaved){ alert("⚠️ The sale could NOT be saved, so no receipt was recorded and inventory was NOT changed. Please try again — and tell the owner if it keeps happening."); return; }
+      if(!saleSaved){ alert("⚠️ The sale could NOT be saved, so no receipt was recorded and inventory was NOT changed. Please try again — and tell the owner if it keeps happening.\n\nDetails: "+(window.__lastSaveError||"unknown")+"\n(Build 2026-10-09-d)"); return; }
       setSales(prev=>[sale,...prev]);
 
       // Update inventory — non-blocking, runs after sale is saved
@@ -7113,11 +7128,51 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   };
 
   const voidSale=async(sale)=>{
+    if(sale.voided){alert("This receipt is already voided.");return;}
+    // A receipt that has returns/exchanges against it can't be voided on its own — the later documents depend on it.
+    const linked=sales.filter(x=>!x.voided&&(x.returnOrigSaleId===sale.id||x.exchangeOrigSaleId===sale.id));
+    if(linked.length){alert(`❌ Can't void ${sale.id}: it has ${linked.length} linked return/exchange receipt(s) (${linked.map(x=>x.id).join(", ")}). Void those first.`);return;}
+    const special=sale.isReturn||sale.isExchange;
+    if(special&&!confirm(`${sale.isReturn?"Voiding a return":"Voiding an exchange"} will NOT automatically undo the stock movement, store credit or refund that went with it — those must be adjusted by hand.\n\nVoid anyway?`))return;
     const reason=prompt("Reason for voiding?");
     if(!reason)return;
     const allSales=await loadSalesForWrite();
-    const updated=allSales.map(s=>s.id===sale.id?{...s,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:s);
-    await save("tpp-sales",updated);setSales(updated);
+    const updated=allSales.map(x=>x.id===sale.id?{...x,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:x);
+    const okSave=await save("tpp-sales",updated);
+    if(!okSave){alert("⚠️ The void could NOT be saved. Nothing was changed — please try again.");return;}
+    setSales(updated);
+    // Put the goods back: a voided sale never happened, so its phones go back to Available and accessories back
+    // into stock (otherwise inventory stays reduced for a sale that no longer exists). Returns are left alone (above).
+    try{
+      if(!sale.isReturn){
+        const items=(sale.items||[]).filter(i=>i.type==="catalog_phone"||i.type==="product");
+        if(items.length){
+          const cat=await loadCatalog();let changed=false;
+          items.forEach(item=>{
+            if(item.type==="catalog_phone"){
+              const pidx=cat.findIndex(p=>p.id===item.raw?.product?.id||(p.units||[]).some(u=>u.id===item.id));
+              if(pidx>=0){
+                const units=(cat[pidx].units||[]).map(u=>(u.id===item.id&&u.status==="Sold")?{...u,status:"Available",saleId:undefined,soldAt:undefined,soldBy:undefined,history:[...(u.history||[]),{status:"Available",ts:new Date().toISOString(),note:`Sale ${sale.id} voided — ${reason}`}]}:u);
+                cat[pidx]={...cat[pidx],units,stock:units.filter(u=>u.status==="Available").length};changed=true;
+              }
+            }else if(!String(item.id||"").startsWith("svc-")){
+              const pidx=cat.findIndex(p=>p.id===item.id);
+              if(pidx>=0){cat[pidx]={...cat[pidx],stock:(cat[pidx].stock||0)+(item.qty||1)};changed=true;}
+            }
+          });
+          if(changed){await saveCatalog(cat);setProducts(cat);}
+        }
+      }
+      // A voided repair-deposit receipt comes off the ticket's paid total.
+      if(sale.isDeposit){
+        const tix=await loadArr("tpp-tickets-v1");
+        await save("tpp-tickets-v1",tix.map(t=>{
+          const dep=(t.deposits||[]).filter(d=>d.saleId===sale.id);
+          if(!dep.length)return t;
+          return {...t,deposits:(t.deposits||[]).filter(d=>d.saleId!==sale.id),totalPaid:Math.max(0,(t.totalPaid||0)-dep.reduce((n,d)=>n+(d.amount||0),0))};
+        }));
+      }
+    }catch(e){console.error("Void sale inventory restore:",e);alert("The receipt was voided, but stock couldn't be restored automatically — please check the Catalog.");}
     if(selectedSale?.id===sale.id)setSelectedSale({...sale,voided:true,voidReason:reason});
   };
 
@@ -12381,3 +12436,5 @@ function App() {
   </script>
 </body>
 </html>
+
+  
