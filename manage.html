@@ -597,6 +597,7 @@ const save = async (key, val) => {
   try {
     if (Array.isArray(val)) {
       const json = JSON.stringify(val);
+      val = JSON.parse(json); // drops any undefined values, which Firestore refuses to store
       if (json.length > CHUNK_CHARS) {
         const chunks = []; let cur = [], size = 0;
         val.forEach(item => { const n = JSON.stringify(item).length + 1; if (cur.length && size + n > CHUNK_CHARS) { chunks.push(cur); cur = []; size = 0; } cur.push(item); size += n; });
@@ -609,6 +610,11 @@ const save = async (key, val) => {
     await _db.collection('tpp').doc(key).set({ v: val, ts: Date.now() });
     return true;
   } catch (e) {
+    // Firestore rejects `undefined` field values outright — strip them and retry once.
+    if (/undefined/i.test(String(e && e.message))) {
+      try { await _db.collection('tpp').doc(key).set({ v: JSON.parse(JSON.stringify(val === undefined ? null : val)), ts: Date.now() }); return true; }
+      catch (e2) { console.error("FB save (retry):", e2); return false; }
+    }
     console.error("FB save:", e);
     return false;
   }
@@ -7040,7 +7046,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
         // Cost of the original item(s) handed back on an exchange (snapshot at sale time) so COGS can be
         // reversed for them — the goods are back in stock (or written off if damaged), not sold.
-        exchangeHandedBack:isExchange?exchangeItems.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"})):undefined,
+        ...(isExchange?{exchangeHandedBack:exchangeItems.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"}))}:{}),
         returnOrigSaleId:returnOrigSale?.id||null,
         appliedCreditId:appliedCredit?.id||null,
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
