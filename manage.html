@@ -6350,57 +6350,74 @@ const getLogoBitmap = () => new Promise(resolve => {
   } catch { resolve(null); }
 });
 
-const buildReceiptEscPos = (sale, logo) => {
+// One layout used by BOTH printers (RawBT/ESC-POS and the laptop print window) so they look identical.
+// Returns lines: { t:text, c:centered, b:bold, big:double-height, logo:true }
+const receiptLines = (sale) => {
   const COLS = getReceiptCols();
-  const bytes = [];
-  const push = (...b) => b.forEach(v => bytes.push(v));
-  const clean = t => String(t==null?"":t).replace(/[—–]/g,"-").replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\x20-\x7E\n]/g,"?");
-  const text = t => { const c = clean(t); for (let i=0;i<c.length;i++) bytes.push(c.charCodeAt(i)); };
-  const line = (t="") => { text(t); push(0x0A); };
+  const out = [];
+  const clean = t => String(t==null?"":t).replace(/[—–]/g,"-").replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[•·●▪]/g,"-").replace(/[…]/g,"...").replace(/[^\x20-\x7E\n]/g,"?");
+  const add = (t="", o={}) => out.push({ t: clean(t), ...o });
   const J = n => "J$" + (parseFloat(n)||0).toLocaleString("en-JM",{minimumFractionDigits:2,maximumFractionDigits:2});
   const JS = n => (n<0?"-":"") + J(Math.abs(n));
-  const wrap = (t, w) => { const out=[]; String(t==null?"":t).split("\n").forEach(par=>{ let cur=""; par.split(/\s+/).filter(Boolean).forEach(word=>{ while(word.length>w){ if(cur){out.push(cur);cur="";} out.push(word.slice(0,w)); word=word.slice(w); } if(!cur) cur=word; else if((cur+" "+word).length<=w) cur+=" "+word; else { out.push(cur); cur=word; } }); out.push(cur); }); return out; };
-  const row = (l, r, w=COLS) => { l=clean(l); r=clean(r); const room=Math.max(4,w-r.length-1); const ls=wrap(l,room); ls.forEach((ln,i)=>{ if(i===ls.length-1) line(ln+" ".repeat(Math.max(1,w-ln.length-r.length))+r); else line(ln); }); };
-  const dash = () => line("-".repeat(COLS));
-  const center = () => push(0x1B,0x61,1), left = () => push(0x1B,0x61,0);
-  const bold = on => push(0x1B,0x45,on?1:0), big = on => push(0x1D,0x21,on?0x11:0x00);
+  const wrap = (t, w) => { const o=[]; String(t==null?"":t).split("\n").forEach(par=>{ let cur=""; par.split(/\s+/).filter(Boolean).forEach(word=>{ while(word.length>w){ if(cur){o.push(cur);cur="";} o.push(word.slice(0,w)); word=word.slice(w); } if(!cur) cur=word; else if((cur+" "+word).length<=w) cur+=" "+word; else { o.push(cur); cur=word; } }); o.push(cur); }); return o; };
+  const row = (l, r, o={}) => { l=clean(l); r=clean(r); const room=Math.max(4,COLS-r.length-1); const ls=wrap(l,room); ls.forEach((ln,i)=>{ if(i===ls.length-1) add(ln+" ".repeat(Math.max(1,COLS-ln.length-r.length))+r, o); else add(ln, o); }); };
+  const dash = () => add("-".repeat(COLS));
 
-  push(0x1B,0x40);
-  center();
-  if (logo) { push(0x1D,0x76,0x30,0x00, logo.bpr&255, logo.bpr>>8, logo.h&255, logo.h>>8); logo.data.forEach(v=>bytes.push(v)); push(0x0A); }
-  else { bold(true); line("The Phone Plug"); bold(false); }
-  line("Shop 5D Hagley Park Plaza, Half Way Tree");
-  line("Instagram: @phoneplug_ja");
-  line("876-490-5515 or 876-672-2442");
-  line("support@phoneplugja.com");
-  [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).forEach(t=>{ line(); bold(true); line("*** "+t+" ***"); bold(false); });
-  left(); line();
+  out.push({ logo:true, c:true });
+  ["Shop 5D Hagley Park Plaza, Half Way Tree","Instagram: @phoneplug_ja","876-490-5515 or 876-672-2442","support@phoneplugja.com"].forEach(t=>add(t,{c:true}));
+  [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).forEach(t=>{ add(); add("*** "+t+" ***",{c:true,b:true}); });
+  add();
   const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean);
-  line("Employee: " + (parts.length ? parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "") : "-"));
-  if (sale.customerName) wrap("Customer: "+sale.customerName, COLS).forEach(l=>line(l));
-  if (sale.customerPhone) line(sale.customerPhone);
-  if (sale.deliveryZone && sale.deliveryZone!=="None") wrap("Delivery: "+sale.deliveryZone+(sale.deliveryAddress?" - "+sale.deliveryAddress:""), COLS).forEach(l=>line(l));
+  add("Employee: " + (parts.length ? parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "") : "-"));
+  if (sale.customerName) wrap("Customer: "+sale.customerName, COLS).forEach(l=>add(l));
+  if (sale.customerPhone) add(sale.customerPhone);
+  if (sale.deliveryZone && sale.deliveryZone!=="None") wrap("Delivery: "+sale.deliveryZone+(sale.deliveryAddress?" - "+sale.deliveryAddress:""), COLS).forEach(l=>add(l));
   dash();
   (sale.items||[]).forEach(i=>{
     const qty=i.qty||1, price=parseFloat(i.price)||0;
     row(i.name||"Item", J(price*qty));
-    line("  "+qty+" x "+J(price));
-    if (i.imei) line("  IMEI: "+i.imei);
-    if (i.note) wrap(i.note, COLS-2).forEach(l=>line("  "+l));
+    add("  "+qty+" x "+J(price));
+    if (i.imei) add("  IMEI: "+i.imei);
+    if (i.note) wrap(i.note, COLS-2).forEach(l=>add("  "+l));
   });
   const discs = (sale.discounts||[]).filter(d=>d.amount>0);
   if (discs.length) { dash(); discs.forEach(d=>row(d.label||d.reason||(d.type?d.type+" discount":"Discount"), "-"+J(d.amount))); }
   dash();
-  bold(true); push(0x1D,0x21,0x01); row("Total", JS(sale.total), Math.floor(COLS)); push(0x1D,0x21,0x00); bold(false);
-  if (sale.isDeposit && sale.ticketId) line("Ticket: "+sale.ticketId+" | Balance due on collection");
+  row("Total", JS(sale.total), {b:true, big:true});
+  if (sale.isDeposit && sale.ticketId) add("Ticket: "+sale.ticketId+" | Balance due on collection");
   [["Cash",sale.cash],["Debit Card",sale.debit_card],["Credit Card",sale.credit_card],["NCB Transfer",sale.ncb_transfer],["Scotia Transfer",sale.scotia_transfer],["Other",sale.other_payment]].filter(([,v])=>parseFloat(v)>0).forEach(([l,v])=>row(l,J(v)));
   if (sale.change>0) row("Change", J(sale.change));
   dash();
-  center();
-  wrap(buildWarrantyFooterText(sale), COLS).forEach(l=>line(l));
-  line();
+  // Warranty: heading centred; each "- item" is its own wrapped paragraph, left-aligned so dashes line up.
+  String(buildWarrantyFooterText(sale)).split("\n").forEach((ln,idx)=>{
+    if (idx===0) { add(ln,{c:true,b:true}); return; }
+    const isBullet = /^[•·\-\*]\s*/.test(ln);
+    const body = ln.replace(/^[•·\-\*]\s*/,"");
+    if (isBullet) wrap(body, COLS-2).forEach((w,k)=>add((k===0?"- ":"  ")+w));
+    else wrap(ln, COLS).forEach(w=>add(w,{c:true}));
+  });
+  add();
   let when=""; try { const d=new Date(sale.createdAt||Date.now()); when=d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:"America/Jamaica"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); } catch {}
-  left(); row(when, "#"+sale.id);
+  row(when, "#"+sale.id);
+  return out;
+};
+
+const buildReceiptEscPos = (sale, logo) => {
+  const bytes = [];
+  const push = (...b) => b.forEach(v => bytes.push(v));
+  push(0x1B,0x40);
+  receiptLines(sale).forEach(L => {
+    push(0x1B,0x61, L.c?1:0);
+    if (L.logo) {
+      if (logo) { push(0x1D,0x76,0x30,0x00, logo.bpr&255, logo.bpr>>8, logo.h&255, logo.h>>8); logo.data.forEach(v=>bytes.push(v)); push(0x0A); }
+      else { push(0x1B,0x45,1); for (const ch of "The Phone Plug") bytes.push(ch.charCodeAt(0)); push(0x1B,0x45,0,0x0A); }
+      return;
+    }
+    push(0x1B,0x45,L.b?1:0); push(0x1D,0x21,L.big?0x01:0x00);
+    for (let i=0;i<L.t.length;i++) bytes.push(L.t.charCodeAt(i));
+    push(0x0A);
+  });
+  push(0x1B,0x61,0, 0x1B,0x45,0, 0x1D,0x21,0x00);
   push(0x0A);
   push(0x1D,0x56,0x42,0x00); // feed + partial cut
   return new Uint8Array(bytes);
@@ -6434,74 +6451,37 @@ function ReceiptPrintSettings() {
 }
 const printReceipt = (sale) => {
   if (receiptUseRawBT()) { printReceiptRawBT(sale); return; }
-  // Thermal-friendly layout modelled on the shop's Loyverse receipt: solid black sans-serif text (no
-  // grey, no thin monospace — those print faint on thermal paper), generous spacing, J$ prices,
-  // employee/customer block, itemised lines, big bold total, centred policy text, receipt # and date at the bottom.
+  // Laptop print window: same lines as the RawBT receipt, in a thin monospace font sized so one line
+  // is exactly the paper width, with dash dividers and no heavy strokes.
   const esc = v => String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  const J = n => "J$" + (parseFloat(n)||0).toLocaleString("en-JM",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const JS = n => (n<0?"-":"") + J(Math.abs(n));
-  const when = (()=>{ try{ const d=new Date(sale.createdAt||Date.now()); return d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:"America/Jamaica"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); }catch{ return ""; } })();
-  const itemLines = (sale.items||[]).map(i=>{
-    const qty=i.qty||1, line=(parseFloat(i.price)||0)*qty;
-    return `<div class="item"><div class="row"><span class="nm">${esc(i.name)}</span><span class="amt">${J(line)}</span></div>
-      <div class="sub">${qty} x ${J(i.price)}</div>
-      ${i.imei?`<div class="sub it">IMEI: ${esc(i.imei)}</div>`:""}
-      ${i.note?`<div class="sub it">${esc(i.note)}</div>`:""}</div>`;
+  const COLS = getReceiptCols();
+  const body = receiptLines(sale).map(L => {
+    if (L.logo) return `<div class="c"><img class="logo" src="${RECEIPT_LOGO}" alt="The Phone Plug"></div>`;
+    const cls = ["ln", L.c?"c":"", L.b?"b":"", L.big?"big":""].filter(Boolean).join(" ");
+    return `<div class="${cls}">${esc(L.t)||"&nbsp;"}</div>`;
   }).join("");
-  const discountLines = (sale.discounts||[]).filter(d=>d.amount>0).map(d=>
-    `<div class="row"><span class="nm">${esc(d.label||d.reason||(d.type?d.type+" discount":"Discount"))}</span><span class="amt">-${J(d.amount)}</span></div>`
-  ).join("");
-  const pays = [["Cash",sale.cash],["Debit Card",sale.debit_card],["Credit Card",sale.credit_card],["NCB Transfer",sale.ncb_transfer],["Scotia Transfer",sale.scotia_transfer],["Other",sale.other_payment]]
-    .filter(([,v])=>parseFloat(v)>0).map(([l,v])=>`<div class="row"><span class="nm">${l}</span><span class="amt">${J(v)}</span></div>`).join("");
-  const changeLine = sale.change>0?`<div class="row"><span class="nm">Change</span><span class="amt">${J(sale.change)}</span></div>`:"";
-  const badges = [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).map(t=>`<div class="c"><span class="badge">${t}</span></div>`).join("");
-  // First name + last initial (e.g. "Roselyn H.") for staff privacy.
-  const employee = (() => { const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean); return parts.length ? esc(parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "")) : "—"; })();
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${esc(sale.id)}</title>
   <style>
     @page{margin:0;size:80mm auto;}
     *{box-sizing:border-box;}
     html,body{margin:0;padding:0;background:#fff;}
-    body{font-family:'Lucida Console','Consolas','DejaVu Sans Mono','Courier New',monospace;font-size:11.5px;font-weight:700;line-height:1.3;color:#000;width:72mm;margin:0 auto;padding:3mm 1mm 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    body{width:72mm;margin:0 auto;padding:2mm 0 6mm;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;
+      font-family:'Consolas','Lucida Console','DejaVu Sans Mono','Courier New',monospace;font-weight:400;font-size:9.4px;line-height:1.45;}
+    .ln{white-space:pre;}
     .c{text-align:center;}
-    .logo{width:36mm;max-width:100%;height:auto;display:block;margin:0 auto 4px;}
-    .store{font-size:15px;font-weight:800;text-align:center;margin-top:2px;}
-    .hdr{text-align:center;font-size:10.5px;font-weight:700;}
-    .gap{height:8px;}
-    .meta{font-size:11.0px;font-weight:700;}
-    .dots{border-top:2px dotted #000;margin:8px 0;}
-    .row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
-    .row .nm{flex:1;min-width:0;word-break:break-word;}
-    .row .amt{white-space:nowrap;text-align:right;}
-    .item{margin-bottom:7px;}
-    .sub{font-size:10.5px;font-weight:700;padding-left:2px;}
-    .it{font-style:italic;}
-    .total{font-size:16px;font-weight:800;margin:4px 0 6px;}
-    .pol{text-align:center;font-size:10.5px;font-weight:700;line-height:1.35;white-space:pre-wrap;margin-top:4px;}
-    .foot{display:flex;justify-content:space-between;align-items:flex-end;font-size:10.5px;font-weight:700;margin-top:10px;}
-    .badge{display:inline-block;background:#000;color:#fff;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:800;margin:2px 0;}
+    .b{font-weight:700;}
+    .big{transform:scaleY(1.6);transform-origin:0 0;margin:2px 0 0.75em;}
+    .logo{width:36mm;height:auto;display:block;margin:0 auto 4px;}
+    #probe{position:absolute;visibility:hidden;white-space:pre;font-size:10px;}
   </style></head><body>
-  <div class="c"><img class="logo" src="${RECEIPT_LOGO}" alt="The Phone Plug"></div>
-  <div class="hdr">Shop 5D Hagley Park Plaza, Half Way Tree</div>
-  <div class="hdr">Instagram: @phoneplug_ja</div>
-  <div class="hdr">876-490-5515 or 876-672-2442</div>
-  <div class="hdr">support@phoneplugja.com</div>
-  ${badges?`<div class="gap"></div>${badges}`:""}
-  <div class="gap"></div>
-  <div class="meta">Employee: ${employee}</div>
-  ${sale.customerName||sale.customerPhone?`<div class="gap"></div><div class="meta">${sale.customerName?`Customer: ${esc(sale.customerName)}`:""}${sale.customerPhone?`<br>${esc(sale.customerPhone)}`:""}</div>`:""}
-  ${sale.deliveryZone&&sale.deliveryZone!=="None"?`<div class="meta">Delivery: ${esc(sale.deliveryZone)}${sale.deliveryAddress?" — "+esc(sale.deliveryAddress):""}</div>`:""}
-  <div class="dots"></div>
-  ${itemLines}
-  ${discountLines?`<div class="dots"></div>${discountLines}`:""}
-  <div class="dots"></div>
-  <div class="row total"><span>Total</span><span>${JS(sale.total)}</span></div>
-  ${sale.isDeposit&&sale.ticketId?`<div class="meta">Ticket: ${esc(sale.ticketId)} | Balance due on collection</div>`:""}
-  ${pays}${changeLine}
-  <div class="dots"></div>
-  <div class="pol">${esc(buildWarrantyFooterText(sale))}</div>
-  <div class="foot"><span>${esc(when)}</span><span>#${esc(sale.id)}</span></div>
-  <script>window.onload=()=>{setTimeout(()=>{window.print();setTimeout(()=>window.close(),1000);},200);}<\/script>
+  <span id="probe">${"M".repeat(COLS)}</span>
+  ${body}
+  <script>
+    // Scale the font so exactly ${COLS} characters span the 72mm paper width.
+    (function(){var p=document.getElementById('probe');var w=p.getBoundingClientRect().width||1;var target=72/25.4*96;
+      document.body.style.fontSize=(10*target/w)+'px';})();
+    window.onload=()=>{setTimeout(()=>{window.print();setTimeout(()=>window.close(),1000);},250);}
+  <\/script>
   </body></html>`;
   const w=window.open("","_blank","width=400,height=600");
   if(w){w.document.write(html);w.document.close();}
