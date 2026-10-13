@@ -529,11 +529,13 @@ const genId = (existing = []) => {
   } while (existing.includes(id));
   return id;
 };
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Shop-local (Jamaica) calendar date as YYYY-MM-DD — NOT UTC, which flips to "tomorrow" every evening after 7pm.
+const todayStr = () => { try { return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Jamaica",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()); } catch { return new Date().toISOString().slice(0, 10); } };
 const fmt = iso => {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleString("en-GB", {
+      timeZone: "America/Jamaica",
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -548,6 +550,7 @@ const fmtDate = iso => {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleDateString("en-GB", {
+      timeZone: "America/Jamaica",
       day: "2-digit",
       month: "short",
       year: "numeric"
@@ -5221,7 +5224,7 @@ function OwnerDashboard({
       // ── Sheet 7: Signatures Audit ─────────────────────────────────────────
       const signedTix = srcTix.filter(t => t.termsAgreed);
       addSheet("Signatures Audit", ["Ticket ID", "Date", "Customer Name", "Phone", "Device", "Terms Agreed", "Signature Captured", "Notes"], signedTix.map(t => [t.id, t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-GB") : "", t.customerName || "", t.customerPhone || "", `${t.deviceBrand || ""} ${t.deviceModel || ""}`.trim(), t.termsAgreed ? "Yes" : "No", t.signature ? "Yes — image stored in system" : "No", "Signature image retrievable from repair system ticket"]));
-      const filename = `PhonePlug_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = `PhonePlug_${label}_${todayStr()}.xlsx`;
       XLSX.writeFile(wb, filename);
     } catch (e) {
       console.error(e);
@@ -10547,35 +10550,50 @@ function SettingsTab() {
     setLabelSaved(true); setTimeout(()=>setLabelSaved(false),2500);
   };
   const [codeFix, setCodeFix] = useState(null); // {fillBarcode, stripDash, fillSku, generate}
+  const isNumCode = v => /^\d+$/.test(String(v==null?"":v).trim());
   const scanCodes = async () => {
     const cat = await loadCatalog();
-    const c = { total: cat.length, fillBarcode: 0, stripDash: 0, fillSku: 0, generate: 0 };
+    const c = { total: cat.length, convert: 0, generate: 0, dupes: 0 };
+    const seen = new Map();
     cat.forEach(p => {
-      const imei = isImeiCategory(p.category);
-      if (/^-+\d/.test(String(p.barcode||"").trim())) c.stripDash++;
-      else if (!String(p.barcode||"").trim() && String(p.sku||"").trim()) c.fillBarcode++;
-      if (!String(p.sku||"").trim() && String(p.barcode||"").trim()) c.fillSku++;
-      if (!imei && !String(p.sku||"").trim() && !String(p.barcode||"").trim()) c.generate++;
+      const bc = cleanCode(p.barcode), sk = cleanCode(p.sku);
+      if (!bc && !sk) c.generate++;
+      else if (!isNumCode(bc) || !isNumCode(sk) || bc !== sk) c.convert++;
+      const k = isNumCode(bc) ? bc : (isNumCode(sk) ? sk : null);
+      if (k) seen.set(k, (seen.get(k)||0)+1);
     });
+    seen.forEach(n => { if (n>1) c.dupes += n-1; });
     setCodeFix(c);
   };
   const applyCodeFix = async () => {
     const cat = await loadCatalog();
-    // codes already in use, so generated ones never collide
-    const taken = new Set(); cat.forEach(p => [p.sku,p.barcode].forEach(v => { const x=cleanCode(v); if(x) taken.add(x); }));
-    let working = [...cat], changed = 0;
-    working = working.map(p => {
-      let barcode = String(p.barcode||"").trim(), sku = String(p.sku||"").trim(), touched = false;
-      if (/^-+\d/.test(barcode)) { barcode = cleanCode(barcode); touched = true; }
-      if (!barcode && sku) { barcode = cleanCode(sku); touched = true; }
-      if (!sku && barcode) { sku = barcode; touched = true; }
-      if (!barcode && !sku && !isImeiCategory(p.category)) { const n = nextProductCode(working, [...taken]); barcode = n; sku = n; taken.add(n); touched = true; }
-      if (!touched) return p;
-      changed++; return { ...p, barcode, sku };
+    // Every product ends up with ONE short numeric code used as both barcode and SKU.
+    // Keep an existing numeric code when it is unique; otherwise give the next free number.
+    const taken = new Set(); const claimed = new Set();
+    cat.forEach(p => [p.sku,p.barcode].forEach(v => { const x=cleanCode(v); if(x) taken.add(x); }));
+    let maxN = 10000; taken.forEach(x => { if (/^\d{4,8}$/.test(x)) maxN = Math.max(maxN, parseInt(x,10)); });
+    const nextFree = () => { let n = maxN+1; while (taken.has(String(n))) n++; maxN = n; taken.add(String(n)); return String(n); };
+    const mapping = []; let changed = 0;
+    const working = cat.map(p => {
+      const bc = cleanCode(p.barcode), sk = cleanCode(p.sku);
+      let code = isNumCode(bc) && !claimed.has(bc) ? bc : (isNumCode(sk) && !claimed.has(sk) ? sk : "");
+      if (!code) code = nextFree();
+      claimed.add(code);
+      const oldBc = String(p.barcode||"").trim(), oldSku = String(p.sku||"").trim();
+      if (oldBc === code && oldSku === code) return p;
+      changed++; mapping.push([p.name||"", oldSku, oldBc, code]);
+      return { ...p, barcode: code, sku: code };
     });
     await saveCatalog(working);
     setCodeFix(null);
-    alert(`✅ Updated ${changed} product(s). Barcode and SKU now match; nothing that already had a valid code was changed.`);
+    try {
+      const q = v => '"' + String(v).replace(/"/g,'""') + '"';
+      const csv = ["Product,Old SKU,Old Barcode,New Code", ...mapping.map(r=>r.map(q).join(","))].join("\n");
+      const url = URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+      const link = document.createElement("a"); link.href = url; link.download = "old-to-new-product-codes.csv"; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    } catch {}
+    alert(`✅ Updated ${changed} product(s). Every product now has one numeric code (barcode = SKU). A list of old → new codes was downloaded. Reprint any old labels.`);
   };
   const [nameMax, setNameMaxState] = useState(()=>getLabelNameMax());
   const [showVarPrice, setShowVarPriceState] = useState(()=>getLabelShowVariablePrice());
@@ -10683,13 +10701,13 @@ function SettingsTab() {
       labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!"),
       E("div",{style:{marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}`}},
         E("div",{style:{fontWeight:700,fontSize:13,marginBottom:4}},"Product barcodes"),
-        E("div",{style:{fontSize:12,color:T.muted,marginBottom:8}},"Barcode and SKU should be the same short number. This fills in missing barcodes from the SKU, removes a stray leading \"-\" (like -10213), and gives any accessory with no code the next free number. Existing valid codes are never changed."),
+        E("div",{style:{fontSize:12,color:T.muted,marginBottom:8}},"Barcode and SKU should be the same short number. Gives every product one short numeric code (barcode = SKU). Codes that are already numeric and unique are kept; text codes like PHNSAMS240LNBL128 or ACCAPP1011, missing codes and duplicates get the next free number (starting after your highest, 11033). A list of old → new codes downloads so you have a record."),
         !codeFix?E(Btn,{variant:"ghost",onClick:scanCodes},"Check product barcodes")
           :E("div",null,
-              E("div",{style:{fontSize:12,marginBottom:8}},`Will fix: ${codeFix.fillBarcode} missing barcode(s) · ${codeFix.stripDash} with a leading "-" · ${codeFix.fillSku} missing SKU(s) · ${codeFix.generate} with no code at all.`),
-              (codeFix.fillBarcode+codeFix.stripDash+codeFix.fillSku+codeFix.generate)>0
-                ?E(Btn,{onClick:applyCodeFix},"Fix them")
-                :E("div",{style:{color:T.green,fontSize:12,fontWeight:600}},"✅ Everything already matches."))),
+              E("div",{style:{fontSize:12,marginBottom:8}},`Will fix: ${codeFix.convert} product(s) whose code isn't a plain number (or barcode ≠ SKU) · ${codeFix.generate} with no code · ${codeFix.dupes} duplicate code(s).`),
+              (codeFix.convert+codeFix.generate+codeFix.dupes)>0
+                ?E(Btn,{onClick:applyCodeFix},"Make all codes numeric")
+                :E("div",{style:{color:T.green,fontSize:12,fontWeight:600}},"✅ Every product already has a unique numeric code."))),
       E("div",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,marginTop:12}},
         "Max characters in a label name:",
         E(Input,{type:"number",value:nameMax,style:{width:80},onChange:e=>{const v=parseInt(e.target.value)||40;setNameMaxState(v);setLabelNameMax(v);}}),
@@ -11883,7 +11901,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // "Attributing To" dropdown on this line, never a silent name/category string match.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || (isImei ? "" : nextProductCode(updatedCatalog)), variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || nextProductCode(updatedCatalog), variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Add units
@@ -11911,7 +11929,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || (isImei ? "" : nextProductCode(updatedCatalog)), variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || nextProductCode(updatedCatalog), variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Weighted-average cost across what's already on hand and what just arrived, rather than
@@ -12202,7 +12220,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
     const isImei = isImeiCategory(form.category);
     const product = editingProduct
       ? { ...editingProduct, ...form, sku:(form.barcode||"").trim()||editingProduct.sku||"", price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
-      : { labelName:(form.labelName||"").trim(), ...makeCatalogProduct({ name:form.name, category:form.category, price:form.price, cost:form.cost, barcode:(form.barcode||"").trim() || (isImei ? "" : nextProductCode(catalog)), stock:isImei?0:form.stock, variable_price:form.variable_price }) };
+      : { labelName:(form.labelName||"").trim(), ...makeCatalogProduct({ name:form.name, category:form.category, price:form.price, cost:form.cost, barcode:(form.barcode||"").trim() || nextProductCode(catalog), stock:isImei?0:form.stock, variable_price:form.variable_price }) };
     const updated = editingProduct ? catalog.map(p=>p.id===editingProduct.id?product:p) : [product,...catalog];
     await saveCatalogFn(updated);
     setFormS(emptyForm()); setShowAddForm(false); setEditingProduct(null);
