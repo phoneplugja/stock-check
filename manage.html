@@ -6322,6 +6322,7 @@ const sendOrderEmail = async (sale, overrideEmail) => {
   } catch(e){console.error("Order email error:",e);return false;}
 };
 
+const RECEIPT_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAbgAAADmAQAAAACPQq0tAAAEwUlEQVR42u2avXLjOAzH/0A0iYrMRmU66xFSbhc9Sh4h7VVhZq7Ych9hi3sQudsyD3CF3eU6eScFnVGMK2zZ+iIp4pLsxRMVHtnyTyBBAAQgQcQi9piJQMREcyQC2SD+uBMohgnMhKHhKjAeFNwTGKWC24CEzqJHusyFBZfR4i5heIObaO4UJSxJ/GFmDFbopQDbRMHlFVepgsssI1NwKXiRK7ik1mgFALgsNNRGLQ9GQREIohFHTKphGv38Prn/NTcnIiIysdzOTX6EuSXREss1MQC87H58nCRvsT+rlfOzUgO4kL8jOdpd+RLJ/dpHriA3WwgAzDaNRODK6dWeaC2+6+9tZ0lfjXaZWp28+oj9T0rMVPPLjz4uLfkjzW8RxeUqP5phhtnE/f5z//vkPrnj5e57mdqWW3UzuM6X+wQADEqsiIgoaXEPAP7cEgX6EealucnDQF4B4MVZKDU5YdnnZHC7ztHkhGZcL0+uSPrcyoM63AaHz7HEyXjXoXO5E+fL4X15cHnkeHDIqwN7ifXbS+Xiaj9n3W0TL1d7M1E35+5QGS/n3vlKpR8t/JyzJK+U8qyfK10ZQu3iyN8mbDQtIlL35N2Gk5bRcZ4jUII4OK+GjJsjj2F77cynmFKzftmIxnhQCQ+PdGQGjLADJv755R4dWM38SLsfmaGBvun+VwxDCAeK453G5F3HmSm59E3yicXUYn2yPA78lKrGWcYY6CvoxYTDEhEVfVXJdn3nNGmL4X6W4jBs9zgflfPLPZEid5mC0H/xh2K6Q7yK/xkdRxEO+Brj5AgH5MA+MEVequSyCIdnVVejyxU6jkxEoGhxp2EpdyIDv909B7yWsSespm+ILe5GZy9nJoZLgjmyV17I3YsPUhfnH2Sc2ZH3J9LfM85+X+PN5CXH3l9Scnys86sPcZKncI2DryPlNc9FfzlSGxeX7iL0X4eATVO4ZPfc91srgJoJ3Elvnllvk2AAOBnZKk0jZ/vvLwC+djxY8/4S7j/97/dxkum4jVWOs9ZxtVYvGyUnhxQ1ch2+e7kVkcE8B+Y5VhmE9tvRU0je/sYV8LyPNocTdiSQ7ab7Y8vVmwmy8cczAPjR6nz/CPmt6Zza1rB383MILNsFOmpgTu1khAt/nX5Y7e2N7F7eWFui80phjYsy6dqagPPRtsuZqVrfbr+mPeHM4UTckkmu+obKWRVMjBlcNHfaLnedTHiPs0pABrjevilKBoAFp8/xySCqlBOHodmRFWn9xBwuF4f1a5ExOZ43+YrkNXKGWU0vxE4WwD1RioJR4J7aR+KaFICkGbLhSVX0Ou3Xu673KovMGQIBnIJH+/nrQD14Cd5nAMGWEtqlMEc9dairphRmYDaagres4WD5LzlwJ2K3cbD7rqwNNQ+88ZMPonIbwZ17rNrDUbVXapbVkzpHnbhkUTYxZd52+NB+VMMg3T5aKjsNAg/3DyXZyx/Ige8/Y/IJC6T4BiRYFYP/h/fNgsf0kQTLN7M7KSLyHgYIMEAKXHXCh58jgIEb4Aq4ENuKUYH5lTgHLlu72r6ZNPYaeHUmIiVwIhbXIoKzvcU3f6GIBtE6xUmty1/OlXnPLSatX1+9G11+xu+bJyeJjuNWtP8XAAaU05GKzlwAAAAASUVORK5CYII=";
 const printReceipt = (sale) => {
   // Thermal-friendly layout modelled on the shop's Loyverse receipt: solid black sans-serif text (no
   // grey, no thin monospace — those print faint on thermal paper), generous spacing, J$ prices,
@@ -6353,6 +6354,7 @@ const printReceipt = (sale) => {
     html,body{margin:0;padding:0;background:#fff;}
     body{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:600;line-height:1.35;color:#000;width:72mm;margin:0 auto;padding:3mm 1mm 6mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .c{text-align:center;}
+    .logo{width:62mm;max-width:100%;height:auto;display:block;margin:0 auto 4px;}
     .store{font-size:16px;font-weight:800;text-align:center;margin-top:2px;}
     .hdr{text-align:center;font-size:12px;font-weight:600;}
     .gap{height:8px;}
@@ -6369,7 +6371,7 @@ const printReceipt = (sale) => {
     .foot{display:flex;justify-content:space-between;align-items:flex-end;font-size:12px;font-weight:600;margin-top:10px;}
     .badge{display:inline-block;background:#000;color:#fff;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:800;margin:2px 0;}
   </style></head><body>
-  <div class="store">The Phone Plug</div>
+  <div class="c"><img class="logo" src="${RECEIPT_LOGO}" alt="The Phone Plug"></div>
   <div class="hdr">Shop 5D Hagley Park Plaza, Half Way Tree</div>
   <div class="hdr">Instagram: @phoneplug_ja</div>
   <div class="hdr">876-490-5515 or 876-672-2442</div>
@@ -6389,7 +6391,7 @@ const printReceipt = (sale) => {
   <div class="dots"></div>
   <div class="pol">${esc(buildWarrantyFooterText(sale))}</div>
   <div class="foot"><span>${esc(when)}</span><span>#${esc(sale.id)}</span></div>
-  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000);}<\/script>
+  <script>window.onload=()=>{setTimeout(()=>{window.print();setTimeout(()=>window.close(),1000);},200);}<\/script>
   </body></html>`;
   const w=window.open("","_blank","width=400,height=600");
   if(w){w.document.write(html);w.document.close();}
@@ -6412,6 +6414,20 @@ const getLabelSize = () => {
 // A scan of either the short code or the full IMEI finds the unit (see unitMatchesCode).
 const imeiShortCode = imei => { const d = String(imei || "").trim(); return d.length > 8 ? d.slice(0, 4) + d.slice(-4) : d; };
 const unitMatchesCode = (u, code) => !!(u && u.imei) && !!code && (String(u.imei).trim() === code || imeiShortCode(u.imei) === code);
+// Label names: a product can carry its own short "label name"; otherwise the full name is tidied only when it
+// is too long for the label — model codes (SM-G998U), the word "Galaxy" and bracketed notes come out first,
+// and as a last resort it is cut at a word boundary. The catalog and receipts keep the full name.
+const getLabelNameMax = () => { try { return parseInt(window.localStorage.getItem("tpp_label_namemax")) || 40; } catch { return 40; } };
+const setLabelNameMax = n => { try { window.localStorage.setItem("tpp_label_namemax", String(n)); } catch {} };
+const shortLabelName = (name, max = getLabelNameMax()) => {
+  let n = String(name || "").trim();
+  if (n.length <= max) return n;
+  n = n.replace(/\([^)]*\)/g, " ").replace(/\bSM-[A-Z0-9]+\b/gi, " ").replace(/\bGalaxy\b/gi, " ").replace(/\s+-\s+/g, " ").replace(/\s{2,}/g, " ").trim();
+  if (n.length <= max) return n;
+  n = n.replace(/\b5G\b/g, " ").replace(/\s{2,}/g, " ").trim();
+  if (n.length <= max) return n;
+  return n.slice(0, max).replace(/\s+\S*$/, "").trim();
+};
 // Variable-price items (price set at the till) print with no price on the label unless this is switched on.
 const getLabelShowVariablePrice = () => { try { return window.localStorage.getItem("tpp_label_showvar") === "1"; } catch { return false; } };
 const setLabelShowVariablePrice = on => { try { window.localStorage.setItem("tpp_label_showvar", on ? "1" : "0"); } catch {} };
@@ -6448,7 +6464,7 @@ const printBarcodeLabels = (items) => {
     const priceNum = parseFloat(it.price) || 0;
     const showPrice = priceNum > 0 && (!it.variable || showVarPrice);
     return `<div class="label">
-      <div class="lname">${(it.name || "").replace(/</g,"&lt;")}</div>
+      <div class="lname">${String(it.labelName || shortLabelName(it.name) || "").replace(/</g,"&lt;")}</div>
       ${showPrice ? `<div class="lprice">${fmtMoney(priceNum)}</div>` : ""}
       <div class="lbarcode">${barcodeSvg}</div>
       ${it.sub ? `<div class="lsub">${it.sub}</div>` : ""}
@@ -6552,12 +6568,26 @@ const getAvailableStock = (product) => {
 // The one place a brand-new catalog product gets built, so a product created from Receive Stock
 // looks exactly like one created by hand in the Catalog tab — same fields, same defaults — instead
 // of two slightly different shapes depending on which screen made it.
-const makeCatalogProduct = ({ name, category, price = 0, cost = 0, barcode = "", stock = 0, variable_price = false }) => ({
+// Product codes: SKU and barcode are the same short number (e.g. 10397). The next one is the highest
+// all-digit code already in the catalog + 1, so new items never clash with existing ones and never run to
+// the long product-id strings that made labels unscannable. Phones (IMEI items) are labelled by IMEI instead.
+const cleanCode = v => String(v == null ? "" : v).trim().replace(/^-+/, "");
+const nextProductCode = (catalog, taken = []) => {
+  let max = 10000; const used = new Set(taken.map(String));
+  (catalog || []).forEach(p => [p.sku, p.barcode].forEach(v => {
+    const c = cleanCode(v); if (c) used.add(c);
+    if (/^\d{4,8}$/.test(c)) max = Math.max(max, parseInt(c, 10));
+  }));
+  let n = max + 1; while (used.has(String(n))) n++;
+  return String(n);
+};
+const makeCatalogProduct = ({ name, category, price = 0, cost = 0, barcode = "", sku = "", stock = 0, variable_price = false }) => ({
   id: `prod-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
   name, category,
   price: parseFloat(price) || 0,
   cost: parseFloat(cost) || 0,
-  barcode: barcode || "",
+  barcode: barcode || sku || "",
+  sku: sku || barcode || "",
   stock: parseInt(stock) || 0,
   variable_price: !!variable_price,
   units: [],
@@ -10426,6 +10456,38 @@ function SettingsTab() {
     setLabelSize(w, h); setLabelSizeState({w,h});
     setLabelSaved(true); setTimeout(()=>setLabelSaved(false),2500);
   };
+  const [codeFix, setCodeFix] = useState(null); // {fillBarcode, stripDash, fillSku, generate}
+  const scanCodes = async () => {
+    const cat = await loadCatalog();
+    const c = { total: cat.length, fillBarcode: 0, stripDash: 0, fillSku: 0, generate: 0 };
+    cat.forEach(p => {
+      const imei = isImeiCategory(p.category);
+      if (/^-+\d/.test(String(p.barcode||"").trim())) c.stripDash++;
+      else if (!String(p.barcode||"").trim() && String(p.sku||"").trim()) c.fillBarcode++;
+      if (!String(p.sku||"").trim() && String(p.barcode||"").trim()) c.fillSku++;
+      if (!imei && !String(p.sku||"").trim() && !String(p.barcode||"").trim()) c.generate++;
+    });
+    setCodeFix(c);
+  };
+  const applyCodeFix = async () => {
+    const cat = await loadCatalog();
+    // codes already in use, so generated ones never collide
+    const taken = new Set(); cat.forEach(p => [p.sku,p.barcode].forEach(v => { const x=cleanCode(v); if(x) taken.add(x); }));
+    let working = [...cat], changed = 0;
+    working = working.map(p => {
+      let barcode = String(p.barcode||"").trim(), sku = String(p.sku||"").trim(), touched = false;
+      if (/^-+\d/.test(barcode)) { barcode = cleanCode(barcode); touched = true; }
+      if (!barcode && sku) { barcode = cleanCode(sku); touched = true; }
+      if (!sku && barcode) { sku = barcode; touched = true; }
+      if (!barcode && !sku && !isImeiCategory(p.category)) { const n = nextProductCode(working, [...taken]); barcode = n; sku = n; taken.add(n); touched = true; }
+      if (!touched) return p;
+      changed++; return { ...p, barcode, sku };
+    });
+    await saveCatalog(working);
+    setCodeFix(null);
+    alert(`✅ Updated ${changed} product(s). Barcode and SKU now match; nothing that already had a valid code was changed.`);
+  };
+  const [nameMax, setNameMaxState] = useState(()=>getLabelNameMax());
   const [showVarPrice, setShowVarPriceState] = useState(()=>getLabelShowVariablePrice());
   const saveOrderTplId = () => {
     setOrderTemplateId(orderTplId.trim());
@@ -10529,6 +10591,19 @@ function SettingsTab() {
         E(Btn,{onClick:saveLabelSize},"Save")
       ),
       labelSaved&&E("div",{style:{color:T.green,fontSize:13,fontWeight:600}},"✅ Label size saved!"),
+      E("div",{style:{marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}`}},
+        E("div",{style:{fontWeight:700,fontSize:13,marginBottom:4}},"Product barcodes"),
+        E("div",{style:{fontSize:12,color:T.muted,marginBottom:8}},"Barcode and SKU should be the same short number. This fills in missing barcodes from the SKU, removes a stray leading \"-\" (like -10213), and gives any accessory with no code the next free number. Existing valid codes are never changed."),
+        !codeFix?E(Btn,{variant:"ghost",onClick:scanCodes},"Check product barcodes")
+          :E("div",null,
+              E("div",{style:{fontSize:12,marginBottom:8}},`Will fix: ${codeFix.fillBarcode} missing barcode(s) · ${codeFix.stripDash} with a leading "-" · ${codeFix.fillSku} missing SKU(s) · ${codeFix.generate} with no code at all.`),
+              (codeFix.fillBarcode+codeFix.stripDash+codeFix.fillSku+codeFix.generate)>0
+                ?E(Btn,{onClick:applyCodeFix},"Fix them")
+                :E("div",{style:{color:T.green,fontSize:12,fontWeight:600}},"✅ Everything already matches."))),
+      E("div",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,marginTop:12}},
+        "Max characters in a label name:",
+        E(Input,{type:"number",value:nameMax,style:{width:80},onChange:e=>{const v=parseInt(e.target.value)||40;setNameMaxState(v);setLabelNameMax(v);}}),
+        E("span",{style:{fontSize:11,color:T.muted}},"Longer names are tidied automatically; you can also set a short label name on any product.")),
       E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,marginTop:12,cursor:"pointer"}},
         E("input",{type:"checkbox",checked:showVarPrice,onChange:e=>{setShowVarPriceState(e.target.checked);setLabelShowVariablePrice(e.target.checked);}}),
         "Show the price on labels for variable-price items (off = no price printed)")
@@ -10597,6 +10672,11 @@ function InventoryValuation({ phones }) {
   // or its product) so this matches the catalog, POS and Testing Queue — not the old tpp-phones list.
   const avail = [];
   products.filter(p=>isImeiCategory(p.category)).forEach(p=>(p.units||[]).forEach(u=>{ if(u.status==="Available") avail.push({p,u}); }));
+  const holdUnits = (st)=>{ const a=[]; products.filter(p=>isImeiCategory(p.category)).forEach(p=>(p.units||[]).forEach(u=>{ if(u.status===st) a.push({p,u}); })); return a; };
+  const testingU = holdUnits("Under Testing"), repairU = holdUnits("Needs Repair");
+  const uCost = a=>a.reduce((s,x)=>s+(parseFloat(x.u.cost)||parseFloat(x.p.cost)||0),0);
+  const uRetail = a=>a.reduce((s,x)=>s+(parseFloat(x.u.sellPrice)||parseFloat(x.p.price)||0),0);
+  const testingCost=uCost(testingU), testingRetail=uRetail(testingU), repairCost=uCost(repairU), repairRetail=uRetail(repairU);
   const phoneCost = avail.reduce((s,x)=>s+(parseFloat(x.u.cost)||parseFloat(x.p.cost)||0),0);
   const phoneRetail = avail.reduce((s,x)=>s+(parseFloat(x.u.sellPrice)||parseFloat(x.p.price)||0),0);
   const catGroups = {};
@@ -10607,7 +10687,7 @@ function InventoryValuation({ phones }) {
   });
   const catCost=Object.values(catGroups).reduce((s,g)=>s+g.cost,0);
   const catRetail=Object.values(catGroups).reduce((s,g)=>s+g.retail,0);
-  const grandCost=phoneCost+catCost; const grandRetail=phoneRetail+catRetail;
+  const grandCost=phoneCost+catCost+testingCost+repairCost; const grandRetail=phoneRetail+catRetail+testingRetail+repairRetail;
   const sv=view==="cost";
   // Repair profit rollup: finalCost minus parts cost, for completed tickets that were priced.
   // Falls back to summing partsUsed directly for older tickets saved before partsCostTotal existed.
@@ -10629,11 +10709,16 @@ function InventoryValuation({ phones }) {
     E("div",{style:{background:T.blue,borderRadius:14,padding:"20px 24px",marginBottom:20,color:"#fff"}},
       E("div",{style:{fontSize:13,opacity:0.8,marginBottom:4}},sv?"Total at cost":"Total at retail"),
       E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:32}},fmtMoney(sv?grandCost:grandRetail)),
+      E("div",{style:{fontSize:11,opacity:0.7,marginTop:2}},"Includes phones under testing and needing repair (shown separately below)"),
       sv&&E("div",{style:{fontSize:12,opacity:0.7,marginTop:4}},`Retail: ${fmtMoney(grandRetail)} · Margin: ${fmtMoney(grandRetail-grandCost)}`)
     ),
     E(R2,null,
       E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`📱 Phones (${avail.length})`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(sv?phoneCost:phoneRetail))),
       E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`📦 Catalog`),E("div",{style:{fontWeight:700,fontSize:18,color:T.blue}},fmtMoney(sv?catCost:catRetail)))
+    ),
+    E(R2,{style:{marginTop:12}},
+      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`🧪 Under Testing (${testingU.length})`),E("div",{style:{fontWeight:700,fontSize:18,color:T.amber}},fmtMoney(sv?testingCost:testingRetail))),
+      E(Card,null,E("div",{style:{fontSize:13,color:T.muted,marginBottom:4}},`🔧 Needs Repair (${repairU.length})`),E("div",{style:{fontWeight:700,fontSize:18,color:T.red}},fmtMoney(sv?repairCost:repairRetail)))
     ),
     E(Card,{style:{marginTop:16}},
       E("div",{style:{fontSize:13,color:T.muted,marginBottom:8,fontWeight:700}},`🔧 Repair Profit (${pricedTickets.length} priced ticket${pricedTickets.length===1?"":"s"})`),
@@ -11109,6 +11194,7 @@ function PurchasesTab() {
   const [catalog, setCatalog] = useState([]);
   const [view, setView] = useState("pos");
   const [viewingPO, setViewingPO] = useState(null);
+  const [labelPO, setLabelPO] = useState(null); // { po, rows:[{key,kind,product,unit,name,sub,qty,checked,note}] }
   const [poTab, setPoTab] = useState("pending");
   const [filter, setFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(todayStr().slice(0,7));
@@ -11279,6 +11365,67 @@ function PurchasesTab() {
   const allTypes = ["phones","accessories","parts","gadgets","mixture"];
 
   // ── PO Detail Modal ─────────────────────────────────────────────────────────
+  // Reprint labels for everything that came in on a PO: each phone (by IMEI) and each accessory line.
+  // Phones already sold / returned / written off start unticked so labels aren't printed for stock that's gone.
+  const openPOLabels = (po) => {
+    const impact = findPOImpact(catalog, history, po);
+    const rows = [];
+    impact.units.forEach(({ product, unit }) => {
+      const gone = ["Sold","Returned to Supplier","Damaged"].includes(unit.status);
+      rows.push({ key:`u-${unit.id}`, kind:"phone", product, unit, name:product.name, sub:`IMEI •${String(unit.imei||"").slice(-4)} · ${unit.status}`, qty:1, checked:!gone && !!unit.imei });
+    });
+    impact.stockAdjustments.forEach(({ product, qty }) => {
+      rows.push({ key:`s-${product.id}`, kind:"stock", product, name:product.name, sub:`Accessory · received ${qty}`, qty, checked:qty>0 });
+    });
+    if (!rows.length) { alert("Couldn't find any phones or accessories linked to this PO. If it was received before PO links were recorded, print from the Catalog instead."); return; }
+    setViewingPO(null); setLabelPO({ po, rows });
+  };
+  const printPOLabels = async () => {
+    const chosen = labelPO.rows.filter(r => r.checked && (parseInt(r.qty)||0) > 0);
+    if (!chosen.length) { alert("Tick at least one item."); return; }
+    let cat = catalog, assigned = false;
+    const items = [];
+    chosen.forEach(r => {
+      const prod = cat.find(p => p.id === r.product.id) || r.product;
+      if (r.kind === "phone") {
+        items.push({ name:prod.name, labelName:prod.labelName, price:r.unit.sellPrice||prod.price||0, variable:!!prod.variable_price, code:imeiShortCode(r.unit.imei), sub:`IMEI •${String(r.unit.imei).slice(-4)}` });
+      } else {
+        let code = prod.barcode || prod.sku;
+        if (!code) { code = nextProductCode(cat); cat = cat.map(p => p.id === prod.id ? { ...p, barcode:code, sku:code } : p); assigned = true; }
+        for (let i = 0; i < (parseInt(r.qty)||0); i++) items.push({ name:prod.name, labelName:prod.labelName, price:prod.price||0, variable:!!prod.variable_price, code });
+      }
+    });
+    if (assigned) { await saveCatalog(cat); setCatalog(cat); }
+    setLabelPO(null);
+    printBarcodeLabels(items);
+  };
+  const LabelPOModal = () => labelPO && E("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
+    E("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:560, width:"100%", maxHeight:"88vh", overflowY:"auto" } },
+      E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 } },
+        E("div", { style:{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:18 } }, "🏷️ Print labels"),
+        E("button", { onClick:()=>setLabelPO(null), style:{ background:"none", border:"none", fontSize:20, cursor:"pointer" } }, "✕")
+      ),
+      E("div", { style:{ fontSize:12, color:T.muted, marginBottom:12 } }, `${labelPO.po.supplier||""}${labelPO.po.poRef?` — ${labelPO.po.poRef}`:""}. Labels use the current catalog price (variable-price items follow your label setting).`),
+      E("div", { style:{ display:"flex", gap:8, marginBottom:10 } },
+        E(Btn,{variant:"ghost",style:{fontSize:11,padding:"4px 10px"},onClick:()=>setLabelPO(l=>({...l,rows:l.rows.map(r=>({...r,checked:true}))}))},"Tick all"),
+        E(Btn,{variant:"ghost",style:{fontSize:11,padding:"4px 10px"},onClick:()=>setLabelPO(l=>({...l,rows:l.rows.map(r=>({...r,checked:false}))}))},"Untick all")
+      ),
+      E("div", { style:{ display:"flex", flexDirection:"column", gap:4, marginBottom:16 } },
+        labelPO.rows.map(r => E("div", { key:r.key, style:{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", border:`1px solid ${T.border}`, borderRadius:8, opacity:r.checked?1:0.6 } },
+          E("input", { type:"checkbox", checked:r.checked, onChange:e=>setLabelPO(l=>({...l,rows:l.rows.map(x=>x.key===r.key?{...x,checked:e.target.checked}:x)})) }),
+          E("div", { style:{ flex:1, minWidth:0 } },
+            E("div", { style:{ fontWeight:600, fontSize:13 } }, r.name),
+            E("div", { style:{ fontSize:11, color:T.muted } }, r.sub)),
+          r.kind==="stock" && E("div", { style:{ display:"flex", alignItems:"center", gap:4, fontSize:11 } }, "Labels:",
+            E("input", { type:"number", min:0, value:r.qty, style:{ width:56, padding:"4px 6px", border:`1px solid ${T.border}`, borderRadius:6 }, onChange:e=>setLabelPO(l=>({...l,rows:l.rows.map(x=>x.key===r.key?{...x,qty:e.target.value}:x)})) }))
+        ))
+      ),
+      E("div", { style:{ display:"flex", gap:8 } },
+        E(Btn,{variant:"ghost",onClick:()=>setLabelPO(null)},"Cancel"),
+        E(Btn,{onClick:printPOLabels},`🖨️ Print ${labelPO.rows.filter(r=>r.checked).reduce((n,r)=>n+(r.kind==="phone"?1:(parseInt(r.qty)||0)),0)} label(s)`)
+      )
+    )
+  );
   const PODetail = () => viewingPO && E("div", { style:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 } },
     E("div", { style:{ background:"#fff", borderRadius:16, padding:24, maxWidth:560, width:"100%", maxHeight:"88vh", overflowY:"auto" } },
       E("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 } },
@@ -11308,6 +11455,7 @@ function PurchasesTab() {
       E("div", { style:{ display:"flex", gap:8 } },
         E(Btn,{variant:"ghost",onClick:()=>setViewingPO(null)},"Close"),
         viewingPO.status!=="Voided"&&viewingPO.status!=="Received"&&E(Btn,{variant:"ghost",style:{color:T.green},onClick:()=>{setViewingPO(null);setView("receive");}},"📥 Receive Stock"),
+        viewingPO.status==="Received"&&E(Btn,{variant:"ghost",onClick:()=>openPOLabels(viewingPO)},"🏷️ Print labels"),
         viewingPO.status!=="Voided"&&E(Btn,{variant:"danger",onClick:()=>voidPO(viewingPO.id)},"🚫 Void")
       )
     )
@@ -11442,6 +11590,7 @@ function PurchasesTab() {
 
   return E("div",{style:{maxWidth:720,margin:"0 auto"}},
     E(PODetail,null),
+    E(LabelPOModal,null),
     E(VoidReviewModal,null),
     // AI Invoice modal
     view==="ai"&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}},
@@ -11643,7 +11792,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // "Attributing To" dropdown on this line, never a silent name/category string match.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode, variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || (isImei ? "" : nextProductCode(updatedCatalog)), variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Add units
@@ -11671,7 +11820,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           // Non-IMEI: just add to stock count — same explicit attribution as the IMEI branch above.
           let product = line.matchedProductId ? updatedCatalog.find(p=>p.id===line.matchedProductId) : null;
           if (!product) {
-            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode, variable_price: sellPriceBlank });
+            product = makeCatalogProduct({ name: line.name, category: line.category, price: line.sellPrice, cost: landed(line.unitCost), barcode: line.barcode || (isImei ? "" : nextProductCode(updatedCatalog)), variable_price: sellPriceBlank });
             updatedCatalog = [product, ...updatedCatalog];
           }
           // Weighted-average cost across what's already on hand and what just arrived, rather than
@@ -11855,7 +12004,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [expandedProduct, setExpandedProduct] = useState(null);
-  const emptyForm = () => ({ name:"", category:"Like New Samsung", price:"", cost:"", barcode:"", stock:"", variable_price:false });
+  const emptyForm = () => ({ name:"", labelName:"", category:"Like New Samsung", price:"", cost:"", barcode:"", stock:"", variable_price:false });
   const [form, setFormS] = useState(emptyForm());
   const setF = (k,v) => setFormS(p=>({...p,[k]:v}));
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState(null); // product id currently uploading
@@ -11961,8 +12110,8 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
     if (!(parseFloat(form.cost) > 0)) { alert("Cost is required (greater than 0) — it drives COGS, margins and inventory valuation."); return; }
     const isImei = isImeiCategory(form.category);
     const product = editingProduct
-      ? { ...editingProduct, ...form, price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
-      : { ...makeCatalogProduct({ name:form.name, category:form.category, price:form.price, cost:form.cost, barcode:form.barcode, stock:isImei?0:form.stock, variable_price:form.variable_price }) };
+      ? { ...editingProduct, ...form, sku:(form.barcode||"").trim()||editingProduct.sku||"", price:parseFloat(form.price)||0, cost:parseFloat(form.cost)||0, stock:isImei?(editingProduct.units||[]).filter(u=>u.status==="Available").length:parseInt(form.stock)||0, updatedAt:new Date().toISOString() }
+      : { labelName:(form.labelName||"").trim(), ...makeCatalogProduct({ name:form.name, category:form.category, price:form.price, cost:form.cost, barcode:(form.barcode||"").trim() || (isImei ? "" : nextProductCode(catalog)), stock:isImei?0:form.stock, variable_price:form.variable_price }) };
     const updated = editingProduct ? catalog.map(p=>p.id===editingProduct.id?product:p) : [product,...catalog];
     await saveCatalogFn(updated);
     setFormS(emptyForm()); setShowAddForm(false); setEditingProduct(null);
@@ -11982,7 +12131,8 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
         E(Field,{label:"Price (JMD)"},E(Input,{type:"number",value:form.price,onChange:e=>setF("price",e.target.value),placeholder:"0"})),
         E(Field,{label:"Cost (JMD)"},E(Input,{type:"number",value:form.cost,onChange:e=>setF("cost",e.target.value),placeholder:"0"})),
         !isImeiCategory(form.category)&&E(Field,{label:"Stock Qty"},E(Input,{type:"number",value:form.stock,onChange:e=>setF("stock",e.target.value),placeholder:"0"})),
-        E(Field,{label:"Barcode"},E(Input,{value:form.barcode||"",onChange:e=>setF("barcode",e.target.value),placeholder:"Optional"})),
+        E(Field,{label:"Barcode"},E(Input,{value:form.barcode||"",onChange:e=>setF("barcode",e.target.value),placeholder:"Optional — auto-assigned if blank"})),
+        E(Field,{label:"Label name (short, optional)"},E(Input,{value:form.labelName||"",onChange:e=>setF("labelName",e.target.value),placeholder:shortLabelName(form.name)||"Printed on labels instead of the full name"})),
         E(Field,{label:"Variable price?"},E("label",{style:{display:"flex",alignItems:"center",gap:6,fontSize:13,cursor:"pointer",marginTop:8}},E("input",{type:"checkbox",checked:!!form.variable_price,onChange:e=>setF("variable_price",e.target.checked)}),"Yes — price set at sale time"))
       ),
       isImeiCategory(form.category)&&E("div",{style:{background:T.blueLt,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.blue,marginBottom:12}},"📱 IMEI-tracked product — individual units managed in Receive Stock."),
@@ -12032,16 +12182,16 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                       const qty=parseInt(qtyStr)||0; if(qty<=0)return;
                       // A product with no barcode yet gets one assigned from its own catalog id, so the
                       // label printed today can actually be scanned and matched later.
-                      let code=product.barcode;
+                      let code=product.barcode||product.sku;
                       if(!code){
-                        code=product.id;
-                        await saveCatalogFn(catalog.map(p=>p.id===product.id?{...p,barcode:code}:p));
+                        code=nextProductCode(catalog);
+                        await saveCatalogFn(catalog.map(p=>p.id===product.id?{...p,barcode:code,sku:code}:p));
                       }
-                      const items=Array.from({length:qty},()=>({name:product.name,price:product.price||0,variable:!!product.variable_price,code}));
+                      const items=Array.from({length:qty},()=>({name:product.name,labelName:product.labelName,price:product.price||0,variable:!!product.variable_price,code}));
                       printBarcodeLabels(items);
                     },style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🏷️"),
                     E("button",{onClick:e=>{e.stopPropagation();pickPhotoFor(product);},disabled:uploadingPhotoFor===product.id,style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},uploadingPhotoFor===product.id?"⏳":"📷"),
-                    E("button",{onClick:e=>{e.stopPropagation();setEditingProduct(product);setFormS({name:product.name,category:product.category,price:String(product.price||""),cost:String(product.cost||""),barcode:product.barcode||"",stock:String(product.stock||""),variable_price:!!product.variable_price});setShowAddForm(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✏️"),
+                    E("button",{onClick:e=>{e.stopPropagation();setEditingProduct(product);setFormS({name:product.name,labelName:product.labelName||"",category:product.category,price:String(product.price||""),cost:String(product.cost||""),barcode:product.barcode||"",stock:String(product.stock||""),variable_price:!!product.variable_price});setShowAddForm(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✏️"),
                     E("button",{onClick:async e=>{e.stopPropagation();if(!confirm(`Remove "${product.name}"?`))return;await saveCatalogFn(catalog.filter(p=>p.id!==product.id));},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🗑️")
                   )
                 ),
@@ -12065,7 +12215,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                               onChange:e=>{ e.stopPropagation(); changeUnitStatus(product, ui, e.target.value); },
                               style:{width:"auto",fontSize:11,padding:"3px 6px",color:unit.status==="Available"?T.green:unit.status==="Sold"?T.muted:unit.status==="Under Testing"?T.amber:T.red,fontWeight:600}
                             }, PHONE_UNIT_STATUSES.map(s=>E("option",{key:s,value:s},s))),
-                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,price:unit.sellPrice||product.price||0,variable:!!product.variable_price,code:imeiShortCode(unit.imei),sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
+                            unit.imei&&E("button",{onClick:e=>{e.stopPropagation();printBarcodeLabels([{name:product.name,labelName:product.labelName,price:unit.sellPrice||product.price||0,variable:!!product.variable_price,code:imeiShortCode(unit.imei),sub:`IMEI •${unit.imei.slice(-4)}`}]);},style:{background:"#F3F4F6",border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,cursor:"pointer"}},"🏷️"),
                             E("button",{
                               onClick:e=>{ e.stopPropagation(); setMoveTargetId(""); setMoveUnit(isMovingThis?null:{productId:product.id,unitIdx:ui}); },
                               disabled:busyUnit===busyKey,
