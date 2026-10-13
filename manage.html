@@ -6323,7 +6323,117 @@ const sendOrderEmail = async (sale, overrideEmail) => {
 };
 
 const RECEIPT_LOGO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAbgAAADmAQAAAACPQq0tAAAEwUlEQVR42u2avXLjOAzH/0A0iYrMRmU66xFSbhc9Sh4h7VVhZq7Ych9hi3sQudsyD3CF3eU6eScFnVGMK2zZ+iIp4pLsxRMVHtnyTyBBAAQgQcQi9piJQMREcyQC2SD+uBMohgnMhKHhKjAeFNwTGKWC24CEzqJHusyFBZfR4i5heIObaO4UJSxJ/GFmDFbopQDbRMHlFVepgsssI1NwKXiRK7ik1mgFALgsNNRGLQ9GQREIohFHTKphGv38Prn/NTcnIiIysdzOTX6EuSXREss1MQC87H58nCRvsT+rlfOzUgO4kL8jOdpd+RLJ/dpHriA3WwgAzDaNRODK6dWeaC2+6+9tZ0lfjXaZWp28+oj9T0rMVPPLjz4uLfkjzW8RxeUqP5phhtnE/f5z//vkPrnj5e57mdqWW3UzuM6X+wQADEqsiIgoaXEPAP7cEgX6EealucnDQF4B4MVZKDU5YdnnZHC7ztHkhGZcL0+uSPrcyoM63AaHz7HEyXjXoXO5E+fL4X15cHnkeHDIqwN7ifXbS+Xiaj9n3W0TL1d7M1E35+5QGS/n3vlKpR8t/JyzJK+U8qyfK10ZQu3iyN8mbDQtIlL35N2Gk5bRcZ4jUII4OK+GjJsjj2F77cynmFKzftmIxnhQCQ+PdGQGjLADJv755R4dWM38SLsfmaGBvun+VwxDCAeK453G5F3HmSm59E3yicXUYn2yPA78lKrGWcYY6CvoxYTDEhEVfVXJdn3nNGmL4X6W4jBs9zgflfPLPZEid5mC0H/xh2K6Q7yK/xkdRxEO+Brj5AgH5MA+MEVequSyCIdnVVejyxU6jkxEoGhxp2EpdyIDv909B7yWsSespm+ILe5GZy9nJoZLgjmyV17I3YsPUhfnH2Sc2ZH3J9LfM85+X+PN5CXH3l9Scnys86sPcZKncI2DryPlNc9FfzlSGxeX7iL0X4eATVO4ZPfc91srgJoJ3Elvnllvk2AAOBnZKk0jZ/vvLwC+djxY8/4S7j/97/dxkum4jVWOs9ZxtVYvGyUnhxQ1ch2+e7kVkcE8B+Y5VhmE9tvRU0je/sYV8LyPNocTdiSQ7ab7Y8vVmwmy8cczAPjR6nz/CPmt6Zza1rB383MILNsFOmpgTu1khAt/nX5Y7e2N7F7eWFui80phjYsy6dqagPPRtsuZqVrfbr+mPeHM4UTckkmu+obKWRVMjBlcNHfaLnedTHiPs0pABrjevilKBoAFp8/xySCqlBOHodmRFWn9xBwuF4f1a5ExOZ43+YrkNXKGWU0vxE4WwD1RioJR4J7aR+KaFICkGbLhSVX0Ou3Xu673KovMGQIBnIJH+/nrQD14Cd5nAMGWEtqlMEc9dairphRmYDaagres4WD5LzlwJ2K3cbD7rqwNNQ+88ZMPonIbwZ17rNrDUbVXapbVkzpHnbhkUTYxZd52+NB+VMMg3T5aKjsNAg/3DyXZyx/Ige8/Y/IJC6T4BiRYFYP/h/fNgsf0kQTLN7M7KSLyHgYIMEAKXHXCh58jgIEb4Aq4ENuKUYH5lTgHLlu72r6ZNPYaeHUmIiVwIhbXIoKzvcU3f6GIBtE6xUmty1/OlXnPLSatX1+9G11+xu+bJyeJjuNWtP8XAAaU05GKzlwAAAAASUVORK5CYII=";
+
+// ── Android / Bluetooth receipt printing via the RawBT app ──────────────────────────────────────
+// Android Chrome can't send the browser print dialog to a Bluetooth thermal printer. RawBT (free
+// Android app) holds the Bluetooth connection; we hand it raw ESC/POS bytes, like Loyverse does.
+const getReceiptPrintMode = () => { try { return window.localStorage.getItem("tpp_print_mode") || "auto"; } catch { return "auto"; } };
+const setReceiptPrintMode = m => { try { window.localStorage.setItem("tpp_print_mode", m); } catch {} };
+const receiptUseRawBT = () => { const m = getReceiptPrintMode(); if (m==="rawbt") return true; if (m==="browser") return false; return /Android/i.test(navigator.userAgent||""); };
+const getReceiptCols = () => { try { return parseInt(window.localStorage.getItem("tpp_receipt_cols")) || 48; } catch { return 48; } };
+
+let __logoBitmap = null;
+const getLogoBitmap = () => new Promise(resolve => {
+  if (__logoBitmap) return resolve(__logoBitmap);
+  try {
+    const img = new Image();
+    img.onload = () => {
+      const w = 288, h = Math.round(img.height * w / img.width);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0,0,w,h); x.drawImage(img,0,0,w,h);
+      const d = x.getImageData(0,0,w,h).data, bpr = w/8, out = new Uint8Array(bpr*h);
+      for (let yy=0; yy<h; yy++) for (let xx=0; xx<w; xx++) { const i=(yy*w+xx)*4; if ((d[i]+d[i+1]+d[i+2])/3 < 140) out[yy*bpr+(xx>>3)] |= (0x80 >> (xx&7)); }
+      __logoBitmap = { bpr, h, data: out }; resolve(__logoBitmap);
+    };
+    img.onerror = () => resolve(null);
+    img.src = RECEIPT_LOGO;
+  } catch { resolve(null); }
+});
+
+const buildReceiptEscPos = (sale, logo) => {
+  const COLS = getReceiptCols();
+  const bytes = [];
+  const push = (...b) => b.forEach(v => bytes.push(v));
+  const clean = t => String(t==null?"":t).replace(/[—–]/g,"-").replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\x20-\x7E\n]/g,"?");
+  const text = t => { const c = clean(t); for (let i=0;i<c.length;i++) bytes.push(c.charCodeAt(i)); };
+  const line = (t="") => { text(t); push(0x0A); };
+  const J = n => "J$" + (parseFloat(n)||0).toLocaleString("en-JM",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const JS = n => (n<0?"-":"") + J(Math.abs(n));
+  const wrap = (t, w) => { const out=[]; String(t==null?"":t).split("\n").forEach(par=>{ let cur=""; par.split(/\s+/).filter(Boolean).forEach(word=>{ while(word.length>w){ if(cur){out.push(cur);cur="";} out.push(word.slice(0,w)); word=word.slice(w); } if(!cur) cur=word; else if((cur+" "+word).length<=w) cur+=" "+word; else { out.push(cur); cur=word; } }); out.push(cur); }); return out; };
+  const row = (l, r, w=COLS) => { l=clean(l); r=clean(r); const room=Math.max(4,w-r.length-1); const ls=wrap(l,room); ls.forEach((ln,i)=>{ if(i===ls.length-1) line(ln+" ".repeat(Math.max(1,w-ln.length-r.length))+r); else line(ln); }); };
+  const dash = () => line("-".repeat(COLS));
+  const center = () => push(0x1B,0x61,1), left = () => push(0x1B,0x61,0);
+  const bold = on => push(0x1B,0x45,on?1:0), big = on => push(0x1D,0x21,on?0x11:0x00);
+
+  push(0x1B,0x40);
+  center();
+  if (logo) { push(0x1D,0x76,0x30,0x00, logo.bpr&255, logo.bpr>>8, logo.h&255, logo.h>>8); logo.data.forEach(v=>bytes.push(v)); push(0x0A); }
+  else { bold(true); line("The Phone Plug"); bold(false); }
+  line("Shop 5D Hagley Park Plaza, Half Way Tree");
+  line("Instagram: @phoneplug_ja");
+  line("876-490-5515 or 876-672-2442");
+  line("support@phoneplugja.com");
+  [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).forEach(t=>{ line(); bold(true); line("*** "+t+" ***"); bold(false); });
+  left(); line();
+  const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean);
+  line("Employee: " + (parts.length ? parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "") : "-"));
+  if (sale.customerName) wrap("Customer: "+sale.customerName, COLS).forEach(l=>line(l));
+  if (sale.customerPhone) line(sale.customerPhone);
+  if (sale.deliveryZone && sale.deliveryZone!=="None") wrap("Delivery: "+sale.deliveryZone+(sale.deliveryAddress?" - "+sale.deliveryAddress:""), COLS).forEach(l=>line(l));
+  dash();
+  (sale.items||[]).forEach(i=>{
+    const qty=i.qty||1, price=parseFloat(i.price)||0;
+    row(i.name||"Item", J(price*qty));
+    line("  "+qty+" x "+J(price));
+    if (i.imei) line("  IMEI: "+i.imei);
+    if (i.note) wrap(i.note, COLS-2).forEach(l=>line("  "+l));
+  });
+  const discs = (sale.discounts||[]).filter(d=>d.amount>0);
+  if (discs.length) { dash(); discs.forEach(d=>row(d.label||d.reason||(d.type?d.type+" discount":"Discount"), "-"+J(d.amount))); }
+  dash();
+  bold(true); push(0x1D,0x21,0x01); row("Total", JS(sale.total), Math.floor(COLS)); push(0x1D,0x21,0x00); bold(false);
+  if (sale.isDeposit && sale.ticketId) line("Ticket: "+sale.ticketId+" | Balance due on collection");
+  [["Cash",sale.cash],["Debit Card",sale.debit_card],["Credit Card",sale.credit_card],["NCB Transfer",sale.ncb_transfer],["Scotia Transfer",sale.scotia_transfer],["Other",sale.other_payment]].filter(([,v])=>parseFloat(v)>0).forEach(([l,v])=>row(l,J(v)));
+  if (sale.change>0) row("Change", J(sale.change));
+  dash();
+  center();
+  wrap(buildWarrantyFooterText(sale), COLS).forEach(l=>line(l));
+  line();
+  let when=""; try { const d=new Date(sale.createdAt||Date.now()); when=d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}); } catch {}
+  left(); row(when, "#"+sale.id);
+  push(0x0A,0x0A,0x0A,0x0A);
+  push(0x1D,0x56,0x42,0x00); // feed + partial cut
+  return new Uint8Array(bytes);
+};
+
+const sendToRawBT = (u8) => {
+  let bin = ""; for (let i=0;i<u8.length;i+=0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i,i+0x8000));
+  window.location.href = "intent:base64," + btoa(bin) + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+};
+const printReceiptRawBT = async (sale) => { const logo = await getLogoBitmap(); sendToRawBT(buildReceiptEscPos(sale, logo)); };
+
+function ReceiptPrintSettings() {
+  const E = React.createElement;
+  const [mode, setMode] = useState(getReceiptPrintMode());
+  const [cols, setCols] = useState(getReceiptCols());
+  const testSale = { id:"TEST", servedBy:"Test User", createdAt:new Date().toISOString(), items:[{name:"Test item (receipt print check)",qty:1,price:1000}], total:1000, cash:1000 };
+  return E(Card,{style:{marginBottom:20}},
+    E(ST,null,"🧾 Receipt Printing (Android / Bluetooth)"),
+    E("div",{style:{fontSize:13,color:T.muted,marginBottom:12,lineHeight:1.6}},
+      "Phones and tablets can't use the normal print dialog with a Bluetooth thermal printer. Install the free ",E("strong",null,"RawBT"),
+      " app from the Play Store, pair your Munbyn printer inside RawBT once, then receipts print with one tap (just like Loyverse). Laptops keep using the normal print window."),
+    E("div",{style:{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap",marginBottom:10}},
+      E(Field,{label:"Print method"},E(Sel,{value:mode,onChange:e=>{setMode(e.target.value);setReceiptPrintMode(e.target.value);}},
+        E("option",{value:"auto"},"Automatic (RawBT on Android, normal print elsewhere)"),
+        E("option",{value:"rawbt"},"Always RawBT"),
+        E("option",{value:"browser"},"Always normal print window"))),
+      E(Field,{label:"Characters per line"},E(Input,{type:"number",value:cols,style:{width:90},onChange:e=>{const v=parseInt(e.target.value)||48;setCols(v);try{window.localStorage.setItem("tpp_receipt_cols",String(v));}catch{}}}))),
+    E(Btn,{variant:"ghost",onClick:()=>printReceipt(testSale)},"🖨️ Print a test receipt"),
+    E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"If lines wrap or run off the paper, lower the characters per line (48 suits 80mm paper, 42 is a safe alternative). In RawBT settings, set the paper width to 80mm.")
+  );
+}
 const printReceipt = (sale) => {
+  if (receiptUseRawBT()) { printReceiptRawBT(sale); return; }
   // Thermal-friendly layout modelled on the shop's Loyverse receipt: solid black sans-serif text (no
   // grey, no thin monospace — those print faint on thermal paper), generous spacing, J$ prices,
   // employee/customer block, itemised lines, big bold total, centred policy text, receipt # and date at the bottom.
@@ -10608,6 +10718,7 @@ function SettingsTab() {
         E("input",{type:"checkbox",checked:showVarPrice,onChange:e=>{setShowVarPriceState(e.target.checked);setLabelShowVariablePrice(e.target.checked);}}),
         "Show the price on labels for variable-price items (off = no price printed)")
     ),
+    E(ReceiptPrintSettings,null),
     E(Card,{style:{marginBottom:20}},
       E(ST,null,"🖼️ Product Photos (Cloudinary)"),
       E("div",{style:{fontSize:13,color:T.muted,marginBottom:12,lineHeight:1.7}},
