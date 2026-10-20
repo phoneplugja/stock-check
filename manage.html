@@ -6432,6 +6432,114 @@ const sendToRawBT = (u8) => {
 };
 const printReceiptRawBT = async (sale) => { const logo = await getLogoBitmap(); sendToRawBT(buildReceiptEscPos(sale, logo)); };
 
+// ── Start fresh: reset chosen areas of test data (products, customers, staff and settings are never touched) ──
+const RESET_AREAS = [
+  { id:"sales",    label:"Sales & receipts (includes returns and exchanges)", keys:["tpp-sales"] },
+  { id:"parked",   label:"Parked sales", keys:["tpp-parked-sales"] },
+  { id:"credits",  label:"Store credits", keys:["tpp-store-credits"] },
+  { id:"tickets",  label:"Repair tickets", keys:["tpp-tickets-v1"] },
+  { id:"deposits", label:"Repair deposits", keys:["tpp-deposits"] },
+  { id:"bookings", label:"Online bookings", keys:["tpp-bookings"] },
+  { id:"eod",      label:"End-of-day (EOD) history", keys:["tpp-eod"] },
+  { id:"shifts",   label:"Shifts", keys:["tpp-shifts"] },
+  { id:"expenses", label:"Expenses", keys:["tpp-expenses","tpp-expenses-inventory-purchase-backup"] },
+  { id:"reimb",    label:"Reimbursements", keys:["tpp-reimbursements"] },
+  { id:"debts",    label:"Debts & debt payments", keys:["tpp-debts","tpp-debt-payments2"] },
+  { id:"rental",   label:"Rental income", keys:["tpp-rental-income"] },
+  { id:"pos",      label:"Purchase orders", keys:["tpp-purchase-orders"] },
+  { id:"ledger",   label:"Purchases ledger", keys:["tpp-purchases-ledger"] },
+  { id:"receives", label:"Stock receives", keys:["tpp-stock-receives"] },
+  { id:"counts",   label:"Inventory counts", keys:["tpp-count-history","tpp-count-pending"] },
+  { id:"todos",    label:"To-do list", keys:["tpp-todos"] }
+];
+const BACKUP_KEYS = ["tpp-sales","tpp-parked-sales","tpp-store-credits","tpp-tickets-v1","tpp-deposits","tpp-bookings","tpp-eod","tpp-shifts","tpp-expenses","tpp-expenses-inventory-purchase-backup","tpp-reimbursements","tpp-debts","tpp-debt-payments2","tpp-rental-income","tpp-purchase-orders","tpp-purchases-ledger","tpp-stock-receives","tpp-count-history","tpp-count-pending","tpp-todos","tpp-phones","tpp-phones-v1","tpp-customers","tpp-staff","tpp-warranty-settings"];
+
+function StartFreshTool() {
+  const E = React.createElement;
+  const [open, setOpen] = useState(false);
+  const [counts, setCounts] = useState(null);
+  const [picked, setPicked] = useState({});
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState("");
+  const countOf = v => Array.isArray(v) ? v.length : (v && typeof v === "object" ? Object.keys(v).length : (v ? 1 : 0));
+  const scan = async () => {
+    setBusy("Checking what's stored…");
+    try {
+      const out = {};
+      for (const a of RESET_AREAS) {
+        let n = 0;
+        for (const k of a.keys) { try { n += countOf(await loadStrict(k)); } catch {} }
+        if (a.units) { try { (await loadCatalog()).forEach(p => { if (isImeiCategory(p.category)) n += (p.units||[]).length; }); } catch {} }
+        out[a.id] = n;
+      }
+      setCounts(out);
+    } finally { setBusy(""); }
+  };
+  useEffect(() => { if (open && !counts) scan(); }, [open]);
+  const chosen = RESET_AREAS.filter(a => picked[a.id]);
+  const toggle = id => setPicked(p => ({ ...p, [id]: !p[id] }));
+  const downloadBackup = async () => {
+    const backup = { exportedAt: new Date().toISOString(), note: "The Phone Plug backup taken before a reset", data: {} };
+    for (const k of BACKUP_KEYS) { backup.data[k] = await loadStrict(k); }
+    backup.data["catalog"] = await loadCatalog();
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = `phoneplug-backup-before-reset-${todayStr()}.json`;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+  const wipeKey = async key => {
+    let chunks = 0;
+    try { const d = await _db.collection('tpp').doc(key).get(); const v = d.exists ? d.data().v : null; if (v && typeof v === "object" && !Array.isArray(v) && v.__chunked) chunks = v.__chunked; } catch {}
+    const ok = await save(key, []);
+    if (!ok) throw new Error(`Couldn't clear ${key}: ${window.__lastSaveError || "unknown error"}`);
+    for (let i = 0; i < chunks; i++) { try { await _db.collection('tpp').doc(`${key}__c${i}`).delete(); } catch {} }
+  };
+  const run = async () => {
+    if (!chosen.length) return;
+    if (typed.trim().toUpperCase() !== "RESET") { alert('Type RESET (capital letters) in the box to confirm.'); return; }
+    try {
+      setBusy("Saving a backup file first…");
+      await downloadBackup();
+      await new Promise(r => setTimeout(r, 1500));
+      for (const a of chosen) {
+        setBusy(`Clearing ${a.label}…`);
+        for (const k of a.keys) await wipeKey(k);
+        if (a.units) {
+          const cat = await loadCatalog();
+          const cleaned = cat.map(p => isImeiCategory(p.category) && (p.units||[]).length ? { ...p, units: [] } : p);
+          await saveCatalog(cleaned);
+        }
+      }
+      setBusy("");
+      alert(`✅ Done. Cleared: ${chosen.map(a => a.label.split(" (")[0]).join(", ")}.\n\nA backup file was downloaded first. The app will now reload.`);
+      window.location.reload();
+    } catch (e) {
+      setBusy("");
+      alert("⚠️ The reset stopped part-way: " + (e && e.message ? e.message : e) + "\nA backup file was downloaded before it started. Reload the page and check what is left.");
+    }
+  };
+  return E(Card, { style: { marginBottom: 20 } },
+    E(ST, null, "🧹 Start fresh (reset test data)"),
+    E("div", { style: { fontSize: 13, color: T.muted, marginBottom: 10, lineHeight: 1.6 } },
+      "Pick which areas to clear. A backup file downloads first. Products (with their stock numbers), customers, staff and all settings are never touched."),
+    !open
+      ? E(Btn, { variant: "ghost", onClick: () => setOpen(true) }, "Choose what to reset ▾")
+      : E("div", null,
+          E("div", { style: { border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, maxHeight: 360, overflowY: "auto", marginBottom: 10 } },
+            E("div", { style: { display: "flex", gap: 8, marginBottom: 8 } },
+              E(Btn, { variant: "ghost", onClick: () => { const all = {}; RESET_AREAS.forEach(a => all[a.id] = true); setPicked(all); } }, "Select all"),
+              E(Btn, { variant: "ghost", onClick: () => setPicked({}) }, "Clear selection")),
+            RESET_AREAS.map(a => E("label", { key: a.id, style: { display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 2px", fontSize: 13, cursor: "pointer", borderBottom: `1px solid ${T.border}` } },
+              E("input", { type: "checkbox", checked: !!picked[a.id], onChange: () => toggle(a.id), style: { marginTop: 3 } }),
+              E("span", { style: { flex: 1 } }, a.label),
+              E("span", { style: { color: T.muted, fontSize: 12, whiteSpace: "nowrap" } }, counts ? `${counts[a.id]} record${counts[a.id] === 1 ? "" : "s"}` : "…")))),
+          busy && E("div", { style: { fontSize: 13, color: T.blue, fontWeight: 600, marginBottom: 8 } }, busy),
+          E("div", { style: { fontSize: 13, marginBottom: 8 } }, chosen.length ? `${chosen.length} area(s) selected: ${chosen.reduce((s, a) => s + (counts ? counts[a.id] : 0), 0)} records will be deleted.` : "Nothing selected yet."),
+          E("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+            E(Input, { value: typed, placeholder: "Type RESET to confirm", style: { width: 200 }, onChange: e => setTyped(e.target.value) }),
+            E(Btn, { variant: "danger", disabled: !chosen.length || !!busy, onClick: run }, "Back up & reset selected"),
+            E(Btn, { variant: "ghost", onClick: () => { setOpen(false); setTyped(""); } }, "Cancel"))));
+}
+
 function ReceiptPrintSettings() {
   const E = React.createElement;
   const [mode, setMode] = useState(getReceiptPrintMode());
@@ -10717,6 +10825,7 @@ function SettingsTab() {
         "Show the price on labels for variable-price items (off = no price printed)")
     ),
     E(ReceiptPrintSettings,null),
+    E(StartFreshTool,null),
     E(Card,{style:{marginBottom:20}},
       E(ST,null,"🖼️ Product Photos (Cloudinary)"),
       E("div",{style:{fontSize:13,color:T.muted,marginBottom:12,lineHeight:1.7}},
