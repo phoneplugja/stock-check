@@ -16,6 +16,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script>
@@ -312,7 +313,7 @@ const PENDING_IDS = ["received", "diagnosing"];
 const PROGRESS_IDS = ["awaiting_parts", "in_repair"];
 const CONDITIONS = ["Screen cracked", "LCD damaged", "Water damage", "Bent / physical damage", "Missing parts / screws", "Back glass broken", "Camera damaged", "Charging port damaged", "Battery swollen", "Previous repair attempt", "Speaker not working", "Mic not working"];
 const DEVICE_TYPES = ["Smartphone", "Tablet", "Laptop", "Smartwatch", "Accessory", "Other"];
-const COMMON_ISSUES = ["Screen Damage","Battery Issue","Charging Port","Camera Fault","Speaker / Mic","Water Damage","Software / Unlock","Back Glass","Button Fault","Overheating","No Power","Other"];
+const COMMON_ISSUES = ["Diagnostic","Screen Damage","Battery Issue","Charging Port","Camera Fault","Speaker / Mic","Water Damage","Software / Unlock","Back Glass","Button Fault","Overheating","No Power","Other"];
 const DEVICE_COLOURS = ["Black","White","Blue","Gold","Silver","Purple","Green","Red","Pink","Yellow","Graphite","Titanium","Natural","Other"];
 const DEVICE_STORAGE = ["16GB","32GB","64GB","128GB","256GB","512GB","1TB","N/A"];
 // ── Warranty Settings (editable via Settings tab) ───────────────────────────────
@@ -450,6 +451,99 @@ ${WARRANTY_SETTINGS.repairDays}-day warranty on the specific repair performed on
 
 6. AUTHORISATION
 By signing, you confirm you are the rightful owner and have read and accept these terms.`;
+
+// ── PDF helpers (signed repair tickets, pro forma invoices) ─────────────────────────────────────
+// Logo cropped out of the square brand image so it sits nicely at the top of a PDF.
+let __pdfLogo = null;
+const getPdfLogo = () => new Promise(resolve => {
+  if (__pdfLogo) return resolve(__pdfLogo);
+  try {
+    const img = new Image();
+    img.onload = () => {
+      const sw = 842, sh = 442, c = document.createElement("canvas"); c.width = 632; c.height = Math.round(632 * sh / sw);
+      const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0,0,c.width,c.height); x.drawImage(img,119,319,sw,sh,0,0,c.width,c.height);
+      __pdfLogo = { url: c.toDataURL("image/jpeg", 0.92), ratio: sh / sw }; resolve(__pdfLogo);
+    };
+    img.onerror = () => resolve(null);
+    img.src = LOGO_SRC;
+  } catch { resolve(null); }
+});
+const newPdfDoc = () => {
+  const J = window.jspdf && window.jspdf.jsPDF;
+  if (!J) throw new Error("PDF library didn't load (check the internet connection and reload).");
+  return new J({ unit: "mm", format: "a4" });
+};
+const pdfWhen = iso => { try { const d = new Date(iso || Date.now()); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"America/Jamaica"}) + " " + d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); } catch { return ""; } };
+
+const buildSignedTicketPdf = async (ticket) => {
+  const doc = newPdfDoc(), W = 210, M = 16, CW = W - 2 * M;
+  let y = M;
+  const logo = await getPdfLogo();
+  if (logo) doc.addImage(logo.url, "JPEG", M, y - 4, 46, 46 * logo.ratio);
+  doc.setFont("helvetica","bold").setFontSize(18).setTextColor(26,86,219).text("REPAIR TICKET", W - M, y + 4, { align: "right" });
+  doc.setFontSize(10).setTextColor(17,24,39).text("Signed copy", W - M, y + 10, { align: "right" });
+  doc.setFont("helvetica","normal").setFontSize(9).setTextColor(75,85,99);
+  doc.text("Ticket " + (ticket.id || ""), W - M, y + 16, { align: "right" });
+  doc.text("Created " + pdfWhen(ticket.createdAt), W - M, y + 21, { align: "right" });
+  y += 30;
+  doc.setDrawColor(26,86,219).setLineWidth(0.8).line(M, y, W - M, y); y += 7;
+
+  const block = (x, w, title, lines) => {
+    doc.setFont("helvetica","bold").setFontSize(8).setTextColor(107,114,128).text(title, x, y);
+    doc.setFont("helvetica","normal").setFontSize(10).setTextColor(17,24,39);
+    let yy = y + 5;
+    lines.filter(Boolean).forEach(l => { doc.splitTextToSize(String(l), w).forEach(p => { doc.text(p, x, yy); yy += 4.8; }); });
+    return yy;
+  };
+  const left = block(M, CW / 2 - 4, "CUSTOMER", [ticket.customerName, ticket.customerPhone, ticket.customerEmail]);
+  const right = block(M + CW / 2 + 4, CW / 2 - 4, "DEVICE", [
+    ((ticket.deviceBrand || "") + " " + (ticket.deviceModel || "")).trim(),
+    ticket.deviceColor && "Colour: " + ticket.deviceColor,
+    ticket.deviceStorage && "Storage: " + ticket.deviceStorage,
+    ticket.deviceImei && "IMEI: " + ticket.deviceImei
+  ]);
+  y = Math.max(left, right) + 4;
+
+  const section = (title, text) => {
+    if (!text) return;
+    doc.setFont("helvetica","bold").setFontSize(8).setTextColor(107,114,128).text(title, M, y); y += 5;
+    doc.setFont("helvetica","normal").setFontSize(10).setTextColor(17,24,39);
+    doc.splitTextToSize(String(text), CW).forEach(p => { if (y > 280) { doc.addPage(); y = M; } doc.text(p, M, y); y += 4.8; });
+    y += 3;
+  };
+  section("REPORTED ISSUE", ticket.faultDescription);
+  section("PRE-EXISTING CONDITION", (ticket.conditions || []).join(", "));
+  section("ESTIMATE", [ticket.estimatedCost ? "Estimated cost: J$" + (parseFloat(ticket.estimatedCost)||0).toLocaleString("en-JM",{minimumFractionDigits:2,maximumFractionDigits:2}) : "", ticket.estimatedCompletion ? "Estimated ready: " + ticket.estimatedCompletion : ""].filter(Boolean).join("   |   "));
+
+  y += 2; doc.setDrawColor(229,231,235).setLineWidth(0.3).line(M, y, W - M, y); y += 6;
+  doc.setFont("helvetica","bold").setFontSize(10).setTextColor(17,24,39).text("TERMS & CONDITIONS (as agreed)", M, y); y += 6;
+  doc.setFont("helvetica","normal").setFontSize(8.5).setTextColor(55,65,81);
+  doc.splitTextToSize(buildTerms(), CW).forEach(p => { if (y > 278) { doc.addPage(); y = M; } doc.text(p, M, y); y += 4; });
+  y += 6;
+  if (y > 240) { doc.addPage(); y = M; }
+  doc.setFont("helvetica","bold").setFontSize(10).setTextColor(17,24,39);
+  doc.text("Terms agreed: " + (ticket.termsAgreed ? "YES" : "NO") + "  -  signed digitally " + pdfWhen(ticket.createdAt), M, y); y += 5;
+  if (ticket.signature) { try { doc.addImage(ticket.signature, "PNG", M, y, 70, 24); } catch {} y += 26; }
+  doc.setDrawColor(17,24,39).setLineWidth(0.3).line(M, y, M + 80, y);
+  doc.setFont("helvetica","normal").setFontSize(8).setTextColor(107,114,128).text("Customer signature - " + (ticket.customerName || ""), M, y + 4);
+  return doc;
+};
+
+// Uploads a PDF to Cloudinary (unsigned) into a folder and returns its link.
+const uploadPdfToCloudinary = async (blob, name, folder) => {
+  const { cloudName, uploadPreset } = await loadCloudinarySettings();
+  if (!cloudName || !uploadPreset) throw new Error("Cloudinary isn't set up (Settings → Product Photos).");
+  const form = new FormData();
+  form.append("file", blob, name + ".pdf");
+  form.append("upload_preset", uploadPreset);
+  if (folder) form.append("folder", folder);
+  form.append("public_id", name);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, { method: "POST", body: form });
+  if (!res.ok) { let m = ""; try { m = (await res.json()).error?.message || ""; } catch {} throw new Error(`Cloudinary upload failed (${res.status}) ${m}`.trim()); }
+  const data = await res.json();
+  return data.secure_url;
+};
+
 // Figures out which warranty categories actually apply to a sale, from what's in its cart —
 // so a receipt for a $500 screen protector doesn't also carry phone/repair warranty language
 // that has nothing to do with what was bought. Items are tagged this way at add-to-cart time:
@@ -1247,7 +1341,9 @@ function NewTicketForm({
     deviceColor: "",
     deviceStorage: "",
     assignedTo: "",
-    selectedIssues: []
+    selectedIssues: [],
+    otherIssue: "",
+    saveCopy: false
   });
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(emptyForm());
@@ -1272,16 +1368,18 @@ function NewTicketForm({
   const step2Valid = () => {
     const e = {};
     if (!form.faultDescription.trim() && !(form.selectedIssues||[]).length) e.faultDescription = "Select at least one issue or describe the fault.";
+    if ((form.selectedIssues||[]).includes("Other") && !(form.otherIssue||"").trim() && !form.faultDescription.trim()) e.faultDescription = "You picked Other: say what is being repaired.";
     setErr(e);
     return !Object.keys(e).length;
   };
   const submit = () => {
     if (!form.termsAgreed) { alert("Customer must agree to Terms & Conditions."); return; }
     if (!sig) { alert("Please capture the customer's signature."); return; }
-    const issueText = [...(form.selectedIssues||[]), ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : [])].join(" · ");
+    const issueText = [...(form.selectedIssues||[]).map(i=>i==="Other"&&(form.otherIssue||"").trim()?("Other: "+form.otherIssue.trim()):i), ...(form.faultDescription.trim() ? [form.faultDescription.trim()] : [])].join(" · ");
+    const { saveCopy, ...formRest } = form;
     const ticket = {
       id: genId(existingIds),
-      ...form,
+      ...formRest,
       faultDescription: issueText,
       estimatedCost: parseFloat(form.estimatedCost) || "",
       signature: sig,
@@ -1294,7 +1392,7 @@ function NewTicketForm({
     setStep(1);
     setSig(null);
     setErr({});
-    onCreated(ticket);
+    onCreated(ticket, { saveCopy: !!saveCopy });
   };
   if (step === 1) return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1488,6 +1586,7 @@ function NewTicketForm({
         style: { padding: "6px 12px", borderRadius: 99, border: "1.5px solid " + ((form.selectedIssues||[]).includes(issue) ? T.blue : T.border), background: (form.selectedIssues||[]).includes(issue) ? T.blueLt : "#F9FAFB", color: (form.selectedIssues||[]).includes(issue) ? T.blue : T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }
       }, issue))
     ),
+    (form.selectedIssues||[]).includes("Other") && /*#__PURE__*/React.createElement(Field, { label: "What is being repaired? (Other)" }, /*#__PURE__*/React.createElement(Input, { placeholder: "e.g. Face ID, SIM tray, vibration motor...", value: form.otherIssue||"", onChange: e => set("otherIssue", e.target.value) })),
     /*#__PURE__*/React.createElement(Textarea, { placeholder: "Additional fault details...", value: form.faultDescription, onChange: e => set("faultDescription", e.target.value) })
   ),
   /*#__PURE__*/React.createElement(R2, null,
@@ -1663,7 +1762,10 @@ function NewTicketForm({
       marginTop: 2,
       flexShrink: 0
     }
-  }), /*#__PURE__*/React.createElement("span", null, "I, ", /*#__PURE__*/React.createElement("strong", null, form.customerName || "the customer"), ", confirm I have read and agree to The Phone Plug's Terms & Conditions."))), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("span", null, "I, ", /*#__PURE__*/React.createElement("strong", null, form.customerName || "the customer"), ", confirm I have read and agree to The Phone Plug's Terms & Conditions."))), /*#__PURE__*/React.createElement("label", {
+    style: { display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, margin: "14px 0 6px", color: "#333" }
+  }, /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: !!form.saveCopy, onChange: e => set("saveCopy", e.target.checked), style: { accentColor: T.blue, width: 17, height: 17, flexShrink: 0 } }),
+  /*#__PURE__*/React.createElement("span", null, "Also download a copy of the signed PDF to this device")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       justifyContent: "space-between",
@@ -1982,11 +2084,15 @@ function TicketDetail({
     setPartSearch(""); setPartSearchResults([]);
   };
 
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualCost, setManualCost] = useState("");
   const addManualPart = () => {
-    const name = prompt("Part name:");
-    if (!name) return;
-    const cost = parseFloat(prompt("Cost price (JMD):")||"0")||0;
+    const name = manualName.trim();
+    if (!name) { alert("Enter the part name."); return; }
+    const cost = parseFloat(manualCost) || 0;
     setPartsUsed(prev=>[...prev,{ id:`manual-${Date.now()}`, name, qty:1, cost, manual:true }]);
+    setManualName(""); setManualCost(""); setManualOpen(false);
   };
 
   const commitPartsAndStatus = async () => {
@@ -2002,8 +2108,12 @@ function TicketDetail({
       } else {
         updatedProducts = await loadArr("tpp-products");
       }
+      // Only deduct what hasn't been deducted before: parts already saved on the ticket were taken off stock
+      // the first time it was marked Ready, so marking Ready again must not take them off twice.
       partsUsed.filter(p=>!p.manual).forEach(part => {
-        updatedProducts = updatedProducts.map(p => p.id===part.id ? {...p, stock:Math.max(0,(p.stock||0)-part.qty)} : p);
+        const prevQty = ((ticket.partsUsed||[]).find(x=>x.id===part.id)||{}).qty || 0;
+        const delta = (part.qty||0) - prevQty;
+        if (delta > 0) updatedProducts = updatedProducts.map(p => p.id===part.id ? {...p, stock:Math.max(0,(p.stock||0)-delta)} : p);
       });
       if (meta && meta.chunks) {
         const CHUNK=100; const chunks=[];
@@ -2017,7 +2127,8 @@ function TicketDetail({
 
     // Log the total parts cost as an expense (category "Repair Parts") so it actually flows into
     // Expense History / EOD math — previously this number was only ever shown on the ticket.
-    const partsCostTotal = partsUsed.reduce((s,p)=>s+(parseFloat(p.cost)||0)*(p.qty||1),0);
+    const prevPartsCost = (ticket.partsUsed||[]).reduce((s,p)=>s+(parseFloat(p.cost)||0)*(p.qty||1),0);
+    const partsCostTotal = partsUsed.reduce((s,p)=>s+(parseFloat(p.cost)||0)*(p.qty||1),0) - prevPartsCost;
     if (partsCostTotal > 0) {
       try {
         const allExp = await loadArr("tpp-expenses");
@@ -2229,7 +2340,12 @@ function TicketDetail({
     /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, color:T.muted, marginBottom:16 } }, "Log all parts used before marking as Ready for Pickup. Stock will be deducted automatically."),
     /*#__PURE__*/React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:8 } },
       /*#__PURE__*/React.createElement(Input, { placeholder:"Search parts catalog...", value:partSearch, onChange:e=>searchParts(e.target.value) }),
-      /*#__PURE__*/React.createElement(Btn, { variant:"ghost", style:{ fontSize:12, whiteSpace:"nowrap" }, onClick:addManualPart }, "+ Manual")
+      /*#__PURE__*/React.createElement(Btn, { variant:"ghost", style:{ fontSize:12, whiteSpace:"nowrap" }, onClick:()=>setManualOpen(v=>!v) }, manualOpen ? "Close" : "+ Manual")
+    ),
+    manualOpen && /*#__PURE__*/React.createElement("div", { style:{ border:`1px solid ${T.border}`, borderRadius:8, padding:10, marginBottom:12, display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", background:"#F9FAFB" } },
+      /*#__PURE__*/React.createElement(Input, { placeholder:"Part name", value:manualName, onChange:e=>setManualName(e.target.value), style:{ flex:"2 1 160px" } }),
+      /*#__PURE__*/React.createElement(Input, { type:"number", min:"0", placeholder:"Cost (JMD)", value:manualCost, onChange:e=>setManualCost(e.target.value), style:{ flex:"1 1 110px" } }),
+      /*#__PURE__*/React.createElement(Btn, { onClick:addManualPart }, "Add part")
     ),
     partSearchResults.length>0 && /*#__PURE__*/React.createElement("div", { style:{ border:`1px solid ${T.border}`, borderRadius:8, overflow:"hidden", marginBottom:12 } },
       partSearchResults.map((p,i)=>/*#__PURE__*/React.createElement("div", { key:i, onClick:()=>addPart(p), style:{ padding:"8px 12px", cursor:"pointer", borderBottom:i<partSearchResults.length-1?`1px solid ${T.border}`:"none", display:"flex", justifyContent:"space-between", fontSize:13 } },
@@ -2482,7 +2598,7 @@ function TicketDetail({
     value: ticket.customerEmail
   }), /*#__PURE__*/React.createElement(IR, {
     label: "Signed",
-    value: ticket.termsAgreed && ticket.signature ? "✅ Signed" : ticket.termsAgreed ? "✅ Agreed" : "⚠️ Not recorded"
+    value: ticket.termsAgreed && (ticket.signature || ticket.signedPdfUrl) ? "✅ Signed" : ticket.termsAgreed ? "✅ Agreed" : "⚠️ Not recorded"
   })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(ST, null, "Device"), /*#__PURE__*/React.createElement(IR, {
     label: "Type",
     value: ticket.deviceType
@@ -2617,7 +2733,11 @@ function TicketDetail({
   }), /*#__PURE__*/React.createElement(IR, {
     label: "Est. Ready",
     value: ticket.estimatedCompletion ? fmtDate(ticket.estimatedCompletion) : "TBD"
-  })))), ticket.signature && /*#__PURE__*/React.createElement(Card, {
+  })))), ticket.signedPdfUrl && /*#__PURE__*/React.createElement(Card, { style: { marginTop: 14 } },
+    /*#__PURE__*/React.createElement(ST, null, "Signed Terms (PDF)"),
+    /*#__PURE__*/React.createElement("a", { href: ticket.signedPdfUrl, target: "_blank", rel: "noopener", style: { color: T.blue, fontWeight: 700, fontSize: 13 } }, "📄 Open signed PDF"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.muted, marginTop: 6 } }, "Stored in Cloudinary (folder signed-tickets). If the link says it is blocked, enable PDF delivery in Cloudinary: Settings → Security → \"PDF and ZIP files delivery\".")
+  ), ticket.signature && /*#__PURE__*/React.createElement(Card, {
     style: {
       marginTop: 14
     }
@@ -2724,11 +2844,34 @@ function RepairManager() {
     setTickets(next);
   }, []);
 
-  const onCreated = async t => {
+  const onCreated = async (t, opts = {}) => {
     const next = [t, ...tickets];
     await saveTickets(next);
     setSelected(t);
     setView("detail");
+    archiveSignedTicket(t, !!opts.saveCopy);
+  };
+
+  // Builds the signed PDF, optionally downloads it, uploads it to Cloudinary (folder signed-tickets) and keeps just
+  // the link on the ticket instead of the signature image. If the upload fails the signature stays on the ticket and
+  // the PDF is downloaded so nothing is lost.
+  const archiveSignedTicket = async (t, saveCopy) => {
+    let doc, blob;
+    try { doc = await buildSignedTicketPdf(t); blob = doc.output("blob"); }
+    catch (e) { console.error("Signed PDF:", e); alert("⚠️ The ticket was created, but the signed PDF couldn't be made: " + (e && e.message ? e.message : e) + "\nThe signature is still stored on the ticket."); return; }
+    if (saveCopy) { try { doc.save(`Ticket-${t.id}-signed.pdf`); } catch {} }
+    try {
+      const url = await uploadPdfToCloudinary(blob, `ticket-${t.id}-signed`, "signed-tickets");
+      const latest = await loadArr("tpp-tickets-v1");
+      const upd = latest.map(x => x.id === t.id ? { ...x, signedPdfUrl: url, signedPdfAt: new Date().toISOString(), signature: null, signatureArchived: true } : x);
+      await save("tpp-tickets-v1", upd);
+      setTickets(upd);
+      setSelected(prev => prev && prev.id === t.id ? { ...prev, signedPdfUrl: url, signature: null, signatureArchived: true } : prev);
+    } catch (e) {
+      console.error("Signed PDF upload:", e);
+      if (!saveCopy) { try { doc.save(`Ticket-${t.id}-signed.pdf`); } catch {} }
+      alert("⚠️ The signed PDF couldn't be uploaded to Cloudinary (" + (e && e.message ? e.message : e) + "). It was downloaded to this device instead, and the signature is still stored on the ticket.");
+    }
   };
 
   const convertBooking = async (booking) => {
@@ -5154,7 +5297,7 @@ function OwnerDashboard({
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
       // ── Sheet: Sales Ledger ────────────────────────────────────────────────
-      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s)]));
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s)]));
 
       // ── Sheet: Rental Income ──────────────────────────────────────────────
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
@@ -5223,7 +5366,7 @@ function OwnerDashboard({
 
       // ── Sheet 7: Signatures Audit ─────────────────────────────────────────
       const signedTix = srcTix.filter(t => t.termsAgreed);
-      addSheet("Signatures Audit", ["Ticket ID", "Date", "Customer Name", "Phone", "Device", "Terms Agreed", "Signature Captured", "Notes"], signedTix.map(t => [t.id, t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-GB") : "", t.customerName || "", t.customerPhone || "", `${t.deviceBrand || ""} ${t.deviceModel || ""}`.trim(), t.termsAgreed ? "Yes" : "No", t.signature ? "Yes — image stored in system" : "No", "Signature image retrievable from repair system ticket"]));
+      addSheet("Signatures Audit", ["Ticket ID", "Date", "Customer Name", "Phone", "Device", "Terms Agreed", "Signature Captured", "Notes"], signedTix.map(t => [t.id, t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-GB") : "", t.customerName || "", t.customerPhone || "", `${t.deviceBrand || ""} ${t.deviceModel || ""}`.trim(), t.termsAgreed ? "Yes" : "No", (t.signature || t.signedPdfUrl) ? (t.signedPdfUrl ? "Yes — signed PDF in Cloudinary" : "Yes — image stored in system") : "No", t.signedPdfUrl || "Signature image retrievable from repair system ticket"]));
       const filename = `PhonePlug_${label}_${todayStr()}.xlsx`;
       XLSX.writeFile(wb, filename);
     } catch (e) {
@@ -6259,16 +6402,17 @@ const genSaleId = (existing=[], prefix="RCP") => {
 const DISCOUNT_TYPES = ["General","Case","Tempered Glass","Returning Client","Customer Satisfaction","Staff","Bundle"];
 const DELIVERY_ZONES = ["None","Kingston","Portmore","Spanish Town","Old Harbour","Zip Mail","Knutsford Drop Off","Knutsford Fee","Tara Courier"];
 const SERVICES_CATALOG = [
+  {name:"Diagnostic",price:0,note:"Non-refundable"},
   {name:"Screen Replacement",price:0,note:"Variable by model"},
   {name:"Battery Replacement",price:0,note:"Variable by model"},
   {name:"Charging Port Repair",price:0,note:"Variable by model"},
   {name:"Speaker/Mic Repair",price:0,note:"Variable by model"},
   {name:"Back Glass Replacement",price:0,note:"Variable by model"},
-  {name:"Water Damage Assessment",price:3000,note:"Non-refundable diagnostic"},
+  {name:"Water Damage Assessment",price:0,note:"Non-refundable diagnostic"},
   {name:"Software/IMEI Unlock",price:0,note:"Variable by carrier"},
-  {name:"Data Transfer",price:2500,note:"Per device"},
-  {name:"Screen Protector Fitting",price:500,note:""},
-  {name:"Phone Cleaning",price:1000,note:""},
+  {name:"Data Transfer",price:0,note:"Per device"},
+  {name:"Screen Protector Fitting",price:0,note:""},
+  {name:"Phone Cleaning",price:0,note:""},
 ];
 
 const sendReceiptEmail = async (sale, overrideEmail) => {
@@ -6387,7 +6531,7 @@ const receiptLines = (sale) => {
   if (discs.length) { dash(); discs.forEach(d=>row(d.label||d.reason||(d.type?d.type+" discount":"Discount"), "-"+J(d.amount))); }
   dash();
   row("Total", JS(sale.total), {b:true, big:true});
-  if (sale.isDeposit && sale.ticketId) add("Ticket: "+sale.ticketId+" | Balance due on collection");
+  if (sale.ticketId) add("Repair ticket: "+sale.ticketId+(sale.isDeposit ? (sale.ticketBalanceAfter>0 ? " | Balance due: "+J(sale.ticketBalanceAfter) : " | Balance due on collection") : " | Paid in full"));
   [["Cash",sale.cash],["Debit Card",sale.debit_card],["Credit Card",sale.credit_card],["NCB Transfer",sale.ncb_transfer],["Scotia Transfer",sale.scotia_transfer],["Other",sale.other_payment]].filter(([,v])=>parseFloat(v)>0).forEach(([l,v])=>row(l,J(v)));
   if (sale.change>0) row("Change", J(sale.change));
   dash();
@@ -6432,6 +6576,311 @@ const sendToRawBT = (u8) => {
 };
 const printReceiptRawBT = async (sale) => { const logo = await getLogoBitmap(); sendToRawBT(buildReceiptEscPos(sale, logo)); };
 
+// ── Pro forma invoices (owner only) ─────────────────────────────────────────────────────────────
+const INVOICES_KEY = "tpp-invoices";
+const INVOICE_EMAIL_TEMPLATE = "template_zc69rjj";
+const INVOICE_BANKS = [
+  { id: "scotia", name: "Scotia Bank Account", accountName: "Phone Plug", number: "60145000922341", branch: "Half-Way Tree", type: "Business Savings" },
+  { id: "ncb",    name: "NCB Bank Account", accountName: "Phone Plug", number: "305309354",      branch: "Half-Way Tree", type: "Business Savings" }
+];
+const INVOICE_DEFAULT_NOTES = "This is a pro forma invoice and is not a receipt. Prices are valid until the date shown above. Items are reserved once payment is received. Please use the invoice number as the payment reference.";
+const invMoney = n => "J$" + (parseFloat(n) || 0).toLocaleString("en-JM", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const invNum = n => (parseFloat(n) || 0).toLocaleString("en-JM", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const invTotals = inv => {
+  const subtotal = (inv.items || []).reduce((s, i) => s + (parseFloat(i.price) || 0) * (parseFloat(i.qty) || 0), 0);
+  const discount = Math.min(subtotal, Math.max(0, parseFloat(inv.discount) || 0));
+  return { subtotal, discount, total: Math.max(0, subtotal - discount) };
+};
+const nextInvoiceId = list => {
+  let max = 0; (list || []).forEach(i => { const m = /^PF-(\d+)$/.exec(i.id || ""); if (m) max = Math.max(max, parseInt(m[1], 10)); });
+  return "PF-" + String(max + 1).padStart(4, "0");
+};
+const addDaysStr = (dateStr, days) => { const d = new Date(dateStr + "T12:00:00"); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+const fmtInvDate = ds => { try { return new Date(ds + "T12:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); } catch { return ds || ""; } };
+const newInvoice = list => ({
+  id: nextInvoiceId(list), status: "Draft", archived: false,
+  date: todayStr(), validUntil: addDaysStr(todayStr(), 7),
+  billTo: { name: "", attn: "", address: "", phone: "", email: "" },
+  items: [{ desc: "", sub: "", qty: 1, price: "" }],
+  discount: "", notes: INVOICE_DEFAULT_NOTES, banks: { scotia: true, ncb: true },
+  createdAt: new Date().toISOString()
+});
+
+const buildInvoicePdf = async (inv) => {
+  const doc = newPdfDoc(), W = 210, M = 16, CW = W - 2 * M, BLUE = [26, 86, 219];
+  let y = M;
+  const t = invTotals(inv);
+  const logo = await getPdfLogo();
+  if (logo) doc.addImage(logo.url, "JPEG", M, y - 4, 46, 46 * logo.ratio);
+  doc.setFont("helvetica", "bold").setFontSize(20).setTextColor(...BLUE).text("PRO FORMA", W - M, y + 4, { align: "right" });
+  doc.text("INVOICE", W - M, y + 12, { align: "right" });
+  doc.setFontSize(9).setFont("helvetica", "normal");
+  const meta = [["Invoice no.", inv.id], ["Date", fmtInvDate(inv.date)], ["Valid until", fmtInvDate(inv.validUntil)]];
+  meta.forEach((m, k) => { doc.setTextColor(107, 114, 128).text(m[0], W - M - 34, y + 19 + k * 5, { align: "right" }); doc.setTextColor(17, 24, 39).setFont("helvetica", "bold").text(String(m[1] || ""), W - M, y + 19 + k * 5, { align: "right" }); doc.setFont("helvetica", "normal"); });
+  y += 36;
+  doc.setDrawColor(...BLUE).setLineWidth(0.8).line(M, y, W - M, y); y += 7;
+
+  const block = (x, w, title, lines) => {
+    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(107, 114, 128).text(title, x, y);
+    doc.setFontSize(10).setTextColor(17, 24, 39);
+    let yy = y + 5;
+    lines.filter(Boolean).forEach((l, k) => { doc.setFont("helvetica", k === 0 ? "bold" : "normal"); doc.splitTextToSize(String(l), w).forEach(p => { doc.text(p, x, yy); yy += 4.8; }); });
+    return yy;
+  };
+  const b = inv.billTo || {};
+  const l = block(M, CW / 2 - 4, "FROM", ["The Phone Plug", "Shop 5D Hagley Park Plaza", "Half Way Tree, Kingston, Jamaica", "876-490-5515 / 876-672-2442", "support@phoneplugja.com"]);
+  const r = block(M + CW / 2 + 4, CW / 2 - 4, "BILL TO", [b.name, b.attn && "Attn: " + b.attn, b.address, b.phone, b.email]);
+  y = Math.max(l, r) + 6;
+
+  // table
+  const colQty = W - M - 62, colUnit = W - M - 32, colAmt = W - M - 3;
+  const head = () => {
+    doc.setFillColor(239, 244, 255).rect(M, y, CW, 8, "F");
+    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(20, 72, 199);
+    doc.text("#", M + 3, y + 5.2); doc.text("DESCRIPTION", M + 11, y + 5.2);
+    doc.text("QTY", colQty, y + 5.2, { align: "right" }); doc.text("UNIT PRICE", colUnit, y + 5.2, { align: "right" }); doc.text("AMOUNT", colAmt, y + 5.2, { align: "right" });
+    y += 8;
+  };
+  head();
+  (inv.items || []).filter(i => (i.desc || "").trim() || parseFloat(i.price)).forEach((it, k) => {
+    const descLines = doc.splitTextToSize(String(it.desc || ""), colQty - M - 24);
+    const subLines = it.sub ? doc.splitTextToSize(String(it.sub), colQty - M - 24) : [];
+    const h = 5 + descLines.length * 4.6 + subLines.length * 4.2 + 2;
+    if (y + h > 268) { doc.addPage(); y = M; head(); }
+    doc.setDrawColor(229, 231, 235).setLineWidth(0.2).line(M, y, W - M, y);
+    doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(107, 114, 128).text(String(k + 1), M + 3, y + 5.2);
+    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(17, 24, 39);
+    let yy = y + 5.2; descLines.forEach(p => { doc.text(p, M + 11, yy); yy += 4.6; });
+    doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(107, 114, 128); subLines.forEach(p => { doc.text(p, M + 11, yy); yy += 4.2; });
+    doc.setFontSize(10).setTextColor(17, 24, 39);
+    doc.text(String(parseFloat(it.qty) || 0), colQty, y + 5.2, { align: "right" });
+    doc.text(invNum(it.price), colUnit, y + 5.2, { align: "right" });
+    doc.setFont("helvetica", "bold").text(invNum((parseFloat(it.price) || 0) * (parseFloat(it.qty) || 0)), colAmt, y + 5.2, { align: "right" });
+    y += h;
+  });
+  doc.setDrawColor(229, 231, 235).setLineWidth(0.2).line(M, y, W - M, y); y += 6;
+
+  // totals
+  if (y > 250) { doc.addPage(); y = M; }
+  const tx = W - M - 70;
+  doc.setFont("helvetica", "normal").setFontSize(10).setTextColor(55, 65, 81);
+  doc.text("Subtotal", tx, y); doc.text(invMoney(t.subtotal), W - M, y, { align: "right" }); y += 5.5;
+  if (t.discount > 0) { doc.text("Discount", tx, y); doc.text("-" + invMoney(t.discount), W - M, y, { align: "right" }); y += 5.5; }
+  doc.setDrawColor(17, 24, 39).setLineWidth(0.6).line(tx, y, W - M, y); y += 6;
+  doc.setFont("helvetica", "bold").setFontSize(11).setTextColor(17, 24, 39).text("Total due", tx, y); doc.setFontSize(12).text(invMoney(t.total), W - M, y, { align: "right" }); y += 10;
+
+  // banks
+  const banks = INVOICE_BANKS.filter(bk => !inv.banks || inv.banks[bk.id] !== false);
+  if (banks.length) {
+    if (y > 225) { doc.addPage(); y = M; }
+    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(107, 114, 128).text("PAYMENT DETAILS (BANK TRANSFER)", M, y); y += 4;
+    const bw = (CW - 6) / 2;
+    banks.forEach((bk, k) => {
+      const x = M + k * (bw + 6);
+      doc.setDrawColor(229, 231, 235).setLineWidth(0.3).roundedRect(x, y, bw, 28, 2, 2);
+      doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(17, 24, 39).text(bk.name, x + 4, y + 6);
+      [["Account Name", bk.accountName], ["Account Number", bk.number], ["Branch", bk.branch], ["Account Type", bk.type]].forEach((row, q) => {
+        doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(107, 114, 128).text(row[0], x + 4, y + 11.5 + q * 4.3);
+        doc.setFont("helvetica", q === 1 ? "bold" : "normal").setTextColor(17, 24, 39).text(row[1], x + 33, y + 11.5 + q * 4.3);
+      });
+    });
+    y += 34;
+  }
+  // notes
+  if ((inv.notes || "").trim()) {
+    const nl = doc.splitTextToSize(inv.notes.trim(), CW - 10);
+    const nh = 10 + nl.length * 4.4;
+    if (y + nh > 280) { doc.addPage(); y = M; }
+    doc.setFillColor(255, 251, 235).roundedRect(M, y, CW, nh, 1.5, 1.5, "F");
+    doc.setFillColor(217, 119, 6).rect(M, y, 1.2, nh, "F");
+    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(146, 64, 14).text("NOTES & TERMS", M + 5, y + 5.5);
+    doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(74, 58, 31);
+    nl.forEach((p, q) => doc.text(p, M + 5, y + 10.5 + q * 4.4));
+    y += nh + 6;
+  }
+  doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(107, 114, 128).text("Thank you for your business  -  The Phone Plug  -  @phoneplug_ja", W / 2, 289, { align: "center" });
+  return doc;
+};
+
+const buildInvoiceItemsHtml = inv => {
+  const rows = (inv.items || []).filter(i => (i.desc || "").trim() || parseFloat(i.price)).map(i => {
+    const amt = (parseFloat(i.price) || 0) * (parseFloat(i.qty) || 0);
+    const esc = v => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<table width="100%" cellpadding="0" cellspacing="0" style="border-bottom:1px dashed #e0e0e0"><tr>` +
+      `<td style="padding:10px 12px 10px 0;font-size:13px;color:#111;font-weight:500;font-family:Arial,sans-serif">${esc(i.desc)}${i.sub ? `<div style="font-size:11px;color:#999;font-style:italic;margin-top:2px">${esc(i.sub)}</div>` : ""}<div style="font-size:11px;color:#999;margin-top:2px">${esc(parseFloat(i.qty) || 0)} x ${esc(invMoney(i.price))}</div></td>` +
+      `<td align="right" style="padding:10px 0;font-size:13px;color:#111;font-weight:600;white-space:nowrap;font-family:Arial,sans-serif;vertical-align:top">${esc(invMoney(amt))}</td></tr></table>`;
+  });
+  return rows.join("");
+};
+
+function InvoicesTab() {
+  const E = React.createElement;
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [inv, setInv] = useState(null);       // the invoice being edited (draft state)
+  const [isNew, setIsNew] = useState(false);
+  const [filter, setFilter] = useState("active");
+  const [busy, setBusy] = useState("");
+  useEffect(() => { (async () => { setList(await loadArr(INVOICES_KEY)); setLoading(false); })(); }, []);
+
+  const persist = async (next) => {
+    const ok = await save(INVOICES_KEY, next);
+    if (!ok) { alert("⚠️ Couldn't save invoices: " + (window.__lastSaveError || "unknown error")); return false; }
+    setList(next); return true;
+  };
+  const stamp = x => ({ ...x, updatedAt: new Date().toISOString() });
+  const saveInv = async (x = inv) => {
+    const latest = await loadArr(INVOICES_KEY);
+    const rec = stamp(x);
+    const next = latest.some(i => i.id === rec.id) ? latest.map(i => i.id === rec.id ? rec : i) : [rec, ...latest];
+    // a brand-new invoice may have collided on its number with one created elsewhere: renumber then
+    if (isNew && latest.some(i => i.id === x.id)) { rec.id = nextInvoiceId(latest); next.splice(0, next.length, rec, ...latest); setInv(rec); }
+    if (await persist(next)) { setIsNew(false); setInv(rec); return rec; }
+    return null;
+  };
+  const setF = (k, v) => setInv(p => ({ ...p, [k]: v }));
+  const setBill = (k, v) => setInv(p => ({ ...p, billTo: { ...p.billTo, [k]: v } }));
+  const setItem = (i, k, v) => setInv(p => ({ ...p, items: p.items.map((it, j) => j === i ? { ...it, [k]: v } : it) }));
+  const addGct = () => setInv(p => {
+    const base = (p.items || []).filter(it => !/^GCT/i.test(it.desc || "")).reduce((s, it) => s + (parseFloat(it.price) || 0) * (parseFloat(it.qty) || 0), 0);
+    const gct = { desc: "GCT (15%)", sub: "", qty: 1, price: Math.round(base * 0.15 * 100) / 100 };
+    const rest = (p.items || []).filter(it => !/^GCT/i.test(it.desc || ""));
+    return { ...p, items: [...rest, gct] };
+  });
+  const t = inv ? invTotals(inv) : null;
+
+  const download = async () => {
+    try { setBusy("Making PDF…"); const doc = await buildInvoicePdf(inv); doc.save(`${inv.id}.pdf`); }
+    catch (e) { alert("Couldn't make the PDF: " + (e && e.message ? e.message : e)); }
+    finally { setBusy(""); }
+  };
+  const emailIt = async () => {
+    const to = (inv.billTo.email || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { alert("Add a valid customer email address first."); return; }
+    if (!(inv.items || []).some(i => (i.desc || "").trim())) { alert("Add at least one line item first."); return; }
+    try {
+      setBusy("Saving…");
+      const saved = await saveInv(); if (!saved) return;
+      setBusy("Making PDF and uploading…");
+      const doc = await buildInvoicePdf(saved);
+      const url = await uploadPdfToCloudinary(doc.output("blob"), `${saved.id}-${Date.now().toString(36)}`, "invoices");
+      setBusy("Sending email…");
+      const tt = invTotals(saved);
+      await emailjs.send(EMAILJS_SERVICE_ID, INVOICE_EMAIL_TEMPLATE, {
+        to_email: to, customer_name: saved.billTo.attn || saved.billTo.name || "there",
+        invoice_number: saved.id, invoice_date: fmtInvDate(saved.date), valid_until: fmtInvDate(saved.validUntil),
+        items_html: buildInvoiceItemsHtml(saved), subtotal: invMoney(tt.subtotal), discount: tt.discount > 0 ? "-" + invMoney(tt.discount) : "",
+        total: invMoney(tt.total), pdf_link: url, notes: saved.notes || ""
+      });
+      const done = { ...saved, status: saved.status === "Draft" ? "Sent" : saved.status, pdfUrl: url, sentAt: new Date().toISOString(), sentTo: to };
+      await saveInv(done);
+      alert("✅ Invoice emailed to " + to + ".");
+    } catch (e) { console.error(e); alert("⚠️ Couldn't send: " + (e && (e.text || e.message) ? (e.text || e.message) : e)); }
+    finally { setBusy(""); }
+  };
+  const duplicate = async (src) => {
+    const latest = await loadArr(INVOICES_KEY);
+    const copy = { ...JSON.parse(JSON.stringify(src)), id: nextInvoiceId(latest), status: "Draft", archived: false, date: todayStr(), validUntil: addDaysStr(todayStr(), 7), pdfUrl: undefined, sentAt: undefined, sentTo: undefined, createdAt: new Date().toISOString() };
+    await persist([copy, ...latest]); setInv(copy); setIsNew(false);
+  };
+  const del = async (id) => { if (!confirm(`Delete ${id} permanently?`)) return; await persist((await loadArr(INVOICES_KEY)).filter(i => i.id !== id)); setInv(null); };
+  const toggleArchive = async (x) => { const rec = stamp({ ...x, archived: !x.archived }); await persist((await loadArr(INVOICES_KEY)).map(i => i.id === rec.id ? rec : i)); if (inv && inv.id === rec.id) setInv(rec); };
+  const backup = () => {
+    try {
+      const rows = list.map(i => { const tt = invTotals(i); return { "Invoice #": i.id, Status: i.status, Archived: i.archived ? "Yes" : "No", Date: i.date, "Valid until": i.validUntil, "Bill to": i.billTo?.name || "", Attn: i.billTo?.attn || "", Email: i.billTo?.email || "", Phone: i.billTo?.phone || "", Address: i.billTo?.address || "", Items: (i.items || []).map(x => `${x.desc} x${x.qty} @ ${x.price}`).join("; "), Subtotal: tt.subtotal, Discount: tt.discount, Total: tt.total, "PDF link": i.pdfUrl || "", "Sent to": i.sentTo || "", Notes: i.notes || "" }; });
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Invoices");
+      XLSX.writeFile(wb, `PhonePlug_Invoices_${todayStr()}.xlsx`);
+    } catch (e) { alert("Couldn't make the backup: " + (e && e.message ? e.message : e)); }
+  };
+  const clearArchived = async () => {
+    const n = list.filter(i => i.archived).length;
+    if (!n) { alert("No archived invoices to clear."); return; }
+    if (!confirm(`Download a backup, then permanently delete ${n} archived invoice(s)?`)) return;
+    backup();
+    await new Promise(r => setTimeout(r, 1200));
+    await persist((await loadArr(INVOICES_KEY)).filter(i => !i.archived));
+  };
+
+  if (loading) return E("div", { style: { textAlign: "center", padding: "60px 20px", color: T.muted } }, "Loading...");
+
+  // ── Editor ──
+  if (inv) return E("div", { style: { maxWidth: 760, margin: "0 auto" } },
+    E("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 20, margin: 0 } }, "🧾 Pro Forma ", inv.id),
+      E("button", { onClick: () => { setInv(null); setIsNew(false); }, style: { background: "none", border: "none", color: T.blue, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 } }, "← All invoices")),
+    E(Card, { style: { marginBottom: 14 } },
+      E(ST, null, "Details"),
+      E(R2, null,
+        E(Field, { label: "Invoice date" }, E(Input, { type: "date", value: inv.date, onChange: e => setF("date", e.target.value) })),
+        E(Field, { label: "Valid until" }, E(Input, { type: "date", value: inv.validUntil, onChange: e => setF("validUntil", e.target.value) }))),
+      E(Field, { label: "Status" }, E(Sel, { value: inv.status, onChange: e => setF("status", e.target.value) }, ["Draft", "Sent", "Accepted", "Expired"].map(s => E("option", { key: s }, s))))),
+    E(Card, { style: { marginBottom: 14 } },
+      E(ST, null, "Bill to"),
+      E(R2, null,
+        E(Field, { label: "Name / company" }, E(Input, { value: inv.billTo.name, onChange: e => setBill("name", e.target.value) })),
+        E(Field, { label: "Attention (contact person)" }, E(Input, { value: inv.billTo.attn, onChange: e => setBill("attn", e.target.value) }))),
+      E(Field, { label: "Address" }, E(Input, { value: inv.billTo.address, onChange: e => setBill("address", e.target.value) })),
+      E(R2, null,
+        E(Field, { label: "Phone" }, E(Input, { value: inv.billTo.phone, onChange: e => setBill("phone", e.target.value) })),
+        E(Field, { label: "Email" }, E(Input, { type: "email", value: inv.billTo.email, onChange: e => setBill("email", e.target.value) })))),
+    E(Card, { style: { marginBottom: 14 } },
+      E(ST, null, "Line items"),
+      (inv.items || []).map((it, i) => E("div", { key: i, style: { border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, marginBottom: 8, display: "flex", flexDirection: "column", gap: 6 } },
+        E(Input, { placeholder: "Description (e.g. Samsung Galaxy S23 Ultra 256 GB)", value: it.desc, onChange: e => setItem(i, "desc", e.target.value) }),
+        E(Input, { placeholder: "Detail line (optional, e.g. Phantom Black, Like New)", value: it.sub || "", onChange: e => setItem(i, "sub", e.target.value) }),
+        E("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" } },
+          E("span", { style: { fontSize: 12, color: T.muted } }, "Qty"),
+          E(Input, { type: "number", min: "0", value: it.qty, style: { width: 80 }, onChange: e => setItem(i, "qty", e.target.value) }),
+          E("span", { style: { fontSize: 12, color: T.muted } }, "Unit price"),
+          E(Input, { type: "number", min: "0", value: it.price, style: { width: 130 }, onChange: e => setItem(i, "price", e.target.value) }),
+          E("span", { style: { fontWeight: 700, marginLeft: "auto" } }, invMoney((parseFloat(it.price) || 0) * (parseFloat(it.qty) || 0))),
+          E(Btn, { variant: "danger", style: { fontSize: 11, padding: "6px 10px" }, onClick: () => setInv(p => ({ ...p, items: p.items.filter((_, j) => j !== i) })) }, "✕")))),
+      E("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        E(Btn, { variant: "ghost", onClick: () => setInv(p => ({ ...p, items: [...p.items, { desc: "", sub: "", qty: 1, price: "" }] })) }, "+ Add line"),
+        E(Btn, { variant: "ghost", onClick: addGct }, "+ Add GCT (15%)")),
+      E("div", { style: { marginTop: 14, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, fontSize: 13 } },
+        E("div", null, "Subtotal: ", E("strong", null, invMoney(t.subtotal))),
+        E("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, "Discount (J$):", E(Input, { type: "number", min: "0", value: inv.discount, style: { width: 110 }, onChange: e => setF("discount", e.target.value) })),
+        E("div", { style: { fontSize: 15, borderTop: "2px solid #111827", paddingTop: 6 } }, "Total due: ", E("strong", null, invMoney(t.total))))),
+    E(Card, { style: { marginBottom: 14 } },
+      E(ST, null, "Payment details & terms"),
+      INVOICE_BANKS.map(bk => E("label", { key: bk.id, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 6, cursor: "pointer" } },
+        E("input", { type: "checkbox", checked: !inv.banks || inv.banks[bk.id] !== false, onChange: e => setInv(p => ({ ...p, banks: { ...(p.banks || {}), [bk.id]: e.target.checked } })) }),
+        `${bk.name} — ${bk.number}`)),
+      E(Field, { label: "Notes & terms (shown on the PDF; leave empty to hide)" }, E(Textarea, { rows: 4, value: inv.notes || "", onChange: e => setF("notes", e.target.value) }))),
+    busy && E("div", { style: { color: T.blue, fontWeight: 600, fontSize: 13, marginBottom: 8 } }, busy),
+    E("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 } },
+      E(Btn, { disabled: !!busy, onClick: async () => { const r = await saveInv(); if (r) alert("✅ Saved."); } }, "💾 Save"),
+      E(Btn, { variant: "ghost", disabled: !!busy, onClick: download }, "⬇️ Download PDF"),
+      E(Btn, { variant: "ghost", disabled: !!busy, onClick: emailIt }, "✉️ Email to customer"),
+      !isNew && E(Btn, { variant: "ghost", disabled: !!busy, onClick: () => toggleArchive(inv) }, inv.archived ? "↩︎ Unarchive" : "📦 Archive"),
+      !isNew && E(Btn, { variant: "danger", disabled: !!busy, onClick: () => del(inv.id) }, "Delete")),
+    inv.pdfUrl && E("div", { style: { fontSize: 12, color: T.muted } }, "Last emailed", inv.sentTo ? ` to ${inv.sentTo}` : "", ": ", E("a", { href: inv.pdfUrl, target: "_blank", rel: "noopener", style: { color: T.blue } }, "open PDF")));
+
+  // ── List ──
+  const shown = list.filter(i => filter === "archived" ? i.archived : !i.archived);
+  const badge = s => ({ Draft: ["#F3F4F6", "#374151"], Sent: [T.blueLt, T.blue], Accepted: [T.greenLt, T.green], Expired: [T.redLt, T.red] }[s] || ["#F3F4F6", "#374151"]);
+  return E("div", { style: { maxWidth: 760, margin: "0 auto" } },
+    E("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 } },
+      E("h2", { style: { fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 20, margin: 0 } }, "🧾 Pro Forma Invoices"),
+      E(Btn, { onClick: () => { setInv(newInvoice(list)); setIsNew(true); } }, "+ New invoice")),
+    E("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" } },
+      [["active", "Active"], ["archived", "Archived"]].map(([k, l]) => E(Btn, { key: k, variant: filter === k ? "primary" : "ghost", style: { fontSize: 12, padding: "6px 12px" }, onClick: () => setFilter(k) }, `${l} (${list.filter(i => k === "archived" ? i.archived : !i.archived).length})`)),
+      E("span", { style: { flex: 1 } }),
+      E(Btn, { variant: "ghost", style: { fontSize: 12, padding: "6px 12px" }, onClick: backup }, "⬇️ Backup (Excel)"),
+      filter === "archived" && E(Btn, { variant: "danger", style: { fontSize: 12, padding: "6px 12px" }, onClick: clearArchived }, "Clear archived")),
+    shown.length === 0
+      ? E("div", { style: { textAlign: "center", padding: "40px 20px", color: T.muted } }, filter === "archived" ? "No archived invoices." : "No invoices yet. Tap “+ New invoice”.")
+      : E("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+          shown.map(i => { const [bg, fg] = badge(i.status); return E("div", { key: i.id, onClick: () => { setInv(JSON.parse(JSON.stringify(i))); setIsNew(false); }, style: { background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 16px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 } },
+            E("div", null,
+              E("div", { style: { fontWeight: 700, fontSize: 13 } }, i.id, E("span", { style: { background: bg, color: fg, fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 99, marginLeft: 8 } }, i.status)),
+              E("div", { style: { fontSize: 12, color: T.muted, marginTop: 2 } }, (i.billTo && i.billTo.name) || "No customer yet", " · ", fmtInvDate(i.date))),
+            E("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+              E("div", { style: { fontWeight: 700 } }, invMoney(invTotals(i).total)),
+              E(Btn, { variant: "ghost", style: { fontSize: 11, padding: "4px 8px" }, onClick: e => { e.stopPropagation(); duplicate(i); } }, "Duplicate"))); })));
+}
+
 // ── Start fresh: reset chosen areas of test data (products, customers, staff and settings are never touched) ──
 const RESET_AREAS = [
   { id:"sales",    label:"Sales & receipts (includes returns and exchanges)", keys:["tpp-sales"] },
@@ -6450,9 +6899,10 @@ const RESET_AREAS = [
   { id:"ledger",   label:"Purchases ledger", keys:["tpp-purchases-ledger"] },
   { id:"receives", label:"Stock receives", keys:["tpp-stock-receives"] },
   { id:"counts",   label:"Inventory counts", keys:["tpp-count-history","tpp-count-pending"] },
-  { id:"todos",    label:"To-do list", keys:["tpp-todos"] }
+  { id:"todos",    label:"To-do list", keys:["tpp-todos"] },
+  { id:"invoices", label:"Pro forma invoices", keys:["tpp-invoices"] }
 ];
-const BACKUP_KEYS = ["tpp-sales","tpp-parked-sales","tpp-store-credits","tpp-tickets-v1","tpp-deposits","tpp-bookings","tpp-eod","tpp-shifts","tpp-expenses","tpp-expenses-inventory-purchase-backup","tpp-reimbursements","tpp-debts","tpp-debt-payments2","tpp-rental-income","tpp-purchase-orders","tpp-purchases-ledger","tpp-stock-receives","tpp-count-history","tpp-count-pending","tpp-todos","tpp-phones","tpp-phones-v1","tpp-customers","tpp-staff","tpp-warranty-settings"];
+const BACKUP_KEYS = ["tpp-sales","tpp-parked-sales","tpp-store-credits","tpp-tickets-v1","tpp-deposits","tpp-bookings","tpp-eod","tpp-shifts","tpp-expenses","tpp-expenses-inventory-purchase-backup","tpp-reimbursements","tpp-debts","tpp-debt-payments2","tpp-rental-income","tpp-purchase-orders","tpp-purchases-ledger","tpp-stock-receives","tpp-count-history","tpp-count-pending","tpp-todos","tpp-invoices","tpp-phones","tpp-phones-v1","tpp-customers","tpp-staff","tpp-warranty-settings"];
 
 function StartFreshTool() {
   const E = React.createElement;
@@ -6987,6 +7437,12 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [customers,setCustomers]=useState([]);
   const [credits,setCredits]=useState([]);
   const [parkedSales,setParkedSales]=useState([]);
+  // Services are stored (tpp-services) so the owner can add/rename/remove them; every service is variable-priced.
+  const [services,setServices]=useState(SERVICES_CATALOG);
+  const [svcEdit,setSvcEdit]=useState(false);
+  const [svcDraft,setSvcDraft]=useState([]);
+  const isOwnerUser=!user||user.role==="owner";
+  useEffect(()=>{(async()=>{ try{ const v=await load("tpp-services"); if(Array.isArray(v)&&v.length) setServices(v); }catch{} })();},[]);
   const [search,setSearch]=useState("");
   const [searchResults,setSearchResults]=useState([]);
   const [showScanner,setShowScanner]=useState(false);
@@ -7027,6 +7483,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [orderEmailModal,setOrderEmailModal]=useState(null); // {sale, email}
   const [orderEmailSending,setOrderEmailSending]=useState(false);
   const [photoPreview,setPhotoPreview]=useState(null); // image url, or null — shown only when tapped
+  // In-page question shown when a repair ticket is paid: is this the final payment, and should the ticket be marked Collected?
+  const [ticketAsk,setTicketAsk]=useState(null);
+  const askTicketFinal=(amt,bal,name)=>new Promise(res=>setTicketAsk({amt,bal,name,res}));
   // Exchange/Return
   const [isExchange,setIsExchange]=useState(false);
   const [isReturn,setIsReturn]=useState(false);
@@ -7104,14 +7563,19 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     const prodRes=catalogRes;
     const tickRes=tickets
       .filter(t=>t.id?.toLowerCase().includes(q)||t.customerName?.toLowerCase().includes(q)||t.customerPhone?.includes(q))
-      .slice(0,3).map(t=>({type:"ticket",id:t.id,name:`Repair Deposit — ${t.customerName} (${t.id})`,price:0,subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`,raw:t}));
+      .slice(0,3).map(t=>({type:"ticket",id:t.id,name:`Repair — ${t.customerName} (${t.id})`,price:0,subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`,raw:t}));
     setSearchResults([...phoneRes,...prodRes,...tickRes]);
   },[search,phones,products,tickets]);
 
   const addToCart=(item)=>{
     if(item.type==="ticket"){
       if(cart.find(c=>c.ticketId===item.id)){alert("This ticket is already in the cart.");return;}
-      setCart(c=>[...c,{type:"ticket",id:item.id,name:item.name,price:0,qty:1,ticketId:item.id,isDeposit:true,raw:item.raw}]);
+      {
+        // Prefill the amount with what's still owed: final cost (else the estimate) minus what's already been paid.
+        const tk=item.raw||{}; const cost=parseFloat(tk.finalCost)||parseFloat(tk.estimatedCost)||0; const paidSoFar=parseFloat(tk.totalPaid)||0;
+        const balance=Math.max(0,cost-paidSoFar);
+        setCart(c=>[...c,{type:"ticket",id:item.id,name:item.name.replace(/^Repair Deposit — /,"Repair — "),price:balance,qty:1,ticketId:item.id,isDeposit:true,ticketCost:cost,ticketPaid:paidSoFar,ticketBalance:balance,raw:item.raw}]);
+      }
       setSearch("");setSearchResults([]);
     } else if(item.type==="imei_product"){
       // Show unit picker for IMEI products
@@ -7296,6 +7760,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         await save("tpp-expenses",[expEntry,...allExp]);
       }
     }
+    // Repair ticket in the cart: a payment smaller than the balance is a deposit; otherwise ask whether it is the final payment.
+    let ticketDecision=null;
+    {
+      const tl=cart.find(i=>i.type==="ticket");
+      if(tl&&!isExchange&&!isReturn){
+        const amt=(parseFloat(tl.price)||0)*(tl.qty||1);
+        const bal=parseFloat(tl.ticketBalance)||0;
+        if(bal>0&&amt<bal-0.005) ticketDecision={final:false,collect:false};
+        else { ticketDecision=await askTicketFinal(amt,bal,tl.name); if(!ticketDecision)return; }
+      }
+    }
     setProcessing(true);
     try{
       // Strict read: if the sales ledger can't be read, stop — never save over it with a partial list.
@@ -7303,7 +7778,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       try{ existing=(await loadStrict("tpp-sales"))||[]; }
       catch(e){ console.error("checkout: sales load failed",e); alert("⚠️ Couldn't reach the sales ledger, so this sale was NOT recorded and inventory was NOT changed. Check the connection and try again."); return; }
       const hasTicket=cart.some(i=>i.type==="ticket");
-      const prefix=hasTicket?"DEP":"RCP";
+      const ticketIsDeposit=hasTicket&&!(ticketDecision&&ticketDecision.final);
+      const prefix=ticketIsDeposit?"DEP":"RCP";
       const saleId=genSaleId(existing.map(s=>s.id),prefix);
       const servedBy=user?.name||"";
       const sale={
@@ -7314,7 +7790,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         credit_card:parseFloat(creditCard)||0,ncb_transfer:parseFloat(ncbTransfer)||0,
         scotia_transfer:parseFloat(scotiaTransfer)||0,other_payment:parseFloat(otherPayment)||0,
         change,note,servedBy,
-        isExchange,isReturn,isDeposit:hasTicket,
+        isExchange,isReturn,isDeposit:ticketIsDeposit,
+        ...(hasTicket?(()=>{const tl=cart.find(i=>i.type==="ticket");const amt=(parseFloat(tl.price)||0)*(tl.qty||1);const cost=parseFloat(tl.ticketCost)||0;return {ticketId:tl.ticketId,isTicketPayment:true,ticketFinal:!ticketIsDeposit,...(cost>0?{ticketBalanceAfter:Math.max(0,cost-(parseFloat(tl.ticketPaid)||0)-amt)}:{})};})():{}),
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
         // Cost of the original item(s) handed back on an exchange (snapshot at sale time) so COGS can be
         // reversed for them — the goods are back in stock (or written off if damaged), not sold.
@@ -7360,12 +7837,27 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         await reconcileHandedBackItems(exchangeItems,exchangeOrigSale?.id||saleId);
       }
 
-      // Log deposit against ticket
+      // Log the payment against the ticket (and, if you chose, mark it Collected)
       if(hasTicket){
         const ticketItem=cart.find(i=>i.type==="ticket");
         if(ticketItem){
+          const amt=(parseFloat(ticketItem.price)||0)*(ticketItem.qty||1);
+          const isFinalPay=!!(ticketDecision&&ticketDecision.final);
           const allTickets=await loadArr("tpp-tickets-v1");
-          const updatedTickets=allTickets.map(t=>t.id===ticketItem.ticketId?{...t,deposits:[...(t.deposits||[]),{saleId,amount:sale.total,date:todayStr()}],totalPaid:(t.totalPaid||0)+sale.total}:t);
+          const updatedTickets=allTickets.map(t=>{
+            if(t.id!==ticketItem.ticketId)return t;
+            const newPaid=(t.totalPaid||0)+amt;
+            let nt={...t,deposits:[...(t.deposits||[]),{saleId,amount:amt,date:todayStr(),final:isFinalPay}],totalPaid:newPaid,updatedAt:new Date().toISOString()};
+            if(isFinalPay){
+              nt.paidInFull=true;
+              if(!parseFloat(nt.finalCost)) nt.finalCost=newPaid;
+              if(ticketDecision.collect&&nt.status!=="collected"){
+                nt.status="collected";
+                nt.history=[...(t.history||[]),{status:"collected",ts:new Date().toISOString(),note:`Paid in full (${saleId}) and collected.`}];
+              }
+            }
+            return nt;
+          });
           await save("tpp-tickets-v1",updatedTickets);
         }
       }
@@ -7421,12 +7913,12 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         }
       }
       // A voided repair-deposit receipt comes off the ticket's paid total.
-      if(sale.isDeposit){
+      if(sale.isDeposit||sale.ticketId){
         const tix=await loadArr("tpp-tickets-v1");
         await save("tpp-tickets-v1",tix.map(t=>{
           const dep=(t.deposits||[]).filter(d=>d.saleId===sale.id);
           if(!dep.length)return t;
-          return {...t,deposits:(t.deposits||[]).filter(d=>d.saleId!==sale.id),totalPaid:Math.max(0,(t.totalPaid||0)-dep.reduce((n,d)=>n+(d.amount||0),0))};
+          return {...t,deposits:(t.deposits||[]).filter(d=>d.saleId!==sale.id),totalPaid:Math.max(0,(t.totalPaid||0)-dep.reduce((n,d)=>n+(d.amount||0),0)),...(dep.some(d=>d.final)?{paidInFull:false}:{})};
         }));
       }
     }catch(e){console.error("Void sale inventory restore:",e);alert("The receipt was voided, but stock couldn't be restored automatically — please check the Catalog.");}
@@ -7585,15 +8077,34 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   if(view==="services")return E("div",{style:{maxWidth:600,margin:"0 auto"}},
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔧 Services"),
-      E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
+      E("div",{style:{display:"flex",gap:12,alignItems:"center"}},
+        isOwnerUser&&!svcEdit&&E("button",{onClick:()=>{setSvcDraft(services.map(x=>({...x})));setSvcEdit(true);},style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"✏️ Edit services"),
+        E("button",{onClick:()=>{setSvcEdit(false);setView("pos");},style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back"))
     ),
-    E("div",{style:{fontSize:13,color:T.muted,marginBottom:16}},"Tap to add to cart. Edit price on cart screen."),
-    E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-      SERVICES_CATALOG.map((svc,i)=>E("div",{key:i,onClick:()=>{addToCart({type:"product",id:`svc-${Date.now()}-${i}`,name:svc.name,price:svc.price,raw:svc});setView("pos");},style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
-        E("div",null,E("div",{style:{fontWeight:600,fontSize:13}},svc.name),svc.note&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},svc.note)),
-        E("div",{style:{fontWeight:700,color:svc.price>0?T.blue:T.muted}},svc.price>0?fmtMoney(svc.price):"Variable")
-      ))
-    )
+    svcEdit
+      ? E("div",null,
+          E("div",{style:{fontSize:13,color:T.muted,marginBottom:12}},"Rename, add or remove services. Every service is variable-priced: the price is entered in the cart each time."),
+          E("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:12}},
+            svcDraft.map((svc,i)=>E("div",{key:i,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+              E(Input,{value:svc.name,placeholder:"Service name",style:{flex:"2 1 160px"},onChange:e=>setSvcDraft(d=>d.map((x,j)=>j===i?{...x,name:e.target.value}:x))}),
+              E(Input,{value:svc.note||"",placeholder:"Note (optional)",style:{flex:"2 1 140px"},onChange:e=>setSvcDraft(d=>d.map((x,j)=>j===i?{...x,note:e.target.value}:x))}),
+              E(Btn,{variant:"danger",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setSvcDraft(d=>d.filter((_,j)=>j!==i))},"✕")))),
+          E("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+            E(Btn,{variant:"ghost",onClick:()=>setSvcDraft(d=>[...d,{name:"",price:0,note:""}])},"+ Add service"),
+            E(Btn,{onClick:async()=>{
+              const clean=svcDraft.map(x=>({name:String(x.name||"").trim(),price:0,note:String(x.note||"").trim()})).filter(x=>x.name);
+              if(!clean.length){alert("Keep at least one service.");return;}
+              const ok=await save("tpp-services",clean);
+              if(!ok){alert("⚠️ Couldn't save services: "+(window.__lastSaveError||"unknown error"));return;}
+              setServices(clean);setSvcEdit(false);
+            }},"💾 Save services"),
+            E(Btn,{variant:"ghost",onClick:()=>setSvcEdit(false)},"Cancel")))
+      : E("div",null,
+          E("div",{style:{fontSize:13,color:T.muted,marginBottom:16}},"Tap to add to cart. Enter the price on the cart screen."),
+          E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+            services.map((svc,i)=>E("div",{key:i,onClick:()=>{addToCart({type:"product",id:`svc-${Date.now()}-${i}`,name:svc.name,price:0,raw:{...svc,price:0}});setView("pos");},style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              E("div",null,E("div",{style:{fontWeight:600,fontSize:13}},svc.name),svc.note&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},svc.note)),
+              E("div",{style:{fontWeight:700,color:T.muted}},"Variable")))))
   );
 
   // ── Parked Sales view ─────────────────────────────────────────────────────────
@@ -7691,6 +8202,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   return E("div",{style:{maxWidth:680,margin:"0 auto"}},
     showScanner&&E(BarcodeScanner,{onDetected:code=>{setShowScanner(false);let foundUnit=null,foundProduct=null;for(const p of products){if(p.units&&p.units.length){const u=p.units.find(u=>unitMatchesCode(u,code)&&u.status==="Available");if(u){foundUnit=u;foundProduct=p;break;}}}if(foundUnit){const dupes=products.reduce((n,p)=>n+(p.units||[]).filter(u=>unitMatchesCode(u,code)&&u.status==="Available").length,0);if(dupes>1){alert(`${dupes} phones share the code ${code}. Pick the right one by its IMEI.`);setSearch(code);}else addUnitToCart(foundProduct,foundUnit);}else{const prod=products.find(p=>p.barcode===code);if(prod){addToCart({type:"product",id:prod.id,name:prod.name,price:parseFloat(prod.price)||0,raw:prod});}else{const ph=phones.find(p=>p.imei===code&&p.availability==="Available");if(ph){addToCart({type:"phone",id:ph.imei,name:`${ph.make||""} ${ph.model||""} ${ph.storage||""} ${ph.color||""}`.trim(),price:parseFloat(ph.expected_sell)||0,imei:ph.imei,raw:ph});}else{setSearch(code);}}}},onClose:()=>setShowScanner(false)}),
 
+    ticketAsk&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:440,width:"100%"}},
+        E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,marginBottom:6}},"Is this the final payment?"),
+        E("div",{style:{fontSize:13,color:T.muted,marginBottom:16,lineHeight:1.6}},
+          `${ticketAsk.name}: paying ${fmtMoney(ticketAsk.amt)} now`,ticketAsk.bal>0?` against a balance of ${fmtMoney(ticketAsk.bal)}.`:".",
+          " If more work came up and the price needs to change, choose “Not the final payment” so the ticket stays open."),
+        E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+          E(Btn,{full:true,onClick:()=>{const a=ticketAsk;setTicketAsk(null);a.res({final:true,collect:true});}},"✅ Final payment — mark ticket Collected"),
+          E(Btn,{full:true,variant:"ghost",onClick:()=>{const a=ticketAsk;setTicketAsk(null);a.res({final:true,collect:false});}},"Final payment — leave ticket status as is"),
+          E(Btn,{full:true,variant:"ghost",onClick:()=>{const a=ticketAsk;setTicketAsk(null);a.res({final:false,collect:false});}},"Not the final payment (deposit)"),
+          E("button",{onClick:()=>{const a=ticketAsk;setTicketAsk(null);a.res(null);},style:{background:"none",border:"none",color:T.muted,fontSize:13,cursor:"pointer",padding:"6px"}},"Cancel")))),
     // Photo preview — tap 👁️ next to any item to see its photo; closes on tap-away
     photoPreview&&E("div",{onClick:()=>setPhotoPreview(null),style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"pointer"}},
       E("img",{src:photoPreview,style:{maxWidth:"90vw",maxHeight:"85vh",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}),
@@ -7828,7 +8350,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           return E("div",{key:idx,style:{padding:"10px 16px",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"flex-start",gap:10}},
           itemImage&&E("button",{onClick:()=>setPhotoPreview(itemImage),title:"View photo",style:{width:30,height:30,borderRadius:7,background:"#F3F4F6",border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,cursor:"pointer",marginTop:2}},"👁️"),
           E("div",{style:{flex:1,minWidth:0}},
-            E("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},item.type==="ticket"?"🎫":item.type==="phone"?"📱":"📦"," ",item.name,item.isDeposit&&E("span",{style:{background:T.amber,color:"#fff",fontSize:9,padding:"1px 5px",borderRadius:3,marginLeft:6}},"DEPOSIT")),
+            E("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},item.type==="ticket"?"🎫":item.type==="phone"?"📱":"📦"," ",item.name,item.type==="ticket"&&E("span",{style:{background:T.blue,color:"#fff",fontSize:9,padding:"1px 5px",borderRadius:3,marginLeft:6}},"REPAIR PAYMENT")),
+            item.type==="ticket"&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:4}},item.ticketCost>0?`Price ${fmtMoney(item.ticketCost)} · paid so far ${fmtMoney(item.ticketPaid||0)} · balance ${fmtMoney(item.ticketBalance||0)}. Amount below = what is being paid now.`:"No price set on this ticket. Enter the amount being paid now."),
             item.type==="phone"&&E(Input,{placeholder:"IMEI",value:item.imei||"",onChange:e=>updateCartField(idx,"imei",e.target.value),style:{fontSize:11,padding:"4px 8px",marginBottom:4}}),
             E(Input,{placeholder:"Note (optional)",value:item.note||"",onChange:e=>updateCartField(idx,"note",e.target.value),style:{fontSize:11,padding:"4px 8px"}})
           ),
@@ -9026,6 +9549,9 @@ function OwnerShell({
     id: "purchases",
     label: "💸 Purchases"
   }, {
+    id: "invoices",
+    label: "🧾 Invoices"
+  }, {
     id: "valuation",
     label: "📊 Valuation"
   }, {
@@ -9229,7 +9755,7 @@ function OwnerShell({
   }), tab === "rental" && /*#__PURE__*/React.createElement(RentalIncomeForm, {
     user: user,
     onDone: fetchAll
-  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(ProductsTab, { data: data, user: user, fetchAll: fetchAll, updatePhones: updatePhones, archiveOldSales: archiveOldSales, initialSubTab: "testing" }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user }), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
+  }), tab === "expense-history" && /*#__PURE__*/React.createElement(ExpenseHistory, null), tab === "eod-history" && /*#__PURE__*/React.createElement(EodHistory, null), tab === "debt" && /*#__PURE__*/React.createElement(DebtLedger, null), tab === "credits" && /*#__PURE__*/React.createElement(StoreCreditsTab, null), tab === "customers" && /*#__PURE__*/React.createElement(CustomersTab, null), tab === "todo" && /*#__PURE__*/React.createElement(ToDoTab, { isOwner: true }), tab === "purchases" && /*#__PURE__*/React.createElement(PurchasesTab, null), tab === "invoices" && /*#__PURE__*/React.createElement(InvoicesTab, null), tab === "valuation" && /*#__PURE__*/React.createElement(InventoryValuation, { phones: data.phones || [] }), tab === "count" && /*#__PURE__*/React.createElement(InventoryCount, { user: user, isOwner: true }), tab === "testing" && /*#__PURE__*/React.createElement(ProductsTab, { data: data, user: user, fetchAll: fetchAll, updatePhones: updatePhones, archiveOldSales: archiveOldSales, initialSubTab: "testing" }), tab === "payroll" && /*#__PURE__*/React.createElement(PayrollManager, null), tab === "redeem" && /*#__PURE__*/React.createElement(RedeemSpinPanel, { user: user }), tab === "settings" && /*#__PURE__*/React.createElement(SettingsTab, null), tab === "import-export" && /*#__PURE__*/React.createElement(DataImportExportTab, null))));
 }
 
 
