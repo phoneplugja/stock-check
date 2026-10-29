@@ -12778,6 +12778,8 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
   const [moveUnit, setMoveUnit] = useState(null); // { productId, unitIdx } | null
   const [moveTargetId, setMoveTargetId] = useState("");
   const [busyUnit, setBusyUnit] = useState(null); // `${productId}:${unitIdx}` currently saving
+  const [selMode, setSelMode] = useState(false);
+  const [selIds, setSelIds] = useState(new Set());
 
   const changeUnitStatus = async (product, unitIdx, newStatus) => {
     const unit = (product.units||[])[unitIdx];
@@ -12857,6 +12859,23 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
   const grouped = {};
   filtered.forEach(p=>{ const c=p.category||"Other"; if(!grouped[c])grouped[c]=[]; grouped[c].push(p); });
 
+  // Bulk select / delete. Phone (IMEI) products are left out on purpose, because deleting one
+  // would also throw away its tracked units — those are removed one at a time with the 🗑️ button.
+  const selectable = filtered.filter(p=>!isImeiCategory(p.category));
+  const toggleSel = id => setSelIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+  const selectMany = (list,on) => setSelIds(prev=>{ const n=new Set(prev); list.forEach(p=>on?n.add(p.id):n.delete(p.id)); return n; });
+  const exitSel = () => { setSelMode(false); setSelIds(new Set()); };
+  const deleteSelected = async () => {
+    const chosen = catalog.filter(p=>selIds.has(p.id) && !isImeiCategory(p.category));
+    if (!chosen.length) return;
+    const preview = chosen.slice(0,8).map(p=>"• "+p.name).join("\n") + (chosen.length>8 ? `\n…and ${chosen.length-8} more` : "");
+    if (!confirm(`Permanently delete ${chosen.length} product${chosen.length===1?"":"s"}?\n\n${preview}\n\nThis can't be undone. Past sales are not affected.`)) return;
+    const gone = new Set(chosen.map(p=>p.id));
+    await saveCatalogFn(catalog.filter(p=>!gone.has(p.id)));
+    exitSel();
+    alert(`✅ Deleted ${chosen.length} product${chosen.length===1?"":"s"}.`);
+  };
+
   // Full IMEI-tracked product list (unfiltered by search/category) — used as the "move to" target
   // list when reattributing a unit, so staff can find the correct product even while a search/
   // category filter is narrowing what's shown above.
@@ -12878,7 +12897,9 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
     E("input",{ref:photoInputRef,type:"file",accept:"image/*",style:{display:"none"},onChange:e=>onPhotoChosen(e.target.files[0])}),
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"Catalog ",E("span",{style:{fontSize:14,color:T.muted,fontWeight:400}},`· ${catalog.length} products`)),
-      E(Btn,{onClick:()=>{setShowAddForm(s=>!s);setEditingProduct(null);setFormS(emptyForm());}},showAddForm?"✕ Cancel":"+ Add Product")
+      E("div",{style:{display:"flex",gap:8}},
+        E(Btn,{variant:selMode?"primary":"ghost",onClick:()=>selMode?exitSel():setSelMode(true)},selMode?"✕ Done selecting":"☑️ Select"),
+        E(Btn,{onClick:()=>{setShowAddForm(s=>!s);setEditingProduct(null);setFormS(emptyForm());}},showAddForm?"✕ Cancel":"+ Add Product"))
     ),
     showAddForm && E(Card,{style:{marginBottom:16}},
       E(ST,null,editingProduct?"Edit Product":"New Product"),
@@ -12905,17 +12926,28 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
       ),
       E(Input,{placeholder:"🔍 Search...",value:search,onChange:e=>setSearch(e.target.value)})
     ),
+    selMode && E("div",{style:{position:"sticky",top:0,zIndex:20,background:T.blueLt,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}},
+      E("strong",{style:{fontSize:13}},`${selIds.size} selected`),
+      E("span",{style:{fontSize:12,color:T.muted}},`· ${selectable.length} shown`),
+      E("span",{style:{flex:1}}),
+      E(Btn,{variant:"ghost",style:{fontSize:12,padding:"6px 12px"},onClick:()=>selectMany(selectable,true)},`Select all shown (${selectable.length})`),
+      E(Btn,{variant:"ghost",style:{fontSize:12,padding:"6px 12px"},onClick:()=>setSelIds(new Set())},"Clear"),
+      E(Btn,{variant:"danger",style:{fontSize:12,padding:"6px 12px"},disabled:selIds.size===0,onClick:deleteSelected},`🗑️ Delete selected (${selIds.size})`)
+    ),
     Object.keys(grouped).length===0
       ?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No products found.")
       :Object.entries(grouped).map(([cat,items])=>E("div",{key:cat,style:{marginBottom:24}},
-          E(ST,null,cat,` (${items.length})`),
+          E(ST,null,cat,` (${items.length})`,selMode&&!isImeiCategory(cat)&&E("button",{onClick:()=>{const all=items.every(p=>selIds.has(p.id));selectMany(items,!all);},style:{marginLeft:10,background:"none",border:"none",color:T.blue,fontSize:11,fontWeight:700,cursor:"pointer",padding:0}},items.every(p=>selIds.has(p.id))?"Unselect category":"Select category")),
           E("div",{style:{display:"flex",flexDirection:"column",gap:6}},
             items.map((product,i)=>{
               const avail = getAvailableStock(product);
               const isImei = isImeiCategory(product.category);
               const expanded = expandedProduct===product.id;
               return E("div",{key:i},
-                E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:isImei?"pointer":"default"},onClick:()=>isImei&&setExpandedProduct(expanded?null:product.id)},
+                E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,cursor:(isImei||selMode)?"pointer":"default",...(selMode&&selIds.has(product.id)?{background:T.blueLt,borderColor:T.blue}:{})},onClick:()=>selMode?(!isImei&&toggleSel(product.id)):(isImei&&setExpandedProduct(expanded?null:product.id))},
+                  selMode && (isImei
+                    ? E("span",{title:"Phone products are deleted one at a time",style:{width:20,flexShrink:0,textAlign:"center",color:T.muted,fontSize:12}},"—")
+                    : E("input",{type:"checkbox",checked:selIds.has(product.id),onChange:()=>toggleSel(product.id),onClick:e=>e.stopPropagation(),style:{width:20,height:20,flexShrink:0,cursor:"pointer"}})),
                   product.image
                     ? E("img",{src:cloudinaryThumb(product.image,60),style:{width:44,height:44,borderRadius:8,objectFit:"cover",flexShrink:0,border:`1px solid ${T.border}`}})
                     : E("div",{style:{width:44,height:44,borderRadius:8,background:"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,color:T.muted}},"📦"),
