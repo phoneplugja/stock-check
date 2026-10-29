@@ -460,9 +460,9 @@ const getPdfLogo = () => new Promise(resolve => {
   try {
     const img = new Image();
     img.onload = () => {
-      const sw = 842, sh = 442, c = document.createElement("canvas"); c.width = 632; c.height = Math.round(632 * sh / sw);
+      const sw = 842, sh = 442, c = document.createElement("canvas"); c.width = 420; c.height = Math.round(420 * sh / sw);
       const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0,0,c.width,c.height); x.drawImage(img,119,319,sw,sh,0,0,c.width,c.height);
-      __pdfLogo = { url: c.toDataURL("image/jpeg", 0.92), ratio: sh / sw }; resolve(__pdfLogo);
+      __pdfLogo = { url: c.toDataURL("image/jpeg", 0.8), ratio: sh / sw }; resolve(__pdfLogo);
     };
     img.onerror = () => resolve(null);
     img.src = LOGO_SRC;
@@ -471,7 +471,7 @@ const getPdfLogo = () => new Promise(resolve => {
 const newPdfDoc = () => {
   const J = window.jspdf && window.jspdf.jsPDF;
   if (!J) throw new Error("PDF library didn't load (check the internet connection and reload).");
-  return new J({ unit: "mm", format: "a4" });
+  return new J({ unit: "mm", format: "a4", compress: true });
 };
 const pdfWhen = iso => { try { const d = new Date(iso || Date.now()); return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"America/Jamaica"}) + " " + d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); } catch { return ""; } };
 
@@ -6761,18 +6761,21 @@ function InvoicesTab() {
     try {
       setBusy("Saving…");
       const saved = await saveInv(); if (!saved) return;
-      setBusy("Making PDF and uploading…");
+      setBusy("Making PDF…");
       const doc = await buildInvoicePdf(saved);
-      const url = await uploadPdfToCloudinary(doc.output("blob"), `${saved.id}-${Date.now().toString(36)}`, "invoices");
+      const pdfData = doc.output("datauristring");
+      let url = "";
+      try { setBusy("Saving a backup copy…"); url = await uploadPdfToCloudinary(doc.output("blob"), `${saved.id}-${Date.now().toString(36)}`, "invoices"); } catch (e) { console.warn("Backup upload skipped", e); }
       setBusy("Sending email…");
       const tt = invTotals(saved);
       await emailjs.send(EMAILJS_SERVICE_ID, INVOICE_EMAIL_TEMPLATE, {
         to_email: to, customer_name: saved.billTo.attn || saved.billTo.name || "there",
         invoice_number: saved.id, invoice_date: fmtInvDate(saved.date), valid_until: fmtInvDate(saved.validUntil),
         items_html: buildInvoiceItemsHtml(saved), subtotal: invMoney(tt.subtotal), discount: tt.discount > 0 ? "-" + invMoney(tt.discount) : "",
-        total: invMoney(tt.total), pdf_link: url, notes: saved.notes || ""
+        total: invMoney(tt.total), pdf_link: url, notes: saved.notes || "",
+        invoice_pdf: pdfData, pdf_name: saved.id + ".pdf"
       });
-      const done = { ...saved, status: saved.status === "Draft" ? "Sent" : saved.status, pdfUrl: url, sentAt: new Date().toISOString(), sentTo: to };
+      const done = { ...saved, status: saved.status === "Draft" ? "Sent" : saved.status, pdfUrl: url || saved.pdfUrl, sentAt: new Date().toISOString(), sentTo: to };
       await saveInv(done);
       alert("✅ Invoice emailed to " + to + ".");
     } catch (e) { console.error(e); alert("⚠️ Couldn't send: " + (e && (e.text || e.message) ? (e.text || e.message) : e)); }
