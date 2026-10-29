@@ -537,8 +537,8 @@ const uploadPdfToCloudinary = async (blob, name, folder) => {
   form.append("file", blob, name + ".pdf");
   form.append("upload_preset", uploadPreset);
   if (folder) form.append("folder", folder);
-  form.append("public_id", name);
-  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, { method: "POST", body: form });
+  form.append("public_id", name + ".pdf");
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`, { method: "POST", body: form });
   if (!res.ok) { let m = ""; try { m = (await res.json()).error?.message || ""; } catch {} throw new Error(`Cloudinary upload failed (${res.status}) ${m}`.trim()); }
   const data = await res.json();
   return data.secure_url;
