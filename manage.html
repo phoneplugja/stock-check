@@ -6688,15 +6688,15 @@ const buildInvoicePdf = async (inv) => {
   }
   // notes
   if ((inv.notes || "").trim()) {
-    const nl = doc.splitTextToSize(inv.notes.trim(), CW - 10);
-    const nh = 10 + nl.length * 4.4;
-    if (y + nh > 280) { doc.addPage(); y = M; }
-    doc.setFillColor(255, 251, 235).roundedRect(M, y, CW, nh, 1.5, 1.5, "F");
-    doc.setFillColor(217, 119, 6).rect(M, y, 1.2, nh, "F");
-    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(146, 64, 14).text("NOTES & TERMS", M + 5, y + 5.5);
-    doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(74, 58, 31);
-    nl.forEach((p, q) => doc.text(p, M + 5, y + 10.5 + q * 4.4));
-    y += nh + 6;
+    doc.setFont("helvetica", "normal").setFontSize(9.5);
+    const nl = [];
+    inv.notes.trim().split(/\r?\n/).forEach(par => { if (!par.trim()) nl.push(""); else doc.splitTextToSize(par, CW).forEach(p => nl.push(p)); });
+    if (y > 262) { doc.addPage(); y = M; }
+    doc.setDrawColor(17, 24, 39).setLineWidth(0.3).line(M, y, W - M, y); y += 5.5;
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(17, 24, 39).text("NOTES & TERMS", M, y); y += 5;
+    doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(17, 24, 39);
+    nl.forEach(p => { if (y > 280) { doc.addPage(); y = M; doc.setFont("helvetica", "normal").setFontSize(9.5).setTextColor(17, 24, 39); } doc.text(p, M, y); y += 4.8; });
+    y += 4;
   }
   doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(107, 114, 128).text("Thank you for your business  -  The Phone Plug  -  @phoneplug_ja", W / 2, 289, { align: "center" });
   return doc;
@@ -6764,21 +6764,30 @@ function InvoicesTab() {
       setBusy("Making PDF…");
       const doc = await buildInvoicePdf(saved);
       const pdfData = doc.output("datauristring");
-      let url = "";
-      try { setBusy("Saving a backup copy…"); url = await uploadPdfToCloudinary(doc.output("blob"), `${saved.id}-${Date.now().toString(36)}`, "invoices"); } catch (e) { console.warn("Backup upload skipped", e); }
       setBusy("Sending email…");
       const tt = invTotals(saved);
       await emailjs.send(EMAILJS_SERVICE_ID, INVOICE_EMAIL_TEMPLATE, {
         to_email: to, customer_name: saved.billTo.attn || saved.billTo.name || "there",
         invoice_number: saved.id, invoice_date: fmtInvDate(saved.date), valid_until: fmtInvDate(saved.validUntil),
         items_html: buildInvoiceItemsHtml(saved), subtotal: invMoney(tt.subtotal), discount: tt.discount > 0 ? "-" + invMoney(tt.discount) : "",
-        total: invMoney(tt.total), pdf_link: url, notes: saved.notes || "",
+        total: invMoney(tt.total), pdf_link: "", notes: saved.notes || "",
         invoice_pdf: pdfData, pdf_name: saved.id + ".pdf"
       });
-      const done = { ...saved, status: saved.status === "Draft" ? "Sent" : saved.status, pdfUrl: url || saved.pdfUrl, sentAt: new Date().toISOString(), sentTo: to };
+      const done = { ...saved, status: saved.status === "Draft" ? "Sent" : saved.status, sentAt: new Date().toISOString(), sentTo: to };
       await saveInv(done);
       alert("✅ Invoice emailed to " + to + ".");
     } catch (e) { console.error(e); alert("⚠️ Couldn't send: " + (e && (e.text || e.message) ? (e.text || e.message) : e)); }
+    finally { setBusy(""); }
+  };
+  const saveToCloud = async () => {
+    try {
+      setBusy("Uploading PDF to Cloudinary…");
+      const saved = await saveInv(); if (!saved) return;
+      const doc = await buildInvoicePdf(saved);
+      const url = await uploadPdfToCloudinary(doc.output("blob"), `${saved.id}-${Date.now().toString(36)}`, "invoices");
+      await saveInv({ ...saved, pdfUrl: url });
+      alert("✅ PDF saved to Cloudinary (invoices folder).");
+    } catch (e) { alert("⚠️ Couldn't upload: " + (e && e.message ? e.message : e)); }
     finally { setBusy(""); }
   };
   const duplicate = async (src) => {
@@ -6856,9 +6865,10 @@ function InvoicesTab() {
       E(Btn, { disabled: !!busy, onClick: async () => { const r = await saveInv(); if (r) alert("✅ Saved."); } }, "💾 Save"),
       E(Btn, { variant: "ghost", disabled: !!busy, onClick: download }, "⬇️ Download PDF"),
       E(Btn, { variant: "ghost", disabled: !!busy, onClick: emailIt }, "✉️ Email to customer"),
+      E(Btn, { variant: "ghost", disabled: !!busy, onClick: saveToCloud }, "☁️ Save PDF to Cloudinary"),
       !isNew && E(Btn, { variant: "ghost", disabled: !!busy, onClick: () => toggleArchive(inv) }, inv.archived ? "↩︎ Unarchive" : "📦 Archive"),
       !isNew && E(Btn, { variant: "danger", disabled: !!busy, onClick: () => del(inv.id) }, "Delete")),
-    inv.pdfUrl && E("div", { style: { fontSize: 12, color: T.muted } }, "Last emailed", inv.sentTo ? ` to ${inv.sentTo}` : "", ": ", E("a", { href: inv.pdfUrl, target: "_blank", rel: "noopener", style: { color: T.blue } }, "open PDF")));
+    inv.pdfUrl && E("div", { style: { fontSize: 12, color: T.muted } }, "Cloudinary copy: ", E("a", { href: inv.pdfUrl, target: "_blank", rel: "noopener", style: { color: T.blue } }, "open PDF")));
 
   // ── List ──
   const shown = list.filter(i => filter === "archived" ? i.archived : !i.archived);
