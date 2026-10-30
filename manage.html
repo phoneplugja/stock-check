@@ -7425,6 +7425,11 @@ const LOYVERSE_ALL_CATS = [
   "Parts & Components","Other"
 ];
 
+// Older imports saved two categories with no space after the dash ("Accessories- Samsung"). Those names are
+// not in any category dropdown or filter, so those products looked uncategorised. Treat them as the spaced names.
+const CATEGORY_FIXES = { "Accessories- Samsung":"Accessories - Samsung", "Accessories- Apple":"Accessories - Apple" };
+const fixCategoryName = c => CATEGORY_FIXES[String(c||"").trim()] || c;
+const fixCatalogCategories = arr => (arr||[]).map(p => (p && CATEGORY_FIXES[p.category]) ? { ...p, category: CATEGORY_FIXES[p.category] } : p);
 const loadCatalog = async () => {
   try {
     const meta = await load("tpp-products-meta");
@@ -7434,10 +7439,10 @@ const loadCatalog = async () => {
         const c = await load(`tpp-products-chunk-${i}`);
         if (Array.isArray(c)) all.push(...c);
       }
-      return all;
+      return fixCatalogCategories(all);
     }
   } catch {}
-  return await loadArr("tpp-products");
+  return fixCatalogCategories(await loadArr("tpp-products"));
 };
 
 
@@ -8700,7 +8705,7 @@ const buildAccessoryImportPlan = (rows, allProducts) => {
   rows.forEach((row, idx) => {
     const rowNum = idx + 2;
     const name = String(row.name || "").trim();
-    const category = String(row.category || "").trim();
+    const category = fixCategoryName(String(row.category || "").trim());
     const sku = String(row.sku || "").trim();
     const barcode = String(row.barcode || "").trim();
     const priceNum = row.price === "" ? NaN : parseFloat(row.price);
