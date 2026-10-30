@@ -7291,6 +7291,7 @@ const nameMatchScore = (nameA, nameB) => {
 };
 
 const suggestProductMatch = (catalog, line) => {
+  if (line && line.productId) { const pre = (catalog||[]).find(p => p.id === line.productId); if (pre) return pre; }
   const lineName = normalizeProductName(line.name);
   if (!lineName) return null;
   const sameCategory = (catalog||[]).filter(p => p.category === line.category);
@@ -11944,6 +11945,70 @@ function PurchasesLedgerView({ onBack }) {
   );
 }
 
+// ── AI reader for ANY supplier invoice / purchase record (phones, accessories, parts, cables…) ──
+// Reads a PDF or photo and fills in the New Purchase Order form. Nothing is saved until the user checks it.
+const scanTokens = (txt) => String(txt || "").toLowerCase()
+  .replace(/\bplus\b/g, "+").replace(/\b(galaxy|samsung|apple|iphone|for|the|and|with)\b/g, " ")
+  .replace(/[^a-z0-9+ ]+/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+const matchCatalogForLine = (catalog, lineName) => {
+  const lt = scanTokens(lineName); if (!lt.length) return null;
+  const digitToks = lt.filter(t => /\d/.test(t));
+  const wordToks = lt.filter(t => !/\d/.test(t));
+  let best = null, bestScore = 0;
+  (catalog || []).forEach(p => {
+    if (isImeiCategory(p.category)) return;
+    const pt = scanTokens(p.name); const ps = new Set(pt);
+    if (digitToks.some(d => !ps.has(d))) return;                    // model/size numbers must match exactly
+    // a model number in the catalog name that the line doesn't mention means a different item (S22 vs S22+)
+    const pDigits = pt.filter(t => /\d/.test(t)); if (pDigits.some(d => !digitToks.includes(d)) ) return;
+    const uw = [...new Set(wordToks)];
+    const hit = uw.filter(w => ps.has(w)).length;
+    if (hit === 0 && uw.length) return;
+    let score = uw.length ? hit / uw.length : 0.5;
+    const extras = [...ps].filter(t => t.length > 1 && !/\d/.test(t) && t !== "clear" && !lt.includes(t)).length;
+    score -= 0.2 * extras;
+    ["privacy","full","ultra","fe","pro","max","plus"].forEach(k => { if (ps.has(k) && !lt.includes(k)) score -= 0.4; });                                          // extra words in the catalog name (privacy, full, fe, brand…) mean it's probably a different item
+    if (score > bestScore) { bestScore = score; best = p; }
+  });
+  return bestScore >= 0.8 ? best : null;
+};
+const guessPoCategory = (kind) => ({ phone:"Like New Samsung", part:"Parts & Components", gadget:"Gadgets", accessory:"Accessories - Other" }[String(kind||"").toLowerCase()] || "Accessories - Other");
+const readSupplierDocWithAI = async (file, apiKey) => {
+  const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = () => rej(new Error("Couldn't read the file.")); r.readAsDataURL(file); });
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+  const block = isPdf ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:b64 } }
+                      : { type:"image", source:{ type:"base64", media_type:file.type || "image/jpeg", data:b64 } };
+  const prompt = `You are reading a supplier invoice, receipt, purchase order or purchase record for a phone and accessories shop in Jamaica (The Phone Plug).
+Extract it and reply with ONE JSON object only (no markdown, no commentary) shaped exactly like this:
+{
+ "supplier": "seller / supplier name",
+ "po_ref": "invoice, order or reference number, or empty string",
+ "date": "YYYY-MM-DD, or empty string",
+ "currency": "JMD or USD (JMD if prices use J$ or $ for a Jamaican seller; USD only if clearly US dollars)",
+ "payment_method": "as written, e.g. NCB bank transfer, cash, PayPal, or empty string",
+ "shipping": number (0 if none),
+ "tax": number (0 if none),
+ "invoice_total": number (the grand total printed, 0 if not shown),
+ "notes": "anything useful, e.g. paid in full, transfer reference, or empty string",
+ "lines": [ { "name": "clear description of ONE line item, include the model, e.g. Tempered glass Galaxy S22+", "kind": "phone | accessory | part | gadget", "qty": number, "unit_cost": number } ]
+}
+Rules: one entry in "lines" for every item row; ignore summary/subtotal rows so nothing is counted twice; unit_cost is the price of ONE unit before shipping/tax; numbers must be plain numbers with no currency symbols or commas; never invent items or prices that are not on the document.`;
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+    body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:4096, messages:[{ role:"user", content:[ block, { type:"text", text:prompt } ] }] })
+  });
+  if (resp.status === 401) throw new Error("Your Anthropic API key was rejected. Check it in Settings.");
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || "The AI service returned an error.");
+  const raw = (data.content || []).map(b => b.text || "").join("").trim();
+  const a = raw.indexOf("{"), z = raw.lastIndexOf("}");
+  let parsed = null;
+  if (a >= 0 && z > a) { try { parsed = JSON.parse(raw.slice(a, z + 1)); } catch {} }
+  if (!parsed) throw new Error(data.stop_reason === "max_tokens" ? "The document is very long and the answer was cut off. Try uploading one page at a time." : "The AI couldn't turn this into a purchase order. It said: " + raw.slice(0, 160));
+  return parsed;
+};
+
 function PurchasesTab() {
   const E = React.createElement;
   const [pos, setPos] = useState([]);
@@ -11990,6 +12055,41 @@ function PurchasesTab() {
     setPO("lines", [...(po.lines||[]), line]);
     setNewLineS({ name:"", category:"Like New Samsung", qty:"1", unitCost:"" });
     setShowAddLine(false);
+  };
+
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanMsg, setScanMsg] = useState(null); // { kind:"ok"|"warn"|"err", text }
+  const scanFileRef = React.useRef(null);
+  const scanDocument = async (file) => {
+    if (!file) return;
+    const apiKey = (() => { try { return localStorage.getItem(API_KEY_STORE) || ""; } catch { return ""; } })();
+    if (!apiKey) { setScanMsg({ kind:"err", text:"No Anthropic API key saved on this device yet. Add it in Settings → Anthropic API Key, then try again." }); return; }
+    setScanBusy(true); setScanMsg(null);
+    try {
+      const r = await readSupplierDocWithAI(file, apiKey);
+      const rawLines = Array.isArray(r.lines) ? r.lines : [];
+      const lines = rawLines.filter(l => l && String(l.name || "").trim()).map((l, i) => {
+        const m = matchCatalogForLine(catalog, l.name);
+        return { id:`${Date.now()}-${i}`, name: m ? m.name : String(l.name).trim(), category: m ? m.category : guessPoCategory(l.kind),
+                 qty: Math.max(1, parseInt(l.qty) || 1), unitCost: parseFloat(l.unit_cost) || 0, productId: m ? m.id : undefined, scannedName: String(l.name).trim() };
+      });
+      if (!lines.length) { setScanMsg({ kind:"err", text:"I couldn't find any item lines on that document. Try a clearer photo or a different file." }); return; }
+      const pm = PAYMENT_METHODS.find(x => x.toLowerCase() === String(r.payment_method || "").trim().toLowerCase())
+        || PAYMENT_METHODS.find(x => String(r.payment_method || "").toLowerCase().includes(x.toLowerCase().replace(" bank transfer", "")) && /transfer/i.test(r.payment_method || "") && /transfer/i.test(x));
+      const cur = String(r.currency || "").toUpperCase() === "USD" ? "USD" : "JMD";
+      setPOS(p => ({ ...p, supplier: r.supplier || p.supplier, poRef: r.po_ref || p.poRef, date: /^\d{4}-\d{2}-\d{2}$/.test(r.date || "") ? r.date : p.date,
+        currency: cur, paymentMethod: pm || p.paymentMethod, shipping: r.shipping ? String(r.shipping) : "", shippingPct:false, tax: r.tax ? String(r.tax) : "", taxPct:false,
+        notes: r.notes || p.notes, lines }));
+      const sum = lines.reduce((s, l) => s + l.qty * l.unitCost, 0) + (parseFloat(r.shipping) || 0) + (parseFloat(r.tax) || 0);
+      const matched = lines.filter(l => l.productId).length;
+      const total = parseFloat(r.invoice_total) || 0;
+      const mismatch = total > 0 && Math.abs(total - sum) > 1;
+      setScanMsg({ kind: mismatch ? "warn" : "ok",
+        text: `Read ${lines.length} line${lines.length === 1 ? "" : "s"} (${matched} matched to your catalog, ${lines.length - matched} will be new items).` +
+          (mismatch ? ` ⚠️ The lines add up to ${sum.toLocaleString()} but the document says ${total.toLocaleString()} — check the quantities and prices.` : " Totals agree with the document.") +
+          (cur === "USD" ? " Enter the exchange rate below." : "") + " Review everything, then save." });
+    } catch (e) { setScanMsg({ kind:"err", text: e.message || "Scan failed." }); }
+    finally { setScanBusy(false); if (scanFileRef.current) scanFileRef.current.value = ""; }
   };
 
   const savePO = async () => {
@@ -12279,6 +12379,14 @@ function PurchasesTab() {
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📄 New Purchase Order"),
       E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
     ),
+    E(Card,{style:{marginBottom:16,border:`1.5px dashed ${T.blue}`,background:T.blueLt}},
+      E("div",{style:{fontWeight:700,fontSize:14,marginBottom:4}},"📎 Read an invoice with AI"),
+      E("div",{style:{fontSize:12,color:T.muted,marginBottom:10}},"Upload any supplier invoice, receipt or purchase record (PDF or photo) — phones, cases, glass, cables, parts. It fills in the order below for you to check. Nothing is saved until you press Save."),
+      E("div",{style:{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}},
+        E(Btn,{disabled:scanBusy,onClick:()=>scanFileRef.current&&scanFileRef.current.click()},scanBusy?"⏳ Reading…":"📎 Choose PDF or photo"),
+        E("input",{ref:scanFileRef,type:"file",accept:"application/pdf,image/*",style:{display:"none"},onChange:e=>scanDocument(e.target.files&&e.target.files[0])})),
+      scanMsg&&E("div",{style:{marginTop:10,fontSize:13,fontWeight:600,color:scanMsg.kind==="err"?T.red:scanMsg.kind==="warn"?T.amber:T.green}},scanMsg.text)
+    ),
     E(Card,{style:{marginBottom:16}},
       E(ST,null,"Order Details"),
       E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}},
@@ -12319,7 +12427,8 @@ function PurchasesTab() {
             (po.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#F9FAFB",borderRadius:8}},
               E("div",null,
                 E("div",{style:{fontSize:13,fontWeight:500}},l.name),
-                E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",fmtMoney(l.unitCost))
+                E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",fmtMoney(l.unitCost)),
+                l.scannedName&&E("div",{style:{fontSize:11,color:l.productId?T.green:T.amber,marginTop:2}},l.productId?`✓ Matched to your catalog (read as "${l.scannedName}")`:"＋ Not in your catalog — will be created as a new item when received")
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
                 E("div",{style:{fontWeight:700,fontSize:13}},fmtPO(l.unitCost*l.qty,po.currency)),
