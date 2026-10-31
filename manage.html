@@ -663,6 +663,14 @@ const fmtMoney = n => {
 // fmtMoney always shows the absolute value; ledgers need the sign (credits/reversals are negative).
 // PO amounts are in the PO's own currency — fmtMoney already prefixes "JMD ", so only non-JMD POs get their own code.
 const fmtPO = (n, cur) => (!cur || cur === "JMD") ? fmtMoney(n) : `${cur} ${(parseFloat(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+// For a foreign-currency PO the invoice stays in its own currency, but the books, ledger and unit costs use the JMD
+// value at the rate stored on the PO. This shows that JMD value next to the foreign amount.
+const poForeign = (cur, fx) => !!cur && cur !== "JMD" && parseFloat(fx) > 0;
+// Main figure is the JMD value (what the books and POS use); the invoice's own currency sits underneath it.
+const poInline = (amt, cur, fx) => poForeign(cur, fx) ? `${fmtMoney((parseFloat(amt) || 0) * parseFloat(fx))} (${fmtPO(amt, cur)})` : fmtPO(amt, cur);
+const poAmtEls = (E, amt, cur, fx) => poForeign(cur, fx)
+  ? [fmtMoney((parseFloat(amt) || 0) * parseFloat(fx)), E("div", { key:"o", style:{ fontSize:11, fontWeight:500, color:T.muted } }, fmtPO(amt, cur) + " on invoice")]
+  : [fmtPO(amt, cur)];
 const fmtSigned = n => { const v = parseFloat(n) || 0; return (v < 0 ? "−" : "") + fmtMoney(v); };
 const isRegression = (from, to) => STATUS_ORDER.indexOf(to) < STATUS_ORDER.indexOf(from);
 const currentYear = new Date().getFullYear();
@@ -12302,13 +12310,13 @@ function PurchasesTab() {
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Currency"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.currency||"JMD")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Payment Method"),E("div",{style:{fontWeight:600,marginTop:2}},viewingPO.paymentMethod||"—")),
         E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Status"),E("div",{style:{fontWeight:700,color:viewingPO.status==="Voided"?T.red:viewingPO.status==="Received"?T.green:T.blue,marginTop:2}},viewingPO.status)),
-        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},fmtPO(viewingPO.invoiceTotal||0,viewingPO.currency)))
+        E("div",null,E("div",{style:{fontSize:10,color:T.muted,textTransform:"uppercase"}},"Total"),E("div",{style:{fontWeight:800,color:T.blue,marginTop:2}},poAmtEls(E,viewingPO.invoiceTotal||0,viewingPO.currency,poFxRate(viewingPO))))
       ),
       (viewingPO.lines||[]).length>0 && E("div", { style:{ marginBottom:14 } },
         E(ST, null, "Line Items"),
         (viewingPO.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:`1px dashed ${T.border}`}},
           E("div",null,E("div",{style:{fontWeight:500}},l.name),E("div",{style:{color:T.muted}},l.category," · qty ",l.qty)),
-          E("div",{style:{fontWeight:600}},fmtPO((l.unitCost||0)*(l.qty||1),viewingPO.currency))
+          E("div",{style:{fontWeight:600,textAlign:"right"}},poAmtEls(E,(l.unitCost||0)*(l.qty||1),viewingPO.currency,poFxRate(viewingPO)))
         ))
       ),
       E("div", { style:{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 } }, E("span",{style:{color:T.muted}},"Shipping"), E("span",null,fmtMoney(viewingPO.shipping||0))),
@@ -12432,20 +12440,20 @@ function PurchasesTab() {
             (po.lines||[]).map((l,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#F9FAFB",borderRadius:8}},
               E("div",null,
                 E("div",{style:{fontSize:13,fontWeight:500}},l.name),
-                E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",fmtMoney(l.unitCost)),
+                E("div",{style:{fontSize:11,color:T.muted}},l.category," · ",l.qty," units @ ",poInline(l.unitCost,po.currency,po.fxRate)),
                 l.scannedName&&E("div",{style:{fontSize:11,color:l.productId?T.green:T.amber,marginTop:2}},l.productId?`✓ Matched to your catalog (read as "${l.scannedName}")`:"＋ Not in your catalog — will be created as a new item when received")
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                E("div",{style:{fontWeight:700,fontSize:13}},fmtPO(l.unitCost*l.qty,po.currency)),
+                E("div",{style:{fontWeight:700,fontSize:13,textAlign:"right"}},poAmtEls(E,l.unitCost*l.qty,po.currency,po.fxRate)),
                 E("button",{onClick:()=>setPO("lines",(po.lines||[]).filter((_,j)=>j!==i)),style:{background:T.redLt,color:T.red,border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}},"✕")
               )
             ))
           ),
       (po.lines||[]).length>0 && E("div",{style:{borderTop:`1px solid ${T.border}`,marginTop:10,paddingTop:10}},
-        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Subtotal"),E("span",null,fmtMoney(lineSubtotal))),
-        shippingAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Shipping"),E("span",null,fmtMoney(shippingAmt))),
-        taxAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Tax"),E("span",null,fmtMoney(taxAmt))),
-        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue}},fmtPO(invoiceTotal,po.currency)))
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Subtotal"),E("span",null,poInline(lineSubtotal,po.currency,po.fxRate))),
+        shippingAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Shipping"),E("span",null,poInline(shippingAmt,po.currency,po.fxRate))),
+        taxAmt>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:4}},E("span",null,"Tax"),E("span",null,poInline(taxAmt,po.currency,po.fxRate))),
+        E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue,textAlign:"right"}},poAmtEls(E,invoiceTotal,po.currency,po.fxRate)))
       )
     ),
     E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},"💾 Save Purchase Order")
@@ -12504,7 +12512,7 @@ function PurchasesTab() {
                 p.receivedAt&&E("div",{style:{fontSize:11,color:T.green,marginTop:2}},"Received: ",fmtDate(p.receivedAt))
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
-                E("div",{style:{fontWeight:700,color:p.status==="Voided"?T.red:T.blue}},fmtPO(p.invoiceTotal||0,p.currency)),
+                E("div",{style:{fontWeight:700,color:p.status==="Voided"?T.red:T.blue,textAlign:"right"}},poAmtEls(E,p.invoiceTotal||0,p.currency,poFxRate(p))),
                 E("button",{onClick:()=>setViewingPO(p),style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}},"View")
               )
             )
@@ -12815,7 +12823,8 @@ function ReceiveStockTab({ onCatalogUpdate }) {
               : E("div",{style:{fontSize:11,color:T.green,marginTop:4,fontWeight:600}},"✅ These unit(s) will be added to this existing product.")
           ),
           E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
-            E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))})),
+            E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))}),
+              poForeign(selectedPO?.currency,poFxRate(selectedPO)) && E("div",{style:{fontSize:11,color:T.green,fontWeight:600,marginTop:4}},`Recorded in your books and POS as ${fmtMoney((parseFloat(line.unitCost)||0)*poLandedFactor(selectedPO))} per unit (JMD, incl. shipping/tax)`)),
             E(Field,{label:"Sell Price"},E(Input,{type:"number",placeholder:"Leave blank = Variable",value:line.sellPrice||"",onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,sellPrice:e.target.value}:l))}))
           ),
           isImei
