@@ -5311,7 +5311,7 @@ function OwnerDashboard({
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
 
       // ── Sheet: Purchase Orders ──────────────────────────────────────────────
-      addSheet("Purchase Orders", ["PO Ref", "Supplier", "Date", "Status", "Payment Method", "Invoice Total", "Shipping", "Tax", "Notes"], [...srcPOs].sort((a, b) => (a.date || a.receivedDate || "") > (b.date || b.receivedDate || "") ? 1 : -1).map(p => [p.poRef || "", p.supplier || "", p.date || p.receivedDate || "", p.status || "", p.paymentMethod || "", parseFloat(p.invoiceTotal) || 0, parseFloat(p.shipping) || 0, parseFloat(p.tax) || 0, p.notes || ""]));
+      addSheet("Purchase Orders", ["PO Ref", "Supplier", "Date", "Status", "Payment Method", "Currency", "Exchange Rate", "Invoice Total (invoice currency)", "Invoice Total (JMD)", "Shipping", "Tax", "Notes"], [...srcPOs].sort((a, b) => (a.date || a.receivedDate || "") > (b.date || b.receivedDate || "") ? 1 : -1).map(p => [p.poRef || "", p.supplier || "", p.date || p.receivedDate || "", p.status || "", p.paymentMethod || "", p.currency || "JMD", (!p.currency || p.currency === "JMD") ? 1 : (parseFloat(p.fxRate) || ""), parseFloat(p.invoiceTotal) || 0, Math.round((parseFloat(p.invoiceTotal) || 0) * ((!p.currency || p.currency === "JMD") ? 1 : (parseFloat(p.fxRate) || 1)) * 100) / 100, parseFloat(p.shipping) || 0, parseFloat(p.tax) || 0, p.notes || ""]));
 
       // ── Sheet: Purchases Ledger ──────────────────────────────────────────────
       // Inventory purchases, returns, and void reversals — a balance-sheet/AP ledger, kept separate
@@ -12118,7 +12118,7 @@ function PurchasesTab() {
     if (!record) return;
     setPos([record, ...pos]);
     setPOS(emptyPO()); setView("pos");
-    alert(`✅ Purchase Order saved — ${fmtMoney(record.invoiceTotal)} ${po.currency}`);
+    alert(`✅ Purchase Order saved — ${poInline(record.invoiceTotal, record.currency, record.fxRate)}`);
   };
 
   // Actually performs the void: applies whatever inventory changes were chosen (none, if the PO
@@ -12535,7 +12535,8 @@ function PurchasesTab() {
         const voidedRefs = new Set(poGroups.voided.map(p=>p.poRef).filter(Boolean));
         const hf=history.filter(h=>(filter==="all"||(h.category||"")===filter)&&(!monthFilter||(h.receivedDate||h.createdAt||"").startsWith(monthFilter)))
           .filter(h=> poTab==="voided" ? (h.poRef&&voidedRefs.has(h.poRef)) : !(h.poRef&&voidedRefs.has(h.poRef)));
-        const ht=hf.reduce((s,h)=>s+(parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1)),0);
+        const histJMD = h => { const hp = pos.find(x=>h.poId&&x.id===h.poId) || pos.find(x=>h.poRef&&x.poRef===h.poRef&&x.supplier===h.supplier); return (parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1))*(hp?poLandedFactor(hp):1); };
+        const ht=hf.reduce((s,h)=>s+histJMD(h),0);
         return E("div",null,
           hf.length>0&&E("div",{style:{background:T.greenLt,borderRadius:8,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between"}},
             E("span",{style:{fontSize:12,color:T.muted}},hf.length," entries"),
@@ -12549,7 +12550,7 @@ function PurchasesTab() {
                   E("div",{style:{fontWeight:600,fontSize:13}},h.productName||h.name),
                   E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},h.category,` · qty ${h.qty||1} · ${h.receivedDate||fmtDate(h.createdAt)}`,h.supplier?` · ${h.supplier}`:"",h.poRef?` · PO: ${h.poRef}`:"")
                 ),
-                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney((parseFloat(h.unitCost||h.costPerUnit||0))*(parseInt(h.qty||1))))
+                E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(histJMD(h)))
               )
             ))
           )
@@ -12868,7 +12869,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
               E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},p.date,` · ${(p.lines||[]).length} line items · `,p.currency||"JMD")
             ),
             E("div",{style:{display:"flex",alignItems:"center",gap:10}},
-              E("div",{style:{fontWeight:700,color:T.blue}},fmtMoney(p.invoiceTotal||0)),
+              E("div",{style:{fontWeight:700,color:T.blue,textAlign:"right"}},poAmtEls(E,p.invoiceTotal||0,p.currency,poFxRate(p))),
               E("div",{style:{fontSize:20,color:T.muted}},"→")
             )
           ))
