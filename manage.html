@@ -6923,7 +6923,7 @@ const RESET_AREAS = [
   { id:"todos",    label:"To-do list", keys:["tpp-todos"] },
   { id:"invoices", label:"Pro forma invoices", keys:["tpp-invoices"] }
 ];
-const BACKUP_KEYS = ["tpp-sales","tpp-parked-sales","tpp-store-credits","tpp-tickets-v1","tpp-deposits","tpp-bookings","tpp-eod","tpp-shifts","tpp-expenses","tpp-expenses-inventory-purchase-backup","tpp-reimbursements","tpp-debts","tpp-debt-payments2","tpp-rental-income","tpp-purchase-orders","tpp-purchases-ledger","tpp-stock-receives","tpp-count-history","tpp-count-pending","tpp-todos","tpp-invoices","tpp-phones","tpp-phones-v1","tpp-customers","tpp-staff","tpp-warranty-settings"];
+const BACKUP_KEYS = ["tpp-sales","tpp-parked-sales","tpp-store-credits","tpp-tickets-v1","tpp-deposits","tpp-bookings","tpp-eod","tpp-shifts","tpp-expenses","tpp-expenses-inventory-purchase-backup","tpp-reimbursements","tpp-debts","tpp-debt-payments2","tpp-rental-income","tpp-purchase-orders","tpp-purchases-ledger","tpp-stock-receives","tpp-count-history","tpp-count-pending","tpp-todos","tpp-invoices","tpp-stock-moves","tpp-phones","tpp-phones-v1","tpp-customers","tpp-staff","tpp-warranty-settings"];
 
 function StartFreshTool() {
   const E = React.createElement;
@@ -7472,6 +7472,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   useEffect(()=>{(async()=>{ try{ const v=await load("tpp-services"); if(Array.isArray(v)&&v.length) setServices(v); }catch{} })();},[]);
   const [search,setSearch]=useState("");
   const [searchResults,setSearchResults]=useState([]);
+  const [posCat,setPosCat]=useState("all"); // category filter for finding items at the POS
   const [showScanner,setShowScanner]=useState(false);
   // Customer
   const [customerName,setCustomerName]=useState("");
@@ -7556,7 +7557,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   // Search phones + products + tickets
   useEffect(()=>{
-    if(!search.trim()){setSearchResults([]);return;}
+    if(!search.trim()&&posCat==="all"){setSearchResults([]);return;}
     const q=search.toLowerCase();
     // A phone label's short code (8 digits) or a full IMEI (15) — typed, or sent by a USB scanner — adds that
     // exact unit straight to the cart when it matches one Available phone.
@@ -7570,9 +7571,12 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     const catalogRes=products
       .filter(p=>{
         if(!p.name) return false;
+        if(posCat!=="all"&&(p.category||"Other")!==posCat) return false;
+        if(!search.trim()) return true;
         return p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search)||(/^\d{4,15}$/.test(codeQ)&&(p.units||[]).some(u=>u.status==="Available"&&u.imei&&(u.imei.endsWith(codeQ)||unitMatchesCode(u,codeQ))));
       })
-      .slice(0,10).map(p=>{
+      .sort((a,b)=>{ if(posCat==="all") return 0; const ia=isImeiCategory(a.category)||getAvailableStock(a)>0, ib=isImeiCategory(b.category)||getAvailableStock(b)>0; return ia===ib ? (a.name||"").localeCompare(b.name||"",undefined,{numeric:true}) : (ia?-1:1); })
+      .slice(0,posCat==="all"?10:100).map(p=>{
         const isImei=isImeiCategory(p.category);
         const avail=getAvailableStock(p);
         const availUnits=isImei?(p.units||[]).filter(u=>u.status==="Available"):[];
@@ -7588,11 +7592,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       });
     const phoneRes=[];
     const prodRes=catalogRes;
-    const tickRes=tickets
+    const tickRes=!search.trim()?[]:tickets
       .filter(t=>t.id?.toLowerCase().includes(q)||t.customerName?.toLowerCase().includes(q)||t.customerPhone?.includes(q))
       .slice(0,3).map(t=>({type:"ticket",id:t.id,name:`Repair — ${t.customerName} (${t.id})`,price:0,subLabel:`${t.deviceBrand||""} ${t.deviceModel||""} · ${t.status}`,raw:t}));
     setSearchResults([...phoneRes,...prodRes,...tickRes]);
-  },[search,phones,products,tickets]);
+  },[search,phones,products,tickets,posCat]);
 
   const addToCart=(item)=>{
     if(item.type==="ticket"){
@@ -7603,16 +7607,16 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         const balance=Math.max(0,cost-paidSoFar);
         setCart(c=>[...c,{type:"ticket",id:item.id,name:item.name.replace(/^Repair Deposit — /,"Repair — "),price:balance,qty:1,ticketId:item.id,isDeposit:true,ticketCost:cost,ticketPaid:paidSoFar,ticketBalance:balance,raw:item.raw}]);
       }
-      setSearch("");setSearchResults([]);
+      setSearch("");if(posCat==="all")setSearchResults([]);
     } else if(item.type==="imei_product"){
       // Show unit picker for IMEI products
       setUnitPicker({product:item.raw,units:item.availUnits});
-      setSearch("");setSearchResults([]);
+      setSearch("");if(posCat==="all")setSearchResults([]);
     } else {
       const ex=cart.find(c=>c.id===item.id&&c.type!=="ticket");
       if(ex)setCart(c=>c.map(ci=>ci.id===item.id?{...ci,qty:(ci.qty||1)+1}:ci));
       else setCart(c=>[...c,{type:"product",id:item.id,name:item.name,price:item.price,qty:1,imei:"",note:"",raw:item.raw}]);
-      setSearch("");setSearchResults([]);
+      setSearch("");if(posCat==="all")setSearchResults([]);
     }
   };
 
@@ -8348,9 +8352,13 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     // Search
     E("div",{style:{display:"flex",gap:8,marginBottom:8}},
       E(Input,{placeholder:"🔍 Search phone, accessory, service, or repair ticket...",value:search,onChange:e=>setSearch(e.target.value),onKeyDown:e=>{if(e.key==="Enter"&&searchResults.length===1)addToCart(searchResults[0]);},style:{flex:1}}),
+      E(Sel,{value:posCat,onChange:e=>setPosCat(e.target.value),style:{width:"auto",maxWidth:200,flexShrink:0},title:"Filter by category"},
+        E("option",{value:"all"},"All categories"),
+        [...new Set(products.map(p=>p.category||"Other"))].sort((a,b)=>a.localeCompare(b)).map(c=>E("option",{key:c,value:c},c))),
       E(Btn,{variant:"ghost",onClick:()=>setShowScanner(true),style:{padding:"10px 14px",fontSize:16}},"📷")
     ),
-    searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
+    posCat!=="all"&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:6}},`Showing ${posCat} — ${searchResults.length} item${searchResults.length===1?"":"s"}${searchResults.length>=100?" (first 100; type to narrow)":""}. In-stock items are listed first. `,E("button",{onClick:()=>setPosCat("all"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:11,cursor:"pointer",padding:0}},"Clear category")),
+    searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",overflowY:"auto",maxHeight:posCat==="all"?"none":420,boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
       searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
         E("div",{style:{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}},
           r.raw?.image&&E("button",{onClick:e=>{e.stopPropagation();setPhotoPreview(r.raw.image);},title:"View photo",style:{width:30,height:30,borderRadius:7,background:"#F3F4F6",border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,cursor:"pointer"}},"👁️"),
@@ -12904,6 +12912,34 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
   const [busyUnit, setBusyUnit] = useState(null); // `${productId}:${unitIdx}` currently saving
   const [selMode, setSelMode] = useState(false);
   const [selIds, setSelIds] = useState(new Set());
+  // Move stock: shifts a quantity of an accessory from one product to another (e.g. received onto the wrong item).
+  const [mv, setMv] = useState(null); // { product, qty, targetId, q }
+  const [mvBusy, setMvBusy] = useState(false);
+  const doMoveStock = async () => {
+    if (!mv || mvBusy) return;
+    const qty = parseInt(mv.qty) || 0;
+    if (!mv.targetId) { alert("Choose the product it should be on."); return; }
+    if (qty <= 0) { alert("Enter how many to move."); return; }
+    setMvBusy(true);
+    try {
+      const fresh = await loadCatalog();
+      const src = fresh.find(p=>p.id===mv.product.id), tgt = fresh.find(p=>p.id===mv.targetId);
+      if (!src || !tgt) { alert("Couldn't find one of the products. Reload and try again."); return; }
+      if (qty > (src.stock||0)) { alert(`"${src.name}" only has ${src.stock||0} in stock.`); return; }
+      const srcCost = parseFloat(src.cost) || 0, tgtCost = parseFloat(tgt.cost) || 0, tgtOn = tgt.stock || 0;
+      const newTgtCost = (tgtOn > 0 && tgtCost > 0 && srcCost > 0) ? Math.round(((tgtOn*tgtCost + qty*srcCost) / (tgtOn+qty))*100)/100 : (srcCost > 0 ? (tgtCost > 0 ? tgtCost : srcCost) : tgtCost);
+      if (!confirm(`Move ${qty} from\n"${src.name}" (${src.stock||0} → ${(src.stock||0)-qty})\nto\n"${tgt.name}" (${tgtOn} → ${tgtOn+qty})\n\nThe cost moves with it (${srcCost?fmtMoney(srcCost)+" each":"no cost recorded"}).`)) return;
+      const updated = fresh.map(p => p.id===src.id ? { ...p, stock:(p.stock||0)-qty }
+                                   : p.id===tgt.id ? { ...p, stock:tgtOn+qty, cost:newTgtCost } : p);
+      await saveCatalogFn(updated);
+      try {
+        const log = await loadArr("tpp-stock-moves");
+        await save("tpp-stock-moves", [{ id:`mv-${Date.now()}`, at:new Date().toISOString(), qty, fromId:src.id, fromName:src.name, toId:tgt.id, toName:tgt.name, unitCost:srcCost, by:"owner" }, ...log]);
+      } catch {}
+      setMv(null);
+      alert(`✅ Moved ${qty} to "${tgt.name}".`);
+    } finally { setMvBusy(false); }
+  };
 
   const changeUnitStatus = async (product, unitIdx, newStatus) => {
     const unit = (product.units||[])[unitIdx];
@@ -13019,6 +13055,22 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
 
   return E("div",null,
     E("input",{ref:photoInputRef,type:"file",accept:"image/*",style:{display:"none"},onChange:e=>onPhotoChosen(e.target.files[0])}),
+    mv && E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:520,width:"100%",maxHeight:"88vh",overflowY:"auto"}},
+        E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},"↔️ Move stock"),
+          E("button",{onClick:()=>setMv(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")),
+        E("div",{style:{fontSize:13,marginBottom:12}},"From: ",E("strong",null,mv.product.name)," · in stock: ",E("strong",null,mv.product.stock||0)),
+        E(Field,{label:"How many to move"},E(Input,{type:"number",min:1,max:mv.product.stock||0,value:mv.qty,onChange:e=>setMv(m=>({...m,qty:e.target.value}))})),
+        E(Field,{label:"Move them to (the correct product)"},E(Input,{placeholder:"🔍 Search products…",value:mv.q,onChange:e=>setMv(m=>({...m,q:e.target.value}))})),
+        (()=>{ const q=(mv.q||"").toLowerCase(); const list=catalog.filter(p=>p.id!==mv.product.id && !isImeiCategory(p.category) && (!q || (p.name||"").toLowerCase().includes(q) || (p.barcode||"").includes(q))).slice(0,40);
+          return E("div",{style:{border:`1px solid ${T.border}`,borderRadius:8,maxHeight:220,overflowY:"auto",marginBottom:12}},
+            list.length===0?E("div",{style:{padding:12,fontSize:12,color:T.muted}},"No matching products."):
+            list.map(p=>E("div",{key:p.id,onClick:()=>setMv(m=>({...m,targetId:p.id})),style:{padding:"8px 12px",fontSize:13,cursor:"pointer",borderBottom:`1px solid ${T.border}`,background:mv.targetId===p.id?T.blueLt:"#fff",fontWeight:mv.targetId===p.id?700:400}},p.name,E("span",{style:{color:T.muted,fontSize:11}},`  · stock ${p.stock||0}`)))); })(),
+        E("div",{style:{fontSize:11,color:T.muted,marginBottom:12}},"The cost moves with the stock and is blended into the other product's existing cost. Past sales aren't changed."),
+        E("div",{style:{display:"flex",gap:8}},
+          E(Btn,{variant:"ghost",onClick:()=>setMv(null)},"Cancel"),
+          E(Btn,{disabled:mvBusy||!mv.targetId||!(parseInt(mv.qty)>0),onClick:doMoveStock},mvBusy?"Moving…":"Move stock")))),
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
       E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"Catalog ",E("span",{style:{fontSize:14,color:T.muted,fontWeight:400}},`· ${catalog.length} products`)),
       E("div",{style:{display:"flex",gap:8}},
@@ -13104,6 +13156,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                       printBarcodeLabels(items);
                     },style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🏷️"),
                     E("button",{onClick:e=>{e.stopPropagation();pickPhotoFor(product);},disabled:uploadingPhotoFor===product.id,style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},uploadingPhotoFor===product.id?"⏳":"📷"),
+                    !isImei&&E("button",{title:"Move stock to another product",onClick:e=>{e.stopPropagation();setMv({product,qty:"",targetId:"",q:""});},style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"↔️"),
                     E("button",{onClick:e=>{e.stopPropagation();setEditingProduct(product);setFormS({name:product.name,labelName:product.labelName||"",category:product.category,price:String(product.price||""),cost:String(product.cost||""),barcode:product.barcode||"",stock:String(product.stock||""),variable_price:!!product.variable_price});setShowAddForm(true);},style:{background:T.blueLt,color:T.blue,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"✏️"),
                     E("button",{onClick:async e=>{e.stopPropagation();if(!confirm(`Remove "${product.name}"?`))return;await saveCatalogFn(catalog.filter(p=>p.id!==product.id));},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,fontWeight:700,cursor:"pointer"}},"🗑️")
                   )
