@@ -7454,6 +7454,19 @@ const loadCatalog = async () => {
 };
 
 
+// POS item search: every word you type must appear somewhere in the name (any order), "plus" = "+", punctuation ignored.
+const posNorm = t => String(t||"").toLowerCase().replace(/\bplus\b/g,"+").replace(/[^a-z0-9+ ]+/g," ").replace(/\s+/g," ").trim();
+const posTokens = q => posNorm(q).split(" ").filter(Boolean);
+const posNameMatch = (name, tokens) => {
+  if (!tokens.length) return null;
+  const n = posNorm(name); const words = n.split(" ");
+  let exact = 0;
+  for (const t of tokens) {
+    if (!n.includes(t)) return null;
+    if (words.includes(t)) exact++;
+  }
+  return { exact, len: n.length };
+};
 function POSSystem({phones=[],onPhonesUpdate,user}){
   const E=React.createElement;
   const [view,setView]=useState("pos");
@@ -7568,17 +7581,24 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       if(hits.length===1){ addUnitToCart(hits[0].p,hits[0].u); setSearch(""); setSearchResults([]); return; }
     }
     // Search unified catalog — IMEI products show available units, others show stock count
-    const catalogRes=products
-      .filter(p=>{
-        if(!p.name) return false;
-        if(posCat!=="all"&&(p.category||"Other")!==posCat) return false;
-        if(!search.trim()) return true;
-        return p.name.toLowerCase().includes(q)||(p.barcode||"").includes(search)||(p.sku||"").includes(search)||(/^\d{4,15}$/.test(codeQ)&&(p.units||[]).some(u=>u.status==="Available"&&u.imei&&(u.imei.endsWith(codeQ)||unitMatchesCode(u,codeQ))));
-      })
-      .sort((a,b)=>{ if(posCat==="all") return 0; const ia=isImeiCategory(a.category)||getAvailableStock(a)>0, ib=isImeiCategory(b.category)||getAvailableStock(b)>0; return ia===ib ? (a.name||"").localeCompare(b.name||"",undefined,{numeric:true}) : (ia?-1:1); })
-      .slice(0,posCat==="all"?10:100).map(p=>{
-        const isImei=isImeiCategory(p.category);
-        const avail=getAvailableStock(p);
+    const toks=posTokens(search);
+    const scored=[];
+    products.forEach(p=>{
+      if(!p.name) return;
+      if(posCat!=="all"&&(p.category||"Other")!==posCat) return;
+      let m=null;
+      if(!search.trim()) m={exact:0,len:(p.name||"").length};
+      else {
+        m=posNameMatch(p.name,toks);
+        if(!m && ((p.barcode||"").includes(search.trim())||(p.sku||"").includes(search.trim())||(/^\d{4,15}$/.test(codeQ)&&(p.units||[]).some(u=>u.status==="Available"&&u.imei&&(u.imei.endsWith(codeQ)||unitMatchesCode(u,codeQ)))))) m={exact:99,len:0};
+      }
+      if(!m) return;
+      const isImei=isImeiCategory(p.category);
+      const avail=getAvailableStock(p);
+      scored.push({p,m,isImei,avail,inStock:isImei?avail>0:avail>0});
+    });
+    scored.sort((a,b)=> (b.inStock-a.inStock) || (b.m.exact-a.m.exact) || (a.m.len-b.m.len) || (a.p.name||"").localeCompare(b.p.name||"",undefined,{numeric:true}));
+    const catalogRes=scored.slice(0,posCat==="all"?30:100).map(({p,isImei,avail})=>{
         const availUnits=isImei?(p.units||[]).filter(u=>u.status==="Available"):[];
         return {
           type:isImei?"imei_product":"product",
@@ -8351,14 +8371,14 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
     // Search
     E("div",{style:{display:"flex",gap:8,marginBottom:8}},
-      E(Input,{placeholder:"🔍 Search phone, accessory, service, or repair ticket...",value:search,onChange:e=>setSearch(e.target.value),onKeyDown:e=>{if(e.key==="Enter"&&searchResults.length===1)addToCart(searchResults[0]);},style:{flex:1}}),
+      E(Input,{placeholder:"🔍 Search: type any words, e.g. s23 ultra case, type c cable…",value:search,onChange:e=>setSearch(e.target.value),onKeyDown:e=>{if(e.key==="Enter"&&searchResults.length===1)addToCart(searchResults[0]);},style:{flex:1}}),
       E(Sel,{value:posCat,onChange:e=>setPosCat(e.target.value),style:{width:"auto",maxWidth:200,flexShrink:0},title:"Filter by category"},
         E("option",{value:"all"},"All categories"),
         [...new Set(products.map(p=>p.category||"Other"))].sort((a,b)=>a.localeCompare(b)).map(c=>E("option",{key:c,value:c},c))),
       E(Btn,{variant:"ghost",onClick:()=>setShowScanner(true),style:{padding:"10px 14px",fontSize:16}},"📷")
     ),
     posCat!=="all"&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:6}},`Showing ${posCat} — ${searchResults.length} item${searchResults.length===1?"":"s"}${searchResults.length>=100?" (first 100; type to narrow)":""}. In-stock items are listed first. `,E("button",{onClick:()=>setPosCat("all"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:11,cursor:"pointer",padding:0}},"Clear category")),
-    searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",overflowY:"auto",maxHeight:posCat==="all"?"none":420,boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
+    searchResults.length>0&&E("div",{style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",overflowY:"auto",maxHeight:420,boxShadow:"0 4px 16px rgba(0,0,0,0.08)"}},
       searchResults.map((r,i)=>E("div",{key:i,onClick:()=>addToCart(r),style:{padding:"10px 14px",cursor:"pointer",borderBottom:i<searchResults.length-1?`1px solid ${T.border}`:"none",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
         E("div",{style:{display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1}},
           r.raw?.image&&E("button",{onClick:e=>{e.stopPropagation();setPhotoPreview(r.raw.image);},title:"View photo",style:{width:30,height:30,borderRadius:7,background:"#F3F4F6",border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,cursor:"pointer"}},"👁️"),
