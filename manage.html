@@ -13216,7 +13216,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                     `${(product.units||[]).length} units — ${avail} available`
                   ),
                   E("div",{style:{display:"flex",flexDirection:"column",gap:4}},
-                    (product.units||[]).slice(0,20).map((unit,ui)=>{
+                    (product.units||[]).map((unit,ui)=>{
                       const busyKey = `${product.id}:${ui}`;
                       const isMovingThis = moveUnit && moveUnit.productId===product.id && moveUnit.unitIdx===ui;
                       return E("div",{key:ui,style:{padding:"6px 0",borderBottom:`1px dashed ${T.border}`}},
@@ -13252,7 +13252,6 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                       );
                     })
                   ),
-                  (product.units||[]).length>20&&E("div",{style:{fontSize:11,color:T.muted,marginTop:6}},`+ ${(product.units||[]).length-20} more units`)
                 )
               );
             })
