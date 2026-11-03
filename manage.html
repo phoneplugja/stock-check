@@ -13061,7 +13061,7 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
 
   const filtered = catalog.filter(p=>{
     const mc = catFilter==="all" || p.category===catFilter;
-    const mq = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search);
+    const mq = !search || p.name?.toLowerCase().includes(search.toLowerCase()) || (p.barcode||"").includes(search) || (p.units||[]).some(u=>(u.imei||"").includes(search.trim()));
     return mc && mq;
   });
 
