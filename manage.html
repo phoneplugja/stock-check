@@ -8869,7 +8869,10 @@ const buildPhoneImportPlan = (rows, allProducts) => {
         working.push(product); workingById.set(productId, product); newlyCreated.set(key, productId);
       }
       const newUnitId = `unit-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
-      product.units.push({ id: newUnitId, imei, status, cost, sellPrice });
+      const poRefCol = String(row.po_ref || "").trim(), poIdCol = String(row.po_id || "").trim(), supplierCol = String(row.supplier || "").trim(), recvCol = String(row.received_date || "").trim();
+      product.units.push({ id: newUnitId, imei, status, cost, sellPrice,
+        ...(poRefCol ? { poRef: poRefCol } : {}), ...(poIdCol ? { poId: poIdCol } : {}), ...(supplierCol ? { supplier: supplierCol } : {}), ...(recvCol ? { receivedDate: recvCol } : {}),
+        history: [{ status, ts: new Date().toISOString(), note: poRefCol ? `Added by import and attributed to PO ${poRefCol}` : "Added by import" }] });
       imeiMap.set(imei, { productId, unitId: newUnitId });
       preview.push({ row: rowNum, status: "add", imei, product: product.name, unitStatus: status, cost, sellPrice, productId: product.id, imageUrl: (imageUrl && !product.image) ? imageUrl : undefined });
     }
@@ -9211,7 +9214,7 @@ function DataImportExportTab() {
     }),
     Section({
       title: "📱 Phones (IMEI-tracked)", type: "phones", onExport: exportPhones, fileRef: phoneFileRef,
-      desc: `Columns: imei, status, cost, sell_price, product_name, category, product_id. One row per physical unit. Matched by IMEI — an existing IMEI updates that unit's status/cost/price; a new IMEI adds a unit (grouping into an existing model by product_name+category, or creating a new model if none matches). Status must be one of: ${PHONE_UNIT_STATUSES.join(", ")}. Category must be one of: ${IMEI_CATEGORIES.join(", ")}. Optional image_url column works the same as Accessories — one photo migrated per model (not per IMEI), same Cloudinary requirement and fallback.`,
+      desc: `Columns: imei, status, cost, sell_price, product_name, category, product_id (optional for new phones: po_ref, po_id, supplier, received_date). One row per physical unit. Matched by IMEI — an existing IMEI updates that unit's status/cost/price; a new IMEI adds a unit (grouping into an existing model by product_name+category, or creating a new model if none matches). Status must be one of: ${PHONE_UNIT_STATUSES.join(", ")}. Category must be one of: ${IMEI_CATEGORIES.join(", ")}. Optional image_url column works the same as Accessories — one photo migrated per model (not per IMEI), same Cloudinary requirement and fallback.`,
       columns: [{ key: "imei", label: "IMEI" }, { key: "product", label: "Product" }, { key: "unitStatus", label: "Status" }, { key: "cost", label: "Cost" }, { key: "sellPrice", label: "Sell Price" }, { key: "imageUrl", label: "Photo" }]
     }),
     E(Card, { style: { marginBottom: 20 } },
