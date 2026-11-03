@@ -13238,7 +13238,9 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                               onClick:e=>{ e.stopPropagation(); setMoveTargetId(""); setMoveUnit(isMovingThis?null:{productId:product.id,unitIdx:ui}); },
                               disabled:busyUnit===busyKey,
                               style:{background:isMovingThis?T.blue:"#F3F4F6",color:isMovingThis?"#fff":T.text,border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,fontWeight:700,cursor:"pointer"}
-                            },"🔀 Wrong product?")
+                            },"🔀 Wrong product?"),
+                            E("button",{onClick:async e=>{ e.stopPropagation(); const v=prompt(`Correct IMEI for this unit?\n(currently ${unit.imei||"none"})`, unit.imei||""); if(v===null) return; setBusyUnit(`${product.id}:${ui}`); try{ const r=await changeUnitImei(catalog,product,unit.id,v); if(r.error) alert(r.error); else await saveCatalogFn(r.next);} finally{ setBusyUnit(null);} },
+                              disabled:busyUnit===busyKey,style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:5,padding:"2px 6px",fontSize:10,fontWeight:700,cursor:"pointer"}},"✏️ IMEI")
                           )
                         ),
                         isMovingThis && E("div",{onClick:e=>e.stopPropagation(),style:{marginTop:6,padding:"8px 10px",background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,display:"flex",flexDirection:"column",gap:6}},
@@ -13409,6 +13411,28 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
 // Supplier. Every transition is written to the unit's own history log for a full audit trail.
 // `catalog`/`onCatalogUpdate` are optional — if this is mounted on its own (e.g. a shell without
 // the rest of the Products tab wired in) it loads and saves the catalog itself.
+// Change a unit's IMEI (typo / bad scan). Keeps status, cost, PO link and history; also fixes the matching line on its purchase order.
+async function changeUnitImei(catalog, product, unitId, newImeiRaw) {
+  const newImei = String(newImeiRaw||"").trim();
+  if (!newImei) return { error: "Enter an IMEI." };
+  if (/\s/.test(newImei)) return { error: "No spaces in the IMEI." };
+  const fresh = await loadCatalog();
+  const dupe = fresh.find(p=>(p.units||[]).some(u=>u.id!==unitId && String(u.imei||"").trim()===newImei));
+  if (dupe) return { error: `IMEI ${newImei} is already on "${dupe.name}".` };
+  let oldImei = "";
+  const next = fresh.map(p=>p.id!==product.id?p:{...p,units:(p.units||[]).map(u=>{ if(u.id!==unitId) return u; oldImei=u.imei||""; return {...u,imei:newImei,history:[...(u.history||[]),{status:u.status,ts:new Date().toISOString(),note:`IMEI corrected: ${oldImei||"none"} → ${newImei}`}]}; })});
+  await saveCatalog(next);
+  try {
+    if (oldImei) {
+      const pos = await loadArr("tpp-purchase-orders");
+      let ch=false;
+      const upd = pos.map(po=>({...po,lines:(po.lines||[]).map(l=>(l.imeis||[]).some(i=>String(i).trim()===oldImei)?(ch=true,{...l,imeis:l.imeis.map(i=>String(i).trim()===oldImei?newImei:i)}):l)}));
+      if (ch) await save("tpp-purchase-orders", upd);
+    }
+  } catch {}
+  return { ok: true, next };
+}
+
 // ── Sold phones: recall a sold unit to change its status, and optionally void its receipt ──
 function SoldPhonesSubTab({ catalog, saveCatalogFn }) {
   const E = React.createElement;
