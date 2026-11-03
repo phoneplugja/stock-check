@@ -5305,7 +5305,7 @@ function OwnerDashboard({
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
       // ── Sheet: Sales Ledger ────────────────────────────────────────────────
-      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s)]));
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)", "Backdated", "Entered On", "Backdate Reason"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s), s.backdated ? "Yes" : "No", s.backdated ? (s.enteredDate || "") : "", s.backdated ? (s.backdatedReason || "") : ""]));
 
       // ── Sheet: Rental Income ──────────────────────────────────────────────
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
@@ -6520,7 +6520,7 @@ const receiptLines = (sale) => {
 
   out.push({ logo:true, c:true });
   ["Shop 5D Hagley Park Plaza, Half Way Tree","Instagram: @phoneplug_ja","876-490-5515 or 876-672-2442","support@phoneplugja.com"].forEach(t=>add(t,{c:true}));
-  [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE"].filter(Boolean).forEach(t=>{ add(); add("*** "+t+" ***",{c:true,b:true}); });
+  [sale.isDeposit&&"DEPOSIT RECEIPT", sale.isReturn&&"RETURN", sale.isExchange&&"EXCHANGE", sale.backdated&&"BACKDATED"].filter(Boolean).forEach(t=>{ add(); add("*** "+t+" ***",{c:true,b:true}); });
   add();
   const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean);
   add("Employee: " + (parts.length ? parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "") : "-"));
@@ -6552,7 +6552,7 @@ const receiptLines = (sale) => {
     else wrap(ln, COLS).forEach(w=>add(w,{c:true}));
   });
   add();
-  let when=""; try { const d=new Date(sale.createdAt||Date.now()); when=d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:"America/Jamaica"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); } catch {}
+  let when=""; try { const d=new Date(sale.createdAt||Date.now()); when=d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:"America/Jamaica"})+" "+d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",timeZone:"America/Jamaica"}); if(sale.backdated) when=d.toLocaleDateString("en-US",{month:"numeric",day:"numeric",year:"2-digit",timeZone:"America/Jamaica"})+" (entered "+String(sale.enteredDate||"").slice(5).replace("-","/")+")"; } catch {}
   row(when, "#"+sale.id);
   return out;
 };
@@ -7486,6 +7486,10 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [search,setSearch]=useState("");
   const [searchResults,setSearchResults]=useState([]);
   const [posCat,setPosCat]=useState("all"); // category filter for finding items at the POS
+  // Owner-only backdating: record a sale that really happened earlier this month. Always flagged as backdated.
+  const [bdOn,setBdOn]=useState(false);
+  const [bdDate,setBdDate]=useState("");
+  const [bdReason,setBdReason]=useState("");
   const [showScanner,setShowScanner]=useState(false);
   // Customer
   const [customerName,setCustomerName]=useState("");
@@ -7707,6 +7711,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setNote("");setIsExchange(false);setIsReturn(false);setExchangeOrigSale(null);setReturnOrigSale(null);setReturnItems([]);
     setExchangeItems([]);
     setAppliedCredit(null);setExchangeDiff(0);
+    setBdOn(false);setBdDate("");setBdReason("");
   };
 
   const parkSale=async()=>{
@@ -7786,6 +7791,19 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   // Cancelling out of the refund-method modal never calls checkout(), so nothing is saved.
   const checkout=async(exchangeRefundMethod)=>{
     if(!canCheckout)return;
+    // ── Backdating (owner only, current month only, normal sales only) ──
+    const useBd=bdOn&&isOwnerUser;
+    let bdStamp=null;
+    if(useBd){
+      const today=todayStr(), monthStart=today.slice(0,8)+"01";
+      if(isExchange||isReturn||appliedCredit||cart.some(i=>i.type==="ticket")){alert("Backdating is only for normal sales. Turn it off for exchanges, returns, store-credit sales and repair payments.");return;}
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(bdDate)||bdDate>=today||bdDate<monthStart){alert(`Pick a date earlier than today and within this month (${monthStart} to ${addDaysStr(today,-1)}).`);return;}
+      if(bdReason.trim().length<3){alert("Enter the reason this sale is being backdated.");return;}
+      let eodNote="";
+      try{ const eods=await loadArr("tpp-eod"); if((eods||[]).some(e=>e.date===bdDate)) eodNote=`\n\n⚠️ An End-of-Day record already exists for ${bdDate}. It will NOT be changed. If this sale's money was already counted that day, nothing more is needed.`; }catch{}
+      if(!confirm(`Record this sale as BACKDATED to ${bdDate}?\n\nReason: ${bdReason.trim()}\n\nIt will count in that day's sales and be marked BACKDATED (entered ${today}) on the receipt and in reports. Stock reduces now.${eodNote}`))return;
+      bdStamp=new Date(bdDate+"T12:00:00-05:00").toISOString();
+    }
     // Tell staff up front if the customer details typed can't be saved, instead of silently dropping them.
     if(customerName||customerPhone||customerEmail){
       const probs=[customerName?validateCustomerName(customerName):"",customerPhone?validatePhone(customerPhone):"",validateEmail(customerEmail)].filter(Boolean);
@@ -7850,7 +7868,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         returnOrigSaleId:returnOrigSale?.id||null,
         appliedCreditId:appliedCredit?.id||null,
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
-        createdAt:new Date().toISOString(),date:todayStr()
+        createdAt:bdStamp||new Date().toISOString(),date:useBd?bdDate:todayStr(),
+        ...(useBd?{backdated:true,backdatedReason:bdReason.trim(),enteredAt:new Date().toISOString(),enteredDate:todayStr(),backdatedBy:servedBy||"Owner"}:{})
       };
       const saleSaved=await save("tpp-sales",[slimSale(sale),...existing.map(slimSale)]);
       if(!saleSaved){ alert("⚠️ The sale could NOT be saved, so no receipt was recorded and inventory was NOT changed. Please try again — and tell the owner if it keeps happening.\n\nDetails: "+(window.__lastSaveError||"unknown")+"\n(Build 2026-10-09-d)"); return; }
@@ -7867,7 +7886,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
             const pidx = updatedCatalog.findIndex(p=>p.id===item.raw?.product?.id);
             if(pidx>=0){
               updatedCatalog[pidx].units=(updatedCatalog[pidx].units||[]).map(u=>
-                u.id===item.id?{...u,status:"Sold",soldAt:new Date().toISOString(),saleId,soldBy:servedBy,history:[...(u.history||[]),{status:"Sold",ts:new Date().toISOString(),note:`Sold via ${saleId}`}]}:u
+                u.id===item.id?{...u,status:"Sold",soldAt:bdStamp||new Date().toISOString(),saleId,soldBy:servedBy,history:[...(u.history||[]),{status:"Sold",ts:bdStamp||new Date().toISOString(),note:`Sold via ${saleId}${useBd?" (backdated, entered "+todayStr()+")":""}`}]}:u
               );
               updatedCatalog[pidx].stock=updatedCatalog[pidx].units.filter(u=>u.status==="Available").length;
             }
@@ -8114,7 +8133,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         filtered.map((s,i)=>E("div",{key:i,onClick:()=>setSelectedSale(s),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 16px",cursor:"pointer",opacity:s.voided?0.55:1,borderLeft:`3px solid ${s.isReturn?T.blue:s.isDeposit?"#F59E0B":s.isExchange?"#7C3AED":s.voided?T.red:T.green}`}},
           E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
             E("div",null,
-              E("div",{style:{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}},s.id,s.voided&&E("span",{style:{color:T.red,fontSize:10}},"VOIDED"),s.isDeposit&&E("span",{style:{color:T.amber,fontSize:10}},"DEP"),s.isReturn&&E("span",{style:{color:T.blue,fontSize:10}},"RTN"),s.isExchange&&E("span",{style:{color:"#7C3AED",fontSize:10}},"EXC")),
+              E("div",{style:{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}},s.id,s.voided&&E("span",{style:{color:T.red,fontSize:10}},"VOIDED"),s.isDeposit&&E("span",{style:{color:T.amber,fontSize:10}},"DEP"),s.isReturn&&E("span",{style:{color:T.blue,fontSize:10}},"RTN"),s.isExchange&&E("span",{style:{color:"#7C3AED",fontSize:10}},"EXC"),s.backdated&&E("span",{title:`Backdated — entered ${s.enteredDate||""}. ${s.backdatedReason||""}`,style:{color:"#B45309",fontSize:10}},"📅 BACKDATED")),
               E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},fmtDate(s.createdAt),s.customerName?" · "+s.customerName:"",s.servedBy?" · "+s.servedBy.split(" ")[0]:"")
             ),
             E("div",{style:{fontWeight:700,fontSize:15,color:s.isReturn?T.red:T.blue}},fmtMoney(Math.abs(s.total)))
@@ -8479,6 +8498,16 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         !exchangeOwesCustomer&&totalPaid>=amountDue&&change>0&&E("div",{style:{color:T.green,fontWeight:700}},"💵 Change: ",fmtMoney(change)),
         !exchangeOwesCustomer&&totalPaid>0&&totalPaid<amountDue&&E("div",{style:{color:T.red,fontWeight:700}},"⚠️ Still owed: ",fmtMoney(amountDue-totalPaid))
       ),
+      isOwnerUser&&!isExchange&&!isReturn&&!appliedCredit&&!cart.some(i=>i.type==="ticket")&&E("div",{style:{border:`1px solid ${bdOn?"#F59E0B":T.border}`,background:bdOn?T.amberLt:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:10}},
+        E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,cursor:"pointer"}},
+          E("input",{type:"checkbox",checked:bdOn,onChange:e=>{setBdOn(e.target.checked); if(e.target.checked&&!bdDate){const y=addDaysStr(todayStr(),-1); if(y>=todayStr().slice(0,8)+"01") setBdDate(y);}}}),"📅 Backdate this sale (owner only)"),
+        bdOn&&(todayStr().slice(8)==="01"
+          ? E("div",{style:{fontSize:12,color:"#92400E",marginTop:8}},"Today is the 1st, so there's no earlier day this month to backdate to.")
+          : E("div",{style:{marginTop:8,display:"flex",flexDirection:"column",gap:8}},
+              E(Field,{label:"Sale date (this month only)"},E(Input,{type:"date",min:todayStr().slice(0,8)+"01",max:addDaysStr(todayStr(),-1),value:bdDate,onChange:e=>setBdDate(e.target.value)})),
+              E(Field,{label:"Reason (required)"},E(Input,{placeholder:"e.g. sale made Monday, not rung up",value:bdReason,onChange:e=>setBdReason(e.target.value)})),
+              E("div",{style:{fontSize:11,color:"#92400E"}},"Recorded on the date above and marked BACKDATED on the receipt and in reports."))
+        )),
       E(Field,{label:"Note"},E(Input,{placeholder:"Optional note",value:note,onChange:e=>setNote(e.target.value)})),
       E("div",{style:{display:"flex",gap:8,marginTop:14}},
         E(Btn,{variant:"ghost",onClick:parkSale,style:{fontSize:13,padding:"11px 16px"}},"⏸️ Park"),
