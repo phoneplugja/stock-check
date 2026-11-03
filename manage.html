@@ -5305,7 +5305,7 @@ function OwnerDashboard({
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
       // ── Sheet: Sales Ledger ────────────────────────────────────────────────
-      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)", "Backdated", "Entered On", "Backdate Reason"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s), s.backdated ? "Yes" : "No", s.backdated ? (s.enteredDate || "") : "", s.backdated ? (s.backdatedReason || "") : ""]));
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)", "Backdated", "Entered On", "Backdate Reason", "Company", "Pro Forma"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s), s.backdated ? "Yes" : "No", s.backdated ? (s.enteredDate || "") : "", s.backdated ? (s.backdatedReason || "") : "", s.customerCompany || "", s.invoiceId || ""]));
 
       // ── Sheet: Rental Income ──────────────────────────────────────────────
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
@@ -6524,7 +6524,8 @@ const receiptLines = (sale) => {
   add();
   const parts = String(sale.servedBy||"").trim().split(/\s+/).filter(Boolean);
   add("Employee: " + (parts.length ? parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "") : "-"));
-  if (sale.customerName) wrap("Customer: "+sale.customerName, COLS).forEach(l=>add(l));
+  if (sale.customerCompany) wrap("Company: "+sale.customerCompany, COLS).forEach(l=>add(l));
+  if (sale.customerName && sale.customerName!==sale.customerCompany) wrap("Customer: "+sale.customerName, COLS).forEach(l=>add(l));
   if (sale.customerPhone) add(sale.customerPhone);
   if (sale.deliveryZone && sale.deliveryZone!=="None") wrap("Delivery: "+sale.deliveryZone+(sale.deliveryAddress?" - "+sale.deliveryAddress:""), COLS).forEach(l=>add(l));
   dash();
@@ -7499,6 +7500,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [customerName,setCustomerName]=useState("");
   const [customerPhone,setCustomerPhone]=useState("");
   const [customerEmail,setCustomerEmail]=useState("");
+  const [customerCompany,setCustomerCompany]=useState("");
   const [customerSuggestions,setCustomerSuggestions]=useState([]);
   const [showNewCustomer,setShowNewCustomer]=useState(false);
   const [isExistingCustomer,setIsExistingCustomer]=useState(false);
@@ -7678,11 +7680,13 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   // the receipt/payment already went through by the time this runs.
   const saveCustomer=async(name,phone,email,opts={})=>{
     const strict=!!opts.strict;
+    const company=(customerCompany||"").trim();
+    if(!name&&company)name=company; // company-only customer: the company name stands in for the contact name
     if(!name&&!phone&&!email)return null;
     // Strict (the explicit "Save Customer" button): name + phone required. At checkout only what was typed
     // is checked, and a customer is stored only when there's a name plus a phone or email to identify them.
     const errors={
-      name:(strict||name)?validateCustomerName(name):"",
+      name:(name===company&&company)?"":(strict||name)?validateCustomerName(name):"",
       phone:(strict||phone)?validatePhone(phone):"",
       email:validateEmail(email)
     };
@@ -7698,8 +7702,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     catch(e){ console.error("saveCustomer load failed:",e); if(strict)alert("⚠️ Couldn't reach the customer list. Customer NOT saved — try again."); return null; }
     const np=normalizePhone(phone);
     const dup=fresh.find(c=>(np&&normalizePhone(c.phone)===np)||(email&&c.email&&c.email.toLowerCase()===email.toLowerCase()));
-    if(dup){ if(fresh.length!==customers.length)setCustomers(fresh); return dup; }
-    const customer={id:Date.now().toString(),name:name.trim(),phone,email,createdAt:new Date().toISOString()};
+    if(dup){ if(company&&dup.company!==company){ const upd=fresh.map(c=>c.id===dup.id?{...c,company}:c); if(await save("tpp-customers",upd)){setCustomers(upd);return {...dup,company};} } if(fresh.length!==customers.length)setCustomers(fresh); return dup; }
+    const customer={id:Date.now().toString(),name:name.trim(),...(company?{company}:{}),phone,email,createdAt:new Date().toISOString()};
     const updated=[customer,...fresh];
     const ok=await save("tpp-customers",updated);
     if(!ok){ alert("⚠️ Customer could NOT be saved (the sale itself is unaffected). Please re-add them from the customer box."); return null; }
@@ -7712,7 +7716,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     const inv=window.__tppInvoiceHandoff; if(!inv) return;
     window.__tppInvoiceHandoff=null;
     setLinkedInv(inv);
-    setCustomerName(inv.billTo?.name||"");setCustomerPhone(inv.billTo?.phone||"");setCustomerEmail(inv.billTo?.email||"");
+    { const bn=(inv.billTo?.name||"").trim(), at=(inv.billTo?.attn||"").trim();
+      if(at){ setCustomerName(at); setCustomerCompany(bn); }
+      else if(bn && !validateCustomerName(bn)) setCustomerName(bn);
+      else { setCustomerName(""); setCustomerCompany(bn); } }
+    setCustomerPhone(inv.billTo?.phone||"");setCustomerEmail(inv.billTo?.email||"");
     const d=parseFloat(inv.discount)||0;
     setDiscounts(d>0?[{type:"General",amount:d}]:[]);
     setNote(`Per pro forma ${inv.id}`);
@@ -7721,7 +7729,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   const resetForm=()=>{
     setLinkedInv(null);
-    setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setIsExistingCustomer(false);
+    setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerCompany("");setIsExistingCustomer(false);
     setDiscounts([]);setNewDiscType("General");setNewDiscAmt("");
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
     setCash("");setDebitCard("");setCreditCard("");setNcbTransfer("");setScotiaTransfer("");setOtherPayment("");
@@ -7869,7 +7877,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       const saleId=genSaleId(existing.map(s=>s.id),prefix);
       const servedBy=user?.name||"";
       const sale={
-        id:saleId,customerName,customerPhone,customerEmail,
+        id:saleId,customerName,customerPhone,customerEmail,...(customerCompany.trim()?{customerCompany:customerCompany.trim()}:{}),
         items:cart,subtotal,discounts,totalDiscount,total,
         deliveryZone,deliveryCost:deliveryCostNum,deliveryAddress,
         cash:parseFloat(cash)||0,debit_card:parseFloat(debitCard)||0,
@@ -8117,7 +8125,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           ),
           E("div",{style:{fontWeight:800,fontSize:20,color:selectedSale.isReturn?T.red:T.blue}},fmtMoney(Math.abs(selectedSale.total)))
         ),
-        selectedSale.customerName&&E("div",{style:{fontSize:13,marginBottom:4}},"👤 ",selectedSale.customerName,selectedSale.customerPhone?" · "+selectedSale.customerPhone:"",selectedSale.customerEmail?" · "+selectedSale.customerEmail:""),
+        (selectedSale.customerName||selectedSale.customerCompany)&&E("div",{style:{fontSize:13,marginBottom:4}},"👤 ",selectedSale.customerCompany?selectedSale.customerCompany+(selectedSale.customerName&&selectedSale.customerName!==selectedSale.customerCompany?" — "+selectedSale.customerName:""):selectedSale.customerName,selectedSale.customerPhone?" · "+selectedSale.customerPhone:"",selectedSale.customerEmail?" · "+selectedSale.customerEmail:""),
         selectedSale.servedBy&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:6}},"Served by: ",(selectedSale.servedBy.split(" ")[0]+(selectedSale.servedBy.split(" ")[1]?" "+selectedSale.servedBy.split(" ")[1][0]+".":""))),
         selectedSale.deliveryZone&&selectedSale.deliveryZone!=="None"&&E("div",{style:{fontSize:12,color:T.muted,marginBottom:6}},"📦 ",selectedSale.deliveryZone,selectedSale.deliveryAddress?" — "+selectedSale.deliveryAddress:"",selectedSale.deliveryCost>0?" · "+fmtMoney(selectedSale.deliveryCost):""),
         E("div",{style:{borderTop:`1px solid ${T.border}`,paddingTop:10,marginBottom:10}},
@@ -8365,6 +8373,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
               E("button",{onClick:()=>{setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerSuggestions([]);setShowNewCustomer(false);setIsExistingCustomer(false);},style:{background:T.redLt,color:T.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}},"✕ Clear")
             )
       ),
+      E(Field,{label:"Company (optional)"},E(Input,{placeholder:"e.g. PSP 281",value:customerCompany,onChange:e=>{setCustomerCompany(e.target.value);setIsExistingCustomer(false);}})),
       E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
         E("div",{style:{position:"relative"}},
           E(Field,{label:"Name"},E(Input,{placeholder:"Search or enter name",value:customerName,onChange:e=>{setCustomerName(e.target.value);setShowNewCustomer(false);setIsExistingCustomer(false);},onFocus:()=>setShowNewCustomer(false)})),
@@ -8376,6 +8385,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
                 e.preventDefault();
                 suppressSuggestRef.current=true;
                 setCustomerName(c.name||"");
+                setCustomerCompany(c.company||"");
                 setCustomerPhone(c.phone||"");
                 setCustomerEmail(c.email||"");
                 setCustomerSuggestions([]);
@@ -8632,17 +8642,18 @@ function CustomersTab() {
   const filtered = customers.filter(c=>
     !search ||
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
+    c.company?.toLowerCase().includes(search.toLowerCase()) ||
     c.phone?.includes(search) ||
     c.email?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const emptyForm = { id:null, name:"", phone:"", email:"" };
+  const emptyForm = { id:null, name:"", company:"", phone:"", email:"" };
   const startNew = () => setEditing(emptyForm);
-  const startEdit = (c) => setEditing({ id:c.id, name:c.name||"", phone:c.phone||"", email:c.email||"" });
+  const startEdit = (c) => setEditing({ id:c.id, name:c.name||"", company:c.company||"", phone:c.phone||"", email:c.email||"" });
 
   const saveEdit = async () => {
-    const name = editing.name.trim(), phone = editing.phone.trim(), email = editing.email.trim();
-    const errs = { name: validateCustomerName(name), phone: validatePhone(phone), email: validateEmail(email) };
+    const name = editing.name.trim(), phone = editing.phone.trim(), email = editing.email.trim(), company = (editing.company||"").trim();
+    const errs = { name: (!name && company) ? "" : validateCustomerName(name), phone: validatePhone(phone), email: validateEmail(email) };
     if (errs.name || errs.phone || errs.email) {
       alert(`❌ Can't save customer:\n${[errs.name, errs.phone, errs.email].filter(Boolean).join("\n")}`);
       return;
@@ -8653,9 +8664,9 @@ function CustomersTab() {
     try {
       let updated;
       if (editing.id) {
-        updated = customers.map(c=>c.id===editing.id ? { ...c, name, phone, email } : c);
+        updated = customers.map(c=>c.id===editing.id ? { ...c, name: name || company, company, phone, email } : c);
       } else {
-        const newCustomer = { id:Date.now().toString(), name, phone, email, createdAt:new Date().toISOString() };
+        const newCustomer = { id:Date.now().toString(), name: name || company, company, phone, email, createdAt:new Date().toISOString() };
         updated = [newCustomer, ...customers];
       }
       await save("tpp-customers", updated);
@@ -8690,7 +8701,8 @@ function CustomersTab() {
           E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18}},editing.id?"Edit Customer":"Add Customer"),
           E("button",{onClick:()=>setEditing(null),style:{background:"none",border:"none",fontSize:20,cursor:"pointer"}},"✕")
         ),
-        E(Field,{label:"Name"},E(Input,{value:editing.name,onChange:e=>setEditing(f=>({...f,name:e.target.value}))})),
+        E(Field,{label:"Name (contact person)"},E(Input,{value:editing.name,onChange:e=>setEditing(f=>({...f,name:e.target.value}))})),
+        E(Field,{label:"Company (optional)"},E(Input,{placeholder:"e.g. PSP 281",value:editing.company||"",onChange:e=>setEditing(f=>({...f,company:e.target.value}))})),
         E(Field,{label:"Phone"},E(Input,{type:"tel",value:editing.phone,onChange:e=>setEditing(f=>({...f,phone:e.target.value}))})),
         E(Field,{label:"Email"},E(Input,{type:"email",value:editing.email,onChange:e=>setEditing(f=>({...f,email:e.target.value}))})),
         E("div",{style:{display:"flex",gap:8,marginTop:16}},
@@ -8706,6 +8718,7 @@ function CustomersTab() {
         E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}},
           E("div",{style:{minWidth:0}},
             E("div",{style:{fontWeight:700,fontSize:14}},c.name),
+            c.company&&c.company!==c.name&&E("div",{style:{fontSize:12,color:T.blue,fontWeight:600,marginTop:1}},"🏢 "+c.company),
             E("div",{style:{fontSize:12,color:T.muted,marginTop:2}},[c.phone,c.email].filter(Boolean).join(" · ")||"—"),
             c.createdAt&&E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},"Added: ",fmtDate(c.createdAt))
           ),
@@ -8761,7 +8774,9 @@ const buildCustomerImportPlan = (rows, existing) => {
     const phoneDigits = phoneRaw.replace(/\D/g, "");
     const email = String(row.email || "").trim();
     const id = String(row.id || "").trim();
-    const nameErr = validateCustomerName(name);
+    const hasCompanyCol = row.company !== undefined;
+    const company = String(row.company || "").trim();
+    const nameErr = (!name && company) ? "" : validateCustomerName(name);
     const phoneErr = validatePhone(phoneRaw);
     const emailErr = validateEmail(email);
     if (nameErr || phoneErr || emailErr) {
@@ -8781,12 +8796,12 @@ const buildCustomerImportPlan = (rows, existing) => {
       if (dupEmail) { preview.push({ row: rowNum, status: "error", name, phone: phoneRaw, email, error: `Email already used by ${dupEmail.name}.` }); return; }
     }
     if (match) {
-      working = working.map(c => c.id === match.id ? { ...c, name, phone: phoneRaw, email } : c);
-      preview.push({ row: rowNum, status: "update", id: match.id, name, phone: phoneRaw, email });
+      working = working.map(c => c.id === match.id ? { ...c, name: name || company, phone: phoneRaw, email, ...(hasCompanyCol ? { company } : {}) } : c);
+      preview.push({ row: rowNum, status: "update", id: match.id, name: name || company, phone: phoneRaw, email });
     } else {
       const newId = `cust-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
-      working = [...working, { id: newId, name, phone: phoneRaw, email, createdAt: new Date().toISOString() }];
-      preview.push({ row: rowNum, status: "add", id: newId, name, phone: phoneRaw, email });
+      working = [...working, { id: newId, name: name || company, ...(company ? { company } : {}), phone: phoneRaw, email, createdAt: new Date().toISOString() }];
+      preview.push({ row: rowNum, status: "add", id: newId, name: name || company, phone: phoneRaw, email });
     }
   });
   return { preview, result: working };
@@ -9018,8 +9033,8 @@ function DataImportExportTab() {
   useEffect(() => { reload(); }, []);
 
   const exportCustomers = () => {
-    downloadCSV("TPP_Customers.csv", ["id", "name", "phone", "email"],
-      customers.map(c => [c.id, c.name || "", c.phone || "", c.email || ""]));
+    downloadCSV("TPP_Customers.csv", ["id", "name", "company", "phone", "email"],
+      customers.map(c => [c.id, c.name || "", c.company || "", c.phone || "", c.email || ""]));
   };
   const exportAllProducts = () => {
     downloadCSV("TPP_All_Products.csv",
@@ -9232,7 +9247,7 @@ function DataImportExportTab() {
     E("div", { style: { fontSize: 13, color: T.muted, marginBottom: 20 } }, "Export a CSV, edit it in Excel/Sheets (add new rows, change existing ones), then re-import the same file. Each section below is independent — importing one never touches the others, and nothing is saved until you review the preview and hit Apply."),
     Section({
       title: "👤 Customers", type: "customers", onExport: exportCustomers, fileRef: custFileRef,
-      desc: "Columns: id, name, phone, email. Leave id blank for a brand-new customer — existing customers are matched by id first, then by phone number.",
+      desc: "Columns: id, name, company (optional), phone, email. Leave id blank for a brand-new customer — existing customers are matched by id first, then by phone number.",
       columns: [{ key: "name", label: "Name" }, { key: "phone", label: "Phone" }, { key: "email", label: "Email" }]
     }),
     Section({
