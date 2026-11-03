@@ -13377,6 +13377,7 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
   const subTabs=[
     {id:"catalog",label:"📦 Catalog"},
     {id:"receive",label:"📥 Receive Stock"},
+    {id:"sold",label:"✅ Sold Phones"},
     {id:"testing",label:`🔬 Testing Queue${testingCount?` (${testingCount})`:""}`},
     {id:"costs",label:`💲 Missing Costs${missingCostCount?` (${missingCostCount})`:""}`},
   ];
@@ -13389,6 +13390,7 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
 
   if (subTab==="catalog") return E("div",null,tabBar,E(CatalogSubTab,{catalog,saveCatalogFn}));
   if (subTab==="receive") return E("div",null,tabBar,E(ReceiveStockTab,{onCatalogUpdate:saveCatalogFn}));
+  if (subTab==="sold") return E("div",null,tabBar,E(SoldPhonesSubTab,{catalog,saveCatalogFn}));
   if (subTab==="testing") return E("div",null,tabBar,E(UnitTestingQueue,{catalog,onCatalogUpdate:saveCatalogFn}));
   if (subTab==="costs") return E("div",null,tabBar,E(MissingCostsTool,{catalog,onCatalogUpdate:saveCatalogFn}));
 
@@ -13404,6 +13406,72 @@ function ProductsTab({ data, user, fetchAll, updatePhones, archiveOldSales, init
 // Supplier. Every transition is written to the unit's own history log for a full audit trail.
 // `catalog`/`onCatalogUpdate` are optional — if this is mounted on its own (e.g. a shell without
 // the rest of the Products tab wired in) it loads and saves the catalog itself.
+// ── Sold phones: recall a sold unit to change its status, and optionally void its receipt ──
+function SoldPhonesSubTab({ catalog, saveCatalogFn }) {
+  const E = React.createElement;
+  const [sales, setSales] = useState(null);
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState("");
+  useEffect(()=>{ loadArr("tpp-sales").then(s=>setSales(s||[])).catch(()=>setSales([])); },[]);
+  const saleById = {}; (sales||[]).forEach(s=>{ saleById[s.id]=s; });
+  const rows = [];
+  catalog.forEach(p=>{ if(!isImeiCategory(p.category)) return; (p.units||[]).forEach((u,ui)=>{ if(u.status==="Sold") rows.push({p,u,ui,sale:saleById[u.saleId]}); }); });
+  rows.sort((a,b)=>String(b.u.soldAt||"").localeCompare(String(a.u.soldAt||"")));
+  const tq = q.trim().toLowerCase();
+  const shown = rows.filter(r=>!tq || (r.p.name||"").toLowerCase().includes(tq) || (r.u.imei||"").includes(tq) || String(r.u.saleId||"").toLowerCase().includes(tq) || String(r.sale?.customerName||"").toLowerCase().includes(tq)).slice(0,100);
+  const setStatus = async (r, newStatus, alsoVoid) => {
+    const { p, u } = r, sale = r.sale;
+    let reason = "";
+    if (alsoVoid && sale && !sale.voided) {
+      const linked = (sales||[]).filter(x=>!x.voided&&(x.returnOrigSaleId===sale.id||x.exchangeOrigSaleId===sale.id));
+      if (linked.length) { alert(`Can't void ${sale.id}: it has linked return/exchange receipt(s) (${linked.map(x=>x.id).join(", ")}). Void those first from Sales History.`); return; }
+      reason = prompt(`Reason for voiding receipt ${sale.id}?`); if (!reason) return;
+    } else if (!confirm(`Change ${u.imei||"this unit"} (${p.name}) from Sold to ${newStatus}?${sale&&!sale.voided?`\n\nReceipt ${sale.id} will stay active — use "Void receipt too" if the sale didn't happen.`:""}`)) return;
+    setBusy(u.id);
+    try {
+      if (alsoVoid && sale && !sale.voided) {
+        const all = await loadSalesForWrite();
+        const updated = all.map(x=>x.id===sale.id?{...x,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:x);
+        if (!(await save("tpp-sales", updated))) { alert("⚠️ The void could NOT be saved. Nothing was changed."); return; }
+        setSales(updated);
+        // Other items on that receipt go back too (accessories +qty); this phone is handled below.
+        const fresh0 = await loadCatalog();
+        let ch = false;
+        (sale.items||[]).forEach(it=>{
+          if (it.type==="product" && !String(it.id||"").startsWith("svc-")) { const i=fresh0.findIndex(x=>x.id===it.id); if(i>=0){ fresh0[i]={...fresh0[i],stock:(fresh0[i].stock||0)+(it.qty||1)}; ch=true; } }
+          else if (it.type==="catalog_phone" && it.id!==u.id) { const i=fresh0.findIndex(x=>(x.units||[]).some(z=>z.id===it.id)); if(i>=0){ const units=fresh0[i].units.map(z=>z.id===it.id&&z.status==="Sold"?{...z,status:"Available",saleId:undefined,soldAt:undefined,soldBy:undefined,history:[...(z.history||[]),{status:"Available",ts:new Date().toISOString(),note:`Sale ${sale.id} voided`}]}:z); fresh0[i]={...fresh0[i],units,stock:units.filter(z=>z.status==="Available").length}; ch=true; } }
+        });
+        if (ch) await saveCatalog(fresh0);
+      }
+      const fresh = await loadCatalog();
+      const next = fresh.map(x=>x.id!==p.id?x:(()=>{ const units=(x.units||[]).map(z=>z.id!==u.id?z:{...z,status:newStatus,saleId:undefined,soldAt:undefined,soldBy:undefined,history:[...(z.history||[]),{status:newStatus,ts:new Date().toISOString(),note:`Recalled from Sold${alsoVoid&&sale?` — receipt ${sale.id} voided (${reason})`:""}`}]}); return {...x,units,stock:units.filter(z=>z.status==="Available").length}; })());
+      await saveCatalogFn(next);
+    } finally { setBusy(""); }
+  };
+  return E("div",null,
+    E("div",{style:{fontSize:12,color:T.muted,marginBottom:10}},"Sold phones are hidden from the POS so they can't be sold twice. Find one here to put it back in stock (or another status), and void its receipt if the sale didn't happen."),
+    E(Input,{placeholder:"🔍 Search IMEI, phone name, receipt ID or customer…",value:q,onChange:e=>setQ(e.target.value),style:{marginBottom:12}}),
+    sales===null?E("div",{style:{color:T.muted,padding:20}},"Loading…")
+    : shown.length===0?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},rows.length?"No sold phones match.":"No sold phones in the catalog.")
+    : E("div",{style:{display:"flex",flexDirection:"column",gap:8}},shown.map(r=>{
+        const s=r.sale;
+        return E("div",{key:r.u.id,style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px"}},
+          E("div",{style:{fontWeight:600,fontSize:13}},r.p.name),
+          E("div",{style:{fontSize:11,color:T.muted,marginTop:2,fontFamily:"monospace"}},`IMEI ${r.u.imei||"—"}`),
+          E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},
+            `Sold ${r.u.soldAt?new Date(r.u.soldAt).toLocaleDateString("en-US",{timeZone:"America/Jamaica"}):"—"}`,
+            r.u.saleId?` · Receipt ${r.u.saleId}`:"",
+            s?` · ${s.customerName||"Walk-in"} · ${fmtMoney(s.total||0)}${s.voided?" · VOIDED":""}`:(r.u.saleId?" · receipt not found in Sales History":"")),
+          E("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginTop:8,alignItems:"center"}},
+            E(Btn,{style:{fontSize:11,padding:"5px 10px"},disabled:busy===r.u.id,onClick:()=>setStatus(r,"Available",false)},"↩ Mark Available"),
+            s&&!s.voided&&E(Btn,{variant:"danger",style:{fontSize:11,padding:"5px 10px"},disabled:busy===r.u.id,onClick:()=>setStatus(r,"Available",true)},"🚫 Void receipt & restore"),
+            E(Sel,{value:"",disabled:busy===r.u.id,onChange:e=>{ if(e.target.value) setStatus(r,e.target.value,false); },style:{width:"auto",fontSize:11,padding:"4px 6px"}},
+              E("option",{value:""},"Other status…"),
+              PHONE_UNIT_STATUSES.filter(x=>x!=="Sold"&&x!=="Available").map(x=>E("option",{key:x,value:x},x)))
+          ));
+      })));
+}
+
 function UnitTestingQueue({ catalog: catalogProp, onCatalogUpdate }) {
   const E = React.createElement;
   const [localCatalog, setLocalCatalog] = useState(catalogProp || []);
