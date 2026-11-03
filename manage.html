@@ -11577,6 +11577,7 @@ function InventoryCount({ user, isOwner }) {
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState([]);
   const [pendingCounts, setPendingCounts] = useState([]);
+  const [submitted, setSubmitted] = useState(false);
   const scanRef = React.useRef(null);
 
   useEffect(()=>{
@@ -11686,7 +11687,7 @@ function InventoryCount({ user, isOwner }) {
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
       E("div",null,E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"🔢 Stock Count"),
         E("div",{style:{fontSize:12,color:T.muted,marginTop:4}},"Count your physical stock and reconcile with the system.")),
-      E(Btn,{onClick:()=>{const init={};products.forEach(p=>{init[p.id]="";});setCounts(init);setSession("active");}},"▶ Start Count")
+      E(Btn,{onClick:()=>{const init={};products.forEach(p=>{init[p.id]="";});setCounts(init);setSubmitted(false);setSession("active");}},"▶ Start Count")
     ),
     // Review screen for a pending count
     reviewingCount&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,overflowY:"auto",padding:20}},
