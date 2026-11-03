@@ -6868,9 +6868,11 @@ function InvoicesTab() {
         E("input", { type: "checkbox", checked: !inv.banks || inv.banks[bk.id] !== false, onChange: e => setInv(p => ({ ...p, banks: { ...(p.banks || {}), [bk.id]: e.target.checked } })) }),
         `${bk.name} — ${bk.number}`)),
       E(Field, { label: "Notes & terms (shown on the PDF; leave empty to hide)" }, E(Textarea, { rows: 4, value: inv.notes || "", onChange: e => setF("notes", e.target.value) }))),
+    inv.saleId && E("div", { style: { background: T.greenLt, border: "1px solid #BBF7D0", color: T.green, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontWeight: 600, marginBottom: 10 } }, `✅ Accepted — receipt ${inv.saleId}${inv.acceptedAt ? " on " + String(inv.acceptedAt).slice(0, 10) : ""}`),
     busy && E("div", { style: { color: T.blue, fontWeight: 600, fontSize: 13, marginBottom: 8 } }, busy),
     E("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 } },
       E(Btn, { disabled: !!busy, onClick: async () => { const r = await saveInv(); if (r) alert("✅ Saved."); } }, "💾 Save"),
+      !isNew && !inv.saleId && E(Btn, { variant: "green", disabled: !!busy, onClick: async () => { const r = await saveInv(); if (!r) return; window.__tppInvoiceHandoff = r; window.dispatchEvent(new CustomEvent("tpp-open-pos")); } }, "🧾 Convert to sale"),
       E(Btn, { variant: "ghost", disabled: !!busy, onClick: download }, "⬇️ Download PDF"),
       E(Btn, { variant: "ghost", disabled: !!busy, onClick: emailIt }, "✉️ Email to customer"),
       E(Btn, { variant: "ghost", disabled: !!busy, onClick: saveToCloud }, "☁️ Save PDF to Cloudinary"),
@@ -7490,6 +7492,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [bdOn,setBdOn]=useState(false);
   const [bdDate,setBdDate]=useState("");
   const [bdReason,setBdReason]=useState("");
+  // A pro forma invoice being turned into a sale (customer/discount prefilled; the receipt gets linked back to it).
+  const [linkedInv,setLinkedInv]=useState(null);
   const [showScanner,setShowScanner]=useState(false);
   // Customer
   const [customerName,setCustomerName]=useState("");
@@ -7703,7 +7707,20 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     return customer;
   };
 
+  // Pick up an invoice handed over from Invoices → "Convert to sale".
+  useEffect(()=>{
+    const inv=window.__tppInvoiceHandoff; if(!inv) return;
+    window.__tppInvoiceHandoff=null;
+    setLinkedInv(inv);
+    setCustomerName(inv.billTo?.name||"");setCustomerPhone(inv.billTo?.phone||"");setCustomerEmail(inv.billTo?.email||"");
+    const d=parseFloat(inv.discount)||0;
+    setDiscounts(d>0?[{type:"General",amount:d}]:[]);
+    setNote(`Per pro forma ${inv.id}`);
+    setView("pos");
+  },[]);
+
   const resetForm=()=>{
+    setLinkedInv(null);
     setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setIsExistingCustomer(false);
     setDiscounts([]);setNewDiscType("General");setNewDiscAmt("");
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
@@ -7869,11 +7886,18 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         appliedCreditId:appliedCredit?.id||null,
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
         createdAt:bdStamp||new Date().toISOString(),date:useBd?bdDate:todayStr(),
+        ...(linkedInv?{invoiceId:linkedInv.id}:{}),
         ...(useBd?{backdated:true,backdatedReason:bdReason.trim(),enteredAt:new Date().toISOString(),enteredDate:todayStr(),backdatedBy:servedBy||"Owner"}:{})
       };
       const saleSaved=await save("tpp-sales",[slimSale(sale),...existing.map(slimSale)]);
       if(!saleSaved){ alert("⚠️ The sale could NOT be saved, so no receipt was recorded and inventory was NOT changed. Please try again — and tell the owner if it keeps happening.\n\nDetails: "+(window.__lastSaveError||"unknown")+"\n(Build 2026-10-09-d)"); return; }
       setSales(prev=>[sale,...prev]);
+      if(linkedInv){
+        try{
+          const invs=await loadArr("tpp-invoices");
+          await save("tpp-invoices",invs.map(x=>x.id===linkedInv.id?{...x,status:"Accepted",saleId:saleId,acceptedAt:new Date().toISOString(),updatedAt:new Date().toISOString()}:x));
+        }catch(e){console.error("Invoice link:",e);alert(`The sale was saved, but invoice ${linkedInv.id} couldn't be marked Accepted. Open it in Invoices and set the status by hand.`);}
+      }
 
       // Update inventory — non-blocking, runs after sale is saved
       try {
@@ -8133,7 +8157,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         filtered.map((s,i)=>E("div",{key:i,onClick:()=>setSelectedSale(s),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 16px",cursor:"pointer",opacity:s.voided?0.55:1,borderLeft:`3px solid ${s.isReturn?T.blue:s.isDeposit?"#F59E0B":s.isExchange?"#7C3AED":s.voided?T.red:T.green}`}},
           E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}},
             E("div",null,
-              E("div",{style:{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}},s.id,s.voided&&E("span",{style:{color:T.red,fontSize:10}},"VOIDED"),s.isDeposit&&E("span",{style:{color:T.amber,fontSize:10}},"DEP"),s.isReturn&&E("span",{style:{color:T.blue,fontSize:10}},"RTN"),s.isExchange&&E("span",{style:{color:"#7C3AED",fontSize:10}},"EXC"),s.backdated&&E("span",{title:`Backdated — entered ${s.enteredDate||""}. ${s.backdatedReason||""}`,style:{color:"#B45309",fontSize:10}},"📅 BACKDATED")),
+              E("div",{style:{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}},s.id,s.voided&&E("span",{style:{color:T.red,fontSize:10}},"VOIDED"),s.isDeposit&&E("span",{style:{color:T.amber,fontSize:10}},"DEP"),s.isReturn&&E("span",{style:{color:T.blue,fontSize:10}},"RTN"),s.isExchange&&E("span",{style:{color:"#7C3AED",fontSize:10}},"EXC"),s.invoiceId&&E("span",{title:"Created from pro forma invoice",style:{color:T.blue,fontSize:10}},"🧾 "+s.invoiceId),s.backdated&&E("span",{title:`Backdated — entered ${s.enteredDate||""}. ${s.backdatedReason||""}`,style:{color:"#B45309",fontSize:10}},"📅 BACKDATED")),
               E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},fmtDate(s.createdAt),s.customerName?" · "+s.customerName:"",s.servedBy?" · "+s.servedBy.split(" ")[0]:"")
             ),
             E("div",{style:{fontWeight:700,fontSize:15,color:s.isReturn?T.red:T.blue}},fmtMoney(Math.abs(s.total)))
@@ -8387,6 +8411,15 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         E(Field,{label:"Delivery Address"},E(Input,{placeholder:"Full address",value:deliveryAddress,onChange:e=>setDeliveryAddress(e.target.value)}))
       )
     ),
+
+    linkedInv&&E("div",{style:{background:T.blueLt,border:`1px solid ${T.blue}`,borderRadius:10,padding:"10px 14px",marginBottom:12}},
+      E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
+        E("div",{style:{fontWeight:700,fontSize:13,color:T.blue}},`🧾 Converting pro forma ${linkedInv.id}`),
+        E("button",{onClick:()=>{setLinkedInv(null);setNote(n=>n===`Per pro forma ${linkedInv.id}`?"":n);},style:{background:"none",border:"none",color:T.muted,fontSize:12,fontWeight:700,cursor:"pointer"}},"✕ Unlink")),
+      E("div",{style:{fontSize:11,color:T.muted,margin:"4px 0 8px"}},"Customer and discount are filled in. Add the actual items from stock (phones by IMEI) so inventory updates. Tap a line to search for it."),
+      (linkedInv.items||[]).filter(it=>(it.desc||"").trim()).map((it,i)=>E("button",{key:i,onClick:()=>setSearch(it.desc||""),style:{display:"flex",justifyContent:"space-between",width:"100%",textAlign:"left",background:"#fff",border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 10px",marginBottom:4,fontSize:12,cursor:"pointer",fontFamily:"inherit"}},
+        E("span",null,`${it.qty||1} × ${it.desc}${it.sub?" — "+it.sub:""}`),E("strong",null,fmtMoney((parseFloat(it.price)||0)*(parseFloat(it.qty)||1))))),
+      E("div",{style:{fontSize:12,textAlign:"right",marginTop:4}},"Invoice total: ",E("strong",null,fmtMoney(invTotals(linkedInv).total)))),
 
     // Search
     E("div",{style:{display:"flex",gap:8,marginBottom:8}},
@@ -9531,6 +9564,7 @@ function OwnerShell({
   onLogout
 }) {
   const [tab, setTab] = useState("dashboard");
+  useEffect(() => { const h = () => setTab("pos"); window.addEventListener("tpp-open-pos", h); return () => window.removeEventListener("tpp-open-pos", h); }, []);
   const [data, setData] = useState({
     eod: [],
     expenses: [],
