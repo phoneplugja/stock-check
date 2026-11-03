@@ -7795,9 +7795,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     const useBd=bdOn&&isOwnerUser;
     let bdStamp=null;
     if(useBd){
-      const today=todayStr(), monthStart=today.slice(0,8)+"01";
+      const today=todayStr(), monthStart=addDaysStr(today,-30);
       if(isExchange||isReturn||appliedCredit||cart.some(i=>i.type==="ticket")){alert("Backdating is only for normal sales. Turn it off for exchanges, returns, store-credit sales and repair payments.");return;}
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(bdDate)||bdDate>=today||bdDate<monthStart){alert(`Pick a date earlier than today and within this month (${monthStart} to ${addDaysStr(today,-1)}).`);return;}
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(bdDate)||bdDate>=today||bdDate<monthStart){alert(`Pick a date earlier than today and within the last 30 days (${monthStart} to ${addDaysStr(today,-1)}).`);return;}
       if(bdReason.trim().length<3){alert("Enter the reason this sale is being backdated.");return;}
       let eodNote="";
       try{ const eods=await loadArr("tpp-eod"); if((eods||[]).some(e=>e.date===bdDate)) eodNote=`\n\n⚠️ An End-of-Day record already exists for ${bdDate}. It will NOT be changed. If this sale's money was already counted that day, nothing more is needed.`; }catch{}
@@ -8500,11 +8500,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       ),
       isOwnerUser&&!isExchange&&!isReturn&&!appliedCredit&&!cart.some(i=>i.type==="ticket")&&E("div",{style:{border:`1px solid ${bdOn?"#F59E0B":T.border}`,background:bdOn?T.amberLt:"#fff",borderRadius:10,padding:"10px 12px",marginBottom:10}},
         E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,cursor:"pointer"}},
-          E("input",{type:"checkbox",checked:bdOn,onChange:e=>{setBdOn(e.target.checked); if(e.target.checked&&!bdDate){const y=addDaysStr(todayStr(),-1); if(y>=todayStr().slice(0,8)+"01") setBdDate(y);}}}),"📅 Backdate this sale (owner only)"),
-        bdOn&&(todayStr().slice(8)==="01"
-          ? E("div",{style:{fontSize:12,color:"#92400E",marginTop:8}},"Today is the 1st, so there's no earlier day this month to backdate to.")
+          E("input",{type:"checkbox",checked:bdOn,onChange:e=>{setBdOn(e.target.checked); if(e.target.checked&&!bdDate){setBdDate(addDaysStr(todayStr(),-1));}}}),"📅 Backdate this sale (owner only)"),
+        bdOn&&(false
+          ? null
           : E("div",{style:{marginTop:8,display:"flex",flexDirection:"column",gap:8}},
-              E(Field,{label:"Sale date (this month only)"},E(Input,{type:"date",min:todayStr().slice(0,8)+"01",max:addDaysStr(todayStr(),-1),value:bdDate,onChange:e=>setBdDate(e.target.value)})),
+              E(Field,{label:"Sale date (up to 30 days back)"},E(Input,{type:"date",min:addDaysStr(todayStr(),-30),max:addDaysStr(todayStr(),-1),value:bdDate,onChange:e=>setBdDate(e.target.value)})),
               E(Field,{label:"Reason (required)"},E(Input,{placeholder:"e.g. sale made Monday, not rung up",value:bdReason,onChange:e=>setBdReason(e.target.value)})),
               E("div",{style:{fontSize:11,color:"#92400E"}},"Recorded on the date above and marked BACKDATED on the receipt and in reports."))
         )),
