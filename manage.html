@@ -6473,20 +6473,22 @@ const buildReceiptPdf = async (sale) => {
   const row = (label, val, bold) => { doc.setFont("helvetica", bold ? "bold" : "normal").setFontSize(bold ? 12 : 10).setTextColor(17,24,39); doc.text(label, cPrice + 4 - 40, y); doc.text(val, cAmt - 2, y, { align: "right" }); y += bold ? 7 : 5.5; };
   (sale.discounts || []).forEach(d => row(d.type + " discount", "-" + fmtMoney(d.amount)));
   if (parseFloat(sale.deliveryCost) > 0) row("Delivery" + (sale.deliveryZone && sale.deliveryZone !== "None" ? " (" + sale.deliveryZone + ")" : ""), fmtMoney(sale.deliveryCost));
-  y += 1; doc.setDrawColor(17,24,39).setLineWidth(0.5).line(cPrice - 36, y - 3.5, W - M, y - 3.5);
+  y += 3; doc.setDrawColor(17,24,39).setLineWidth(0.5).line(cPrice - 36, y - 3.5, W - M, y - 3.5); y += 3.5;
   row("Total", fmtMoney(sale.total || 0), true);
   receiptPaymentsUsed(sale).forEach(([l, v]) => row("Paid — " + l, v));
   if ((parseFloat(sale.change) || 0) > 0) row("Change given", fmtMoney(sale.change));
   y += 4;
   doc.setFont("helvetica","normal").setFontSize(9).setTextColor(75,85,99);
   if (sale.servedBy) { doc.text("Served by " + String(sale.servedBy).split(" ")[0], M, y); y += 6; }
-  // Warranty
+  // Warranty: same look as before, pinned to the bottom of the last page
   const wl = String(buildWarrantyFooterText(sale)).split("\n");
   doc.setFontSize(8).setTextColor(107,114,128);
   const wrapped = []; wl.forEach(l => doc.splitTextToSize(l, CW).forEach(p => wrapped.push(p)));
-  ensure(wrapped.length * 3.8 + 6);
-  doc.setDrawColor(209,213,219).setLineWidth(0.2).line(M, y, W - M, y); y += 5;
-  wrapped.forEach((l, i) => { doc.setFont("helvetica", i === 0 ? "bold" : "normal"); doc.text(l, M, y); y += 3.8; });
+  const fh = wrapped.length * 3.8 + 6;
+  if (y + fh > PH - M) { doc.addPage(); y = M; }
+  let fy = PH - M - fh + 5;
+  doc.setDrawColor(209,213,219).setLineWidth(0.2).line(M, fy - 5, W - M, fy - 5);
+  wrapped.forEach((l, i) => { doc.setFont("helvetica", i === 0 ? "bold" : "normal"); doc.text(l, M, fy); fy += 3.8; });
   return doc;
 };
 
