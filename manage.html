@@ -6492,12 +6492,7 @@ const buildReceiptPdf = async (sale) => {
   return doc;
 };
 
-const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
-  const email = overrideEmail || sale.customerEmail;
-  if (!email) return false;
-  const itemLines = (sale.items||[]).map(i=>`${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
-  const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
-  const discountLines = (sale.discounts||[]).map(d=>`${d.type}: -${fmtMoney(d.amount)}`).join("\n");
+const buildReceiptEmailParts = (sale) => {
   const paid = receiptPaymentsUsed(sale);
   const tdL = "padding:9px 0;font-size:15px;color:#333;border-bottom:1px dashed #D9DEE5;";
   const tdR = "padding:9px 0;font-size:15px;color:#111;font-weight:700;text-align:right;border-bottom:1px dashed #D9DEE5;";
@@ -6516,12 +6511,23 @@ const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
     if (l.startsWith("•")) return `<tr><td valign="top" width="14" style="padding:0 0 5px;color:#777">•</td><td style="padding:0 0 5px;color:#777">${receiptEsc(l.replace(/^•\s*/,""))}</td></tr>`;
     return `<tr><td colspan="2" align="center" style="padding:6px 0 0;color:#777">${receiptEsc(l)}</td></tr>`;
   }).join("") + `</table>`;
+  const billedToHtml = sale.customerCompany?`<div style="border-left:4px solid #1a73e8;background:#f7f8fa;border-radius:6px;padding:10px 14px;margin:0 0 16px"><div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase">Billed to</div><div style="font-size:18px;font-weight:800;color:#111;margin-top:2px">${receiptEsc(sale.customerCompany)}</div>${sale.customerName&&sale.customerName!==sale.customerCompany?`<div style="font-size:13px;color:#555;margin-top:2px">Attn: ${receiptEsc(sale.customerName)}</div>`:""}</div>`:"";
+  return { paid, itemsHtml, paymentsHtml, warrantyHtml, billedToHtml };
+};
+
+const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
+  const email = overrideEmail || sale.customerEmail;
+  if (!email) return false;
+  const itemLines = (sale.items||[]).map(i=>`${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
+  const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
+  const discountLines = (sale.discounts||[]).map(d=>`${d.type}: -${fmtMoney(d.amount)}`).join("\n");
+  const { itemsHtml, paymentsHtml, warrantyHtml, billedToHtml } = buildReceiptEmailParts(sale);
   try {
     let pdfParams = {};
     if (opts.attachPdf) { const doc = await buildReceiptPdf(sale); pdfParams = { receipt_pdf: doc.output("datauristring"), pdf_name: sale.id + ".pdf" }; }
     await emailjs.send("service_3znf9oq","template_viixtmu",{
       to_email:email, customer_name:sale.customerName||sale.customerCompany||"Valued Customer",
-      billed_to_html:sale.customerCompany?`<div style="border-left:4px solid #1a73e8;background:#f7f8fa;border-radius:6px;padding:10px 14px;margin:0 0 16px"><div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase">Billed to</div><div style="font-size:18px;font-weight:800;color:#111;margin-top:2px">${receiptEsc(sale.customerCompany)}</div>${sale.customerName&&sale.customerName!==sale.customerCompany?`<div style="font-size:13px;color:#555;margin-top:2px">Attn: ${receiptEsc(sale.customerName)}</div>`:""}</div>`:"",
+      billed_to_html:billedToHtml,
       company_name:sale.customerCompany||"", company_line:sale.customerCompany?`Company: ${sale.customerCompany}`:"",
       items_html:itemsHtml, payments_html:paymentsHtml, warranty_html:warrantyHtml, ...pdfParams, attachment_note: opts.attachPdf ? `📎 A PDF copy of this receipt (${sale.id}.pdf) is attached to this email.` : "",
       receipt_id:sale.id, date:fmtDate(sale.createdAt), items:itemLines,
@@ -6551,6 +6557,8 @@ const sendOrderEmail = async (sale, overrideEmail) => {
   if (!tplId) { alert("Set your Order Notice EmailJS template ID in Settings first."); return false; }
   const itemLines = (sale.items||[]).map(i=>`${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
   const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
+  const ordParts = buildReceiptEmailParts(sale);
+  const ordShipHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;line-height:1.7;color:#555"><tr><td align="center" style="padding:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase">Shipping &amp; Pickup Policy</td></tr><tr><td style="color:#555">${receiptEsc(ORDER_SHIPPING_NOTICE)}</td></tr></table>`;
   try {
     await emailjs.send("service_3znf9oq",tplId,{
       to_email:email, customer_name:sale.customerName||"Valued Customer",
@@ -6563,6 +6571,7 @@ const sendOrderEmail = async (sale, overrideEmail) => {
       scotia_transfer:sale.scotia_transfer>0?fmtMoney(sale.scotia_transfer):"—",
       other_payment:sale.other_payment>0?fmtMoney(sale.other_payment):"—",
       change:sale.change>0?fmtMoney(sale.change):"—",
+      billed_to_html:ordParts.billedToHtml, items_html:ordParts.itemsHtml, payments_html:ordParts.paymentsHtml, shipping_html:ordShipHtml,
       shipping_notice:ORDER_SHIPPING_NOTICE, served_by:servedName,
     });
     return true;
