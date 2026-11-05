@@ -6500,7 +6500,10 @@ const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
   const tdL = "padding:9px 0;font-size:15px;color:#333;border-bottom:1px dashed #D9DEE5;";
   const tdR = "padding:9px 0;font-size:15px;color:#111;font-weight:700;text-align:right;border-bottom:1px dashed #D9DEE5;";
   const payRow = (l, v) => `<tr><td style="${tdL}">${receiptEsc(l)}</td><td align="right" style="${tdR}">${receiptEsc(v)}</td></tr>`;
-  const itemsHtml = (sale.items||[]).map(i=>`<div style="padding:5px 0;font-size:16px;color:#111;line-height:1.4">${receiptEsc(i.name)} x${i.qty||1} — ${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</div>`).join("");
+  const thS = "padding:0 0 6px;font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase;border-bottom:1px solid #D9DEE5;";
+  const itemsHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr><td style="${thS}">Item</td><td align="center" style="${thS}" width="40">Qty</td><td align="right" style="${thS}" width="110">Amount</td></tr>`
+    + (sale.items||[]).map(i=>`<tr><td valign="top" style="padding:9px 8px 9px 0;font-size:14px;color:#111;line-height:1.4;border-bottom:1px dashed #D9DEE5">${receiptEsc(i.name)}</td><td valign="top" align="center" style="padding:9px 0;font-size:14px;color:#333;border-bottom:1px dashed #D9DEE5">${i.qty||1}</td><td valign="top" align="right" style="padding:9px 0 9px 8px;font-size:14px;font-weight:700;color:#111;white-space:nowrap;border-bottom:1px dashed #D9DEE5">${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</td></tr>`).join("")
+    + `</table>`;
   const paymentsHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">`
     + paid.map(([l,v])=>payRow(l,v)).join("")
     + ((parseFloat(sale.change)||0)>0?payRow("Change Given", fmtMoney(sale.change)):"") + `</table>`;
