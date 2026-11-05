@@ -6497,18 +6497,28 @@ const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
   const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
   const discountLines = (sale.discounts||[]).map(d=>`${d.type}: -${fmtMoney(d.amount)}`).join("\n");
   const paid = receiptPaymentsUsed(sale);
-  const rowStyle = "display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #D1D5DB;font-size:15px;";
-  const itemsHtml = (sale.items||[]).map(i=>`<div style="padding:4px 0;font-size:16px;">${receiptEsc(i.name)} x${i.qty||1} — ${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</div>`).join("");
-  const paymentsHtml = paid.map(([l,v])=>`<div style="${rowStyle}"><span>${receiptEsc(l)}</span><span>${receiptEsc(v)}</span></div>`).join("")
-    + ((parseFloat(sale.change)||0)>0?`<div style="${rowStyle}"><span>Change Given</span><span>${receiptEsc(fmtMoney(sale.change))}</span></div>`:"");
+  const tdL = "padding:9px 0;font-size:15px;color:#333;border-bottom:1px dashed #D9DEE5;";
+  const tdR = "padding:9px 0;font-size:15px;color:#111;font-weight:700;text-align:right;border-bottom:1px dashed #D9DEE5;";
+  const payRow = (l, v) => `<tr><td style="${tdL}">${receiptEsc(l)}</td><td align="right" style="${tdR}">${receiptEsc(v)}</td></tr>`;
+  const itemsHtml = (sale.items||[]).map(i=>`<div style="padding:5px 0;font-size:16px;color:#111;line-height:1.4">${receiptEsc(i.name)} x${i.qty||1} — ${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</div>`).join("");
+  const paymentsHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">`
+    + paid.map(([l,v])=>payRow(l,v)).join("")
+    + ((parseFloat(sale.change)||0)>0?payRow("Change Given", fmtMoney(sale.change)):"") + `</table>`;
+  // Warranty: aligned bullet list (hanging indent), centered header and closing line
+  const wLines = String(buildWarrantyFooterText(sale)).split("\n");
+  const warrantyHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;line-height:1.6;color:#777">` + wLines.map((l,i)=>{
+    if (i===0) return `<tr><td colspan="2" align="center" style="padding:0 0 6px;font-weight:700;letter-spacing:0.5px;color:#777">${receiptEsc(l)}</td></tr>`;
+    if (l.startsWith("•")) return `<tr><td valign="top" width="14" style="padding:0 0 5px;color:#777">•</td><td style="padding:0 0 5px;color:#777">${receiptEsc(l.replace(/^•\s*/,""))}</td></tr>`;
+    return `<tr><td colspan="2" align="center" style="padding:6px 0 0;color:#777">${receiptEsc(l)}</td></tr>`;
+  }).join("") + `</table>`;
   try {
     let pdfParams = {};
     if (opts.attachPdf) { const doc = await buildReceiptPdf(sale); pdfParams = { receipt_pdf: doc.output("datauristring"), pdf_name: sale.id + ".pdf" }; }
     await emailjs.send("service_3znf9oq","template_viixtmu",{
       to_email:email, customer_name:sale.customerName||sale.customerCompany||"Valued Customer",
-      billed_to_html:sale.customerCompany?`<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase;margin-top:12px">Billed to</div><div style="font-size:18px;font-weight:800;color:#111">${receiptEsc(sale.customerCompany)}</div>${sale.customerName&&sale.customerName!==sale.customerCompany?`<div style="font-size:13px;color:#555">Attn: ${receiptEsc(sale.customerName)}</div>`:""}`:"",
+      billed_to_html:sale.customerCompany?`<div style="border-left:4px solid #1a73e8;background:#f7f8fa;border-radius:6px;padding:10px 14px;margin:0 0 16px"><div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase">Billed to</div><div style="font-size:18px;font-weight:800;color:#111;margin-top:2px">${receiptEsc(sale.customerCompany)}</div>${sale.customerName&&sale.customerName!==sale.customerCompany?`<div style="font-size:13px;color:#555;margin-top:2px">Attn: ${receiptEsc(sale.customerName)}</div>`:""}</div>`:"",
       company_name:sale.customerCompany||"", company_line:sale.customerCompany?`Company: ${sale.customerCompany}`:"",
-      items_html:itemsHtml, payments_html:paymentsHtml, ...pdfParams, attachment_note: opts.attachPdf ? `📎 A PDF copy of this receipt (${sale.id}.pdf) is attached to this email.` : "",
+      items_html:itemsHtml, payments_html:paymentsHtml, warranty_html:warrantyHtml, ...pdfParams, attachment_note: opts.attachPdf ? `📎 A PDF copy of this receipt (${sale.id}.pdf) is attached to this email.` : "",
       receipt_id:sale.id, date:fmtDate(sale.createdAt), items:itemLines,
       total:fmtMoney(sale.total||0),
       cash:sale.cash>0?fmtMoney(sale.cash):"—",
@@ -8162,7 +8172,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           E("div",{style:{fontSize:12,color:T.muted,marginBottom:12}},"You can change this email — it won't update the customer record."),
           E("div",{style:{display:"flex",gap:8}},
             E(Btn,{variant:"ghost",onClick:()=>setEmailModal(null)},"Cancel"),
-            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed to send. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
+            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?(emailModal.attach?"✅ Receipt sent WITH the PDF attached.":"✅ Receipt sent (no PDF — the attach box was not ticked)."):"❌ Failed. Check EmailJS settings (and the receipt_pdf attachment).");}},emailSending?"Sending…":"Send")
           )
         )
       ),
@@ -8371,7 +8381,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,margin:"4px 0 12px",cursor:"pointer"}},E("input",{type:"checkbox",checked:!!emailModal.attach,onChange:e=>setEmailModal(prev=>({...prev,attach:e.target.checked}))}),"📎 Attach a PDF copy of this receipt"),
           E("div",{style:{display:"flex",gap:8}},
             E(Btn,{variant:"ghost",onClick:()=>setEmailModal(null)},"Cancel"),
-            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
+            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?(emailModal.attach?"✅ Receipt sent WITH the PDF attached.":"✅ Receipt sent (no PDF — the attach box was not ticked)."):"❌ Failed. Check EmailJS settings (and the receipt_pdf attachment).");}},emailSending?"Sending…":"Send")
           )
         )
       ),
