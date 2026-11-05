@@ -6423,15 +6423,92 @@ const SERVICES_CATALOG = [
   {name:"Phone Cleaning",price:0,note:""},
 ];
 
-const sendReceiptEmail = async (sale, overrideEmail) => {
+const RECEIPT_PAY_METHODS = [["cash","Cash"],["debit_card","Debit Card"],["credit_card","Credit Card"],["ncb_transfer","NCB Transfer"],["scotia_transfer","Scotia Transfer"],["other_payment","Other"]];
+const receiptEsc = t => String(t == null ? "" : t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const receiptPaymentsUsed = sale => RECEIPT_PAY_METHODS.filter(([k]) => (parseFloat(sale[k]) || 0) > 0).map(([k, label]) => [label, fmtMoney(sale[k])]);
+
+// Branded A4 copy of a receipt (same look as the invoice / signed repair ticket) — attached to the email when the box is ticked.
+const buildReceiptPdf = async (sale) => {
+  const doc = newPdfDoc(), W = 210, M = 16, CW = W - 2 * M, PH = 297;
+  let y = M;
+  const ensure = (need) => { if (y + need > PH - M) { doc.addPage(); y = M; } };
+  const logo = await getPdfLogo();
+  if (logo) doc.addImage(logo.url, "JPEG", M, y - 4, 46, 46 * logo.ratio);
+  const kind = sale.isReturn ? "RETURN RECEIPT" : sale.isExchange ? "EXCHANGE RECEIPT" : sale.isDeposit ? "DEPOSIT RECEIPT" : "RECEIPT";
+  doc.setFont("helvetica","bold").setFontSize(18).setTextColor(26,86,219).text(kind, W - M, y + 4, { align: "right" });
+  doc.setFont("helvetica","normal").setFontSize(9).setTextColor(75,85,99);
+  doc.text("Receipt " + (sale.id || ""), W - M, y + 11, { align: "right" });
+  doc.text(pdfWhen(sale.createdAt), W - M, y + 16, { align: "right" });
+  y += 30;
+  doc.setDrawColor(26,86,219).setLineWidth(0.8).line(M, y, W - M, y); y += 7;
+  // Customer / company
+  const who = [sale.customerCompany, (sale.customerName && sale.customerName !== sale.customerCompany) ? sale.customerName : "", sale.customerPhone, sale.customerEmail].filter(Boolean);
+  if (who.length) {
+    doc.setFont("helvetica","bold").setFontSize(8).setTextColor(107,114,128).text("BILLED TO", M, y);
+    doc.setFont("helvetica","normal").setFontSize(10).setTextColor(17,24,39);
+    let yy = y + 5; who.forEach((l, i) => { if (i === 0 && sale.customerCompany) doc.setFont("helvetica","bold"); else doc.setFont("helvetica","normal"); doc.text(String(l), M, yy); yy += 4.8; });
+    y = yy + 4;
+  }
+  // Items table
+  const cQty = M + CW - 62, cPrice = M + CW - 32, cAmt = M + CW;
+  doc.setFillColor(243,244,246).rect(M, y, CW, 7, "F");
+  doc.setFont("helvetica","bold").setFontSize(8.5).setTextColor(55,65,81);
+  doc.text("ITEM", M + 2, y + 4.8); doc.text("QTY", cQty, y + 4.8, { align: "right" }); doc.text("PRICE", cPrice, y + 4.8, { align: "right" }); doc.text("AMOUNT", cAmt - 2, y + 4.8, { align: "right" });
+  y += 11;
+  (sale.items || []).forEach(it => {
+    const qty = it.qty || 1, price = parseFloat(it.price) || 0;
+    const nameLines = doc.setFont("helvetica","normal").setFontSize(10).splitTextToSize(String(it.name || ""), cQty - M - 14);
+    const extra = [it.imei ? "IMEI " + it.imei : "", it.note || ""].filter(Boolean);
+    ensure(nameLines.length * 4.8 + extra.length * 4 + 4);
+    doc.setTextColor(17,24,39);
+    nameLines.forEach((l, i) => { doc.text(l, M + 2, y + i * 4.8); });
+    doc.text(String(qty), cQty, y, { align: "right" }); doc.text(fmtMoney(price), cPrice, y, { align: "right" }); doc.text(fmtMoney(price * qty), cAmt - 2, y, { align: "right" });
+    y += nameLines.length * 4.8;
+    doc.setFontSize(8).setTextColor(107,114,128);
+    extra.forEach(l => { doc.text(String(l), M + 2, y); y += 4; });
+    y += 1.5; doc.setDrawColor(229,231,235).setLineWidth(0.2).line(M, y, W - M, y); y += 4.5;
+  });
+  // Totals
+  ensure(50);
+  const row = (label, val, bold) => { doc.setFont("helvetica", bold ? "bold" : "normal").setFontSize(bold ? 12 : 10).setTextColor(17,24,39); doc.text(label, cPrice + 4 - 40, y); doc.text(val, cAmt - 2, y, { align: "right" }); y += bold ? 7 : 5.5; };
+  (sale.discounts || []).forEach(d => row(d.type + " discount", "-" + fmtMoney(d.amount)));
+  if (parseFloat(sale.deliveryCost) > 0) row("Delivery" + (sale.deliveryZone && sale.deliveryZone !== "None" ? " (" + sale.deliveryZone + ")" : ""), fmtMoney(sale.deliveryCost));
+  y += 1; doc.setDrawColor(17,24,39).setLineWidth(0.5).line(cPrice - 36, y - 3.5, W - M, y - 3.5);
+  row("Total", fmtMoney(sale.total || 0), true);
+  receiptPaymentsUsed(sale).forEach(([l, v]) => row("Paid — " + l, v));
+  if ((parseFloat(sale.change) || 0) > 0) row("Change given", fmtMoney(sale.change));
+  y += 4;
+  doc.setFont("helvetica","normal").setFontSize(9).setTextColor(75,85,99);
+  if (sale.servedBy) { doc.text("Served by " + String(sale.servedBy).split(" ")[0], M, y); y += 6; }
+  // Warranty
+  const wl = String(buildWarrantyFooterText(sale)).split("\n");
+  doc.setFontSize(8).setTextColor(107,114,128);
+  const wrapped = []; wl.forEach(l => doc.splitTextToSize(l, CW).forEach(p => wrapped.push(p)));
+  ensure(wrapped.length * 3.8 + 6);
+  doc.setDrawColor(209,213,219).setLineWidth(0.2).line(M, y, W - M, y); y += 5;
+  wrapped.forEach((l, i) => { doc.setFont("helvetica", i === 0 ? "bold" : "normal"); doc.text(l, M, y); y += 3.8; });
+  return doc;
+};
+
+const sendReceiptEmail = async (sale, overrideEmail, opts = {}) => {
   const email = overrideEmail || sale.customerEmail;
   if (!email) return false;
   const itemLines = (sale.items||[]).map(i=>`${i.name} x${i.qty||1} — ${fmtMoney(i.price*(i.qty||1))}`).join("\n");
   const servedName = sale.servedBy?(sale.servedBy.split(" ")[0]+(sale.servedBy.split(" ")[1]?" "+sale.servedBy.split(" ")[1][0]+".":"")):("Staff");
   const discountLines = (sale.discounts||[]).map(d=>`${d.type}: -${fmtMoney(d.amount)}`).join("\n");
+  const paid = receiptPaymentsUsed(sale);
+  const rowStyle = "display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed #D1D5DB;font-size:15px;";
+  const itemsHtml = (sale.items||[]).map(i=>`<div style="padding:4px 0;font-size:16px;">${receiptEsc(i.name)} x${i.qty||1} — ${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</div>`).join("");
+  const paymentsHtml = paid.map(([l,v])=>`<div style="${rowStyle}"><span>${receiptEsc(l)}</span><span>${receiptEsc(v)}</span></div>`).join("")
+    + ((parseFloat(sale.change)||0)>0?`<div style="${rowStyle}"><span>Change Given</span><span>${receiptEsc(fmtMoney(sale.change))}</span></div>`:"");
   try {
+    let pdfParams = {};
+    if (opts.attachPdf) { const doc = await buildReceiptPdf(sale); pdfParams = { receipt_pdf: doc.output("datauristring"), pdf_name: sale.id + ".pdf" }; }
     await emailjs.send("service_3znf9oq","template_viixtmu",{
-      to_email:email, customer_name:sale.customerName||"Valued Customer",
+      to_email:email, customer_name:sale.customerName||sale.customerCompany||"Valued Customer",
+      billed_to_html:sale.customerCompany?`<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase;margin-top:12px">Billed to</div><div style="font-size:18px;font-weight:800;color:#111">${receiptEsc(sale.customerCompany)}</div>${sale.customerName&&sale.customerName!==sale.customerCompany?`<div style="font-size:13px;color:#555">Attn: ${receiptEsc(sale.customerName)}</div>`:""}`:"",
+      company_name:sale.customerCompany||"", company_line:sale.customerCompany?`Company: ${sale.customerCompany}`:"",
+      items_html:itemsHtml, payments_html:paymentsHtml, ...pdfParams, attachment_note: opts.attachPdf ? `📎 A PDF copy of this receipt (${sale.id}.pdf) is attached to this email.` : "",
       receipt_id:sale.id, date:fmtDate(sale.createdAt), items:itemLines,
       total:fmtMoney(sale.total||0),
       cash:sale.cash>0?fmtMoney(sale.cash):"—",
@@ -8081,10 +8158,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%"}},
           E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:12}},"📧 Send Receipt"),
           E(Field,{label:"Send to email"},E(Input,{type:"email",value:emailModal.email,onChange:e=>setEmailModal(prev=>({...prev,email:e.target.value})),placeholder:"Email address"})),
+          E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,margin:"4px 0 12px",cursor:"pointer"}},E("input",{type:"checkbox",checked:!!emailModal.attach,onChange:e=>setEmailModal(prev=>({...prev,attach:e.target.checked}))}),"📎 Attach a PDF copy of this receipt"),
           E("div",{style:{fontSize:12,color:T.muted,marginBottom:12}},"You can change this email — it won't update the customer record."),
           E("div",{style:{display:"flex",gap:8}},
             E(Btn,{variant:"ghost",onClick:()=>setEmailModal(null)},"Cancel"),
-            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email);setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed to send. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
+            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed to send. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
           )
         )
       ),
@@ -8290,9 +8368,10 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%"}},
           E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:12}},"📧 Send Receipt"),
           E(Field,{label:"Send to email"},E(Input,{type:"email",value:emailModal.email,onChange:e=>setEmailModal(prev=>({...prev,email:e.target.value})),placeholder:"Email address"})),
+          E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,margin:"4px 0 12px",cursor:"pointer"}},E("input",{type:"checkbox",checked:!!emailModal.attach,onChange:e=>setEmailModal(prev=>({...prev,attach:e.target.checked}))}),"📎 Attach a PDF copy of this receipt"),
           E("div",{style:{display:"flex",gap:8}},
             E(Btn,{variant:"ghost",onClick:()=>setEmailModal(null)},"Cancel"),
-            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email);setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
+            E(Btn,{disabled:emailSending||!emailModal.email,onClick:async()=>{setEmailSending(true);const ok=await sendReceiptEmail(emailModal.sale,emailModal.email,{attachPdf:!!emailModal.attach});setEmailSending(false);setEmailModal(null);alert(ok?"✅ Receipt sent!":"❌ Failed. Check EmailJS settings.");}},emailSending?"Sending…":"Send")
           )
         )
       ),
