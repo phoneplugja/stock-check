@@ -6550,7 +6550,24 @@ const ORDER_SHIPPING_NOTICE = "Orders to be delivered outside of Kingston and St
 // Same shape/data as the receipt email, but for notifying a customer their order was placed —
 // swaps the warranty footer for the shipping/pickup policy notice. Uses a separate EmailJS
 // template (id set in Settings) so the wording can be edited there without a code change.
-const sendOrderEmail = async (sale, overrideEmail) => {
+const TRACKING_COURIERS = [
+  { name: "Zipmail", link: "https://jamailtracker.jamaicapost.gov.jm/track-status.php?v=public" },
+  { name: "Knutsford Express", link: "https://www.knutsfordexpress.com/courier/track-your-packages/" },
+  { name: "Tara Courier", link: "https://taracan.com/tracking/" },
+  { name: "Other", link: "" }
+];
+const buildTrackingHtml = (t) => {
+  if (!t) return "";
+  const safeLink = /^https?:\/\//i.test(t.link || "") ? t.link : "";
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="border-left:4px solid #1a73e8;background:#F3F5F8;border-radius:6px;padding:14px 16px">`
+    + `<div style="font-size:11px;font-weight:700;letter-spacing:0.5px;color:#777;text-transform:uppercase">Tracking details</div>`
+    + `<div style="font-size:13px;color:#555;margin-top:8px">Courier</div><div style="font-size:16px;font-weight:700;color:#111">${receiptEsc(t.courier || "")}</div>`
+    + `<div style="font-size:13px;color:#555;margin-top:10px">Tracking number</div><div style="font-size:20px;font-weight:800;color:#111;letter-spacing:0.5px">${receiptEsc(t.number || "")}</div>`
+    + (t.note ? `<div style="font-size:13px;color:#333;margin-top:10px;line-height:1.5">${receiptEsc(t.note)}</div>` : "")
+    + (safeLink ? `<div style="margin-top:14px"><a href="${receiptEsc(safeLink)}" style="display:inline-block;background:#1a73e8;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 20px;border-radius:8px">Track your package</a></div><div style="font-size:12px;color:#777;margin-top:8px">Enter the tracking number above on the courier's page.</div>` : "")
+    + `</td></tr></table>`;
+};
+const sendOrderEmail = async (sale, overrideEmail, opts = {}) => {
   const email = overrideEmail || sale.customerEmail;
   if (!email) return false;
   const tplId = getOrderTemplateId();
@@ -6572,6 +6589,9 @@ const sendOrderEmail = async (sale, overrideEmail) => {
       other_payment:sale.other_payment>0?fmtMoney(sale.other_payment):"—",
       change:sale.change>0?fmtMoney(sale.change):"—",
       billed_to_html:ordParts.billedToHtml, items_html:ordParts.itemsHtml, payments_html:ordParts.paymentsHtml, shipping_html:ordShipHtml,
+      badge_text: opts.tracking ? "Order Shipped" : "Order Confirmed",
+      headline: opts.tracking ? "Your order is on its way." : "Your order is confirmed.",
+      tracking_html: buildTrackingHtml(opts.tracking),
       shipping_notice:ORDER_SHIPPING_NOTICE, served_by:servedName,
     });
     return true;
@@ -7634,6 +7654,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [emailSending,setEmailSending]=useState(false);
   const [orderEmailModal,setOrderEmailModal]=useState(null); // {sale, email}
   const [orderEmailSending,setOrderEmailSending]=useState(false);
+  const [trackModal,setTrackModal]=useState(null); // {sale,email,courier,number,link,note}
   const [photoPreview,setPhotoPreview]=useState(null); // image url, or null — shown only when tapped
   // In-page question shown when a repair ticket is paid: is this the final payment, and should the ticket be marked Collected?
   const [ticketAsk,setTicketAsk]=useState(null);
@@ -8191,6 +8212,35 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         )
       ),
       // Order notice email modal
+      trackModal&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+        E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:420,width:"100%",maxHeight:"90vh",overflowY:"auto"}},
+          E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:12}},"🚚 Send Tracking Info"),
+          E(Field,{label:"Send to email"},E(Input,{type:"email",value:trackModal.email,onChange:e=>setTrackModal(p=>({...p,email:e.target.value})),placeholder:"Email address"})),
+          E(Field,{label:"Courier"},E(Sel,{value:trackModal.courier,onChange:e=>{const c=TRACKING_COURIERS.find(x=>x.name===e.target.value);setTrackModal(p=>({...p,courier:e.target.value,link:c?c.link:"",customCourier:""}));}},TRACKING_COURIERS.map(c=>E("option",{key:c.name,value:c.name},c.name)))),
+          trackModal.courier==="Other"&&E(Field,{label:"Courier name"},E(Input,{value:trackModal.customCourier||"",onChange:e=>setTrackModal(p=>({...p,customCourier:e.target.value}))})),
+          E(Field,{label:"Tracking number"},E(Input,{value:trackModal.number,onChange:e=>setTrackModal(p=>({...p,number:e.target.value})),placeholder:"e.g. ZP123456789"})),
+          E(Field,{label:"Tracking link (optional)"},E(Input,{value:trackModal.link,onChange:e=>setTrackModal(p=>({...p,link:e.target.value})),placeholder:"https://…"})),
+          E(Field,{label:"Note (optional)"},E(Input,{value:trackModal.note,onChange:e=>setTrackModal(p=>({...p,note:e.target.value})),placeholder:"e.g. Expected delivery Monday"})),
+          E("div",{style:{display:"flex",gap:8,marginTop:8}},
+            E(Btn,{variant:"ghost",onClick:()=>setTrackModal(null)},"Cancel"),
+            E(Btn,{disabled:orderEmailSending||!trackModal.email||!trackModal.number.trim()||(trackModal.courier==="Other"&&!(trackModal.customCourier||"").trim()),onClick:async()=>{
+              const m=trackModal; const courier=m.courier==="Other"?m.customCourier.trim():m.courier;
+              const tracking={courier,number:m.number.trim(),link:(m.link||"").trim(),note:(m.note||"").trim()};
+              setOrderEmailSending(true);
+              const ok=await sendOrderEmail(m.sale,m.email,{tracking});
+              if(ok){
+                try{
+                  const all=await loadSalesForWrite();
+                  const upd=all.map(x=>x.id===m.sale.id?{...x,tracking:{...tracking,sentAt:new Date().toISOString(),sentTo:m.email}}:x);
+                  if(await save("tpp-sales",upd)){setSales(upd);setSelectedSale(p=>p&&p.id===m.sale.id?{...p,tracking:{...tracking,sentAt:new Date().toISOString(),sentTo:m.email}}:p);}
+                }catch(e){console.error("Save tracking:",e);}
+              }
+              setOrderEmailSending(false);setTrackModal(null);
+              alert(ok?"✅ Tracking info sent!":"❌ Failed to send. Check EmailJS settings and the order notice template ID.");
+            }},orderEmailSending?"Sending…":"Send")
+          )
+        )
+      ),
       orderEmailModal&&E("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
         E("div",{style:{background:"#fff",borderRadius:16,padding:24,maxWidth:400,width:"100%"}},
           E("div",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:17,marginBottom:12}},"📦 Send Order Notice"),
@@ -8208,6 +8258,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>printReceipt(selectedSale)},"🖨️ Print"),
           !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setEmailModal({sale:selectedSale,email:selectedSale.customerEmail||""})},"📧 Email"),
           !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setOrderEmailModal({sale:selectedSale,email:selectedSale.customerEmail||""})},"📦 Order Notice"),
+          !selectedSale.voided&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px"},onClick:()=>setTrackModal({sale:selectedSale,email:selectedSale.customerEmail||"",courier:TRACKING_COURIERS[0].name,customCourier:"",number:selectedSale.tracking?.number||"",link:TRACKING_COURIERS[0].link,note:""})},"🚚 Send Tracking"),
           !selectedSale.voided&&!selectedSale.isReturn&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px",color:T.amber},onClick:()=>startExchange(selectedSale)},"⟳ Exchange"),
           !selectedSale.voided&&!selectedSale.isReturn&&E(Btn,{variant:"ghost",style:{fontSize:11,padding:"6px 10px",color:T.blue},onClick:()=>startReturn(selectedSale)},"↩ Return"),
           !selectedSale.voided&&E(Btn,{variant:"danger",style:{fontSize:11,padding:"6px 10px"},onClick:()=>voidSale(selectedSale)},"🚫 Void")
@@ -8228,6 +8279,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           E("div",{style:{fontWeight:800,fontSize:20,color:selectedSale.isReturn?T.red:T.blue}},fmtMoney(Math.abs(selectedSale.total)))
         ),
         (selectedSale.customerName||selectedSale.customerCompany)&&E("div",{style:{fontSize:13,marginBottom:4}},"👤 ",selectedSale.customerCompany?selectedSale.customerCompany+(selectedSale.customerName&&selectedSale.customerName!==selectedSale.customerCompany?" — "+selectedSale.customerName:""):selectedSale.customerName,selectedSale.customerPhone?" · "+selectedSale.customerPhone:"",selectedSale.customerEmail?" · "+selectedSale.customerEmail:""),
+        selectedSale.tracking&&E("div",{style:{fontSize:12,color:T.green,marginBottom:4}},`🚚 ${selectedSale.tracking.courier} · ${selectedSale.tracking.number} — sent ${String(selectedSale.tracking.sentAt||"").slice(0,10)}`),
         selectedSale.servedBy&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:6}},"Served by: ",(selectedSale.servedBy.split(" ")[0]+(selectedSale.servedBy.split(" ")[1]?" "+selectedSale.servedBy.split(" ")[1][0]+".":""))),
         selectedSale.deliveryZone&&selectedSale.deliveryZone!=="None"&&E("div",{style:{fontSize:12,color:T.muted,marginBottom:6}},"📦 ",selectedSale.deliveryZone,selectedSale.deliveryAddress?" — "+selectedSale.deliveryAddress:"",selectedSale.deliveryCost>0?" · "+fmtMoney(selectedSale.deliveryCost):""),
         E("div",{style:{borderTop:`1px solid ${T.border}`,paddingTop:10,marginBottom:10}},
