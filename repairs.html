@@ -92,6 +92,14 @@ const WaBtn = ({ label="💬 WhatsApp Us" }) => (
 
 const LOGO_SRC = "/logo.png";
 
+const TermsLink = ({ style:s }) => (
+  <a href="/repair-terms.html" target="_blank" rel="noopener noreferrer" className="tpp-btn"
+    style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#ffffff", color:T.accent, border:`1.5px solid ${T.accentBorder}`, padding:"9px 16px", borderRadius:99, fontSize:13, fontWeight:700, textDecoration:"none", ...s }}>
+    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+    Repair terms &amp; conditions
+  </a>
+);
+
 function TrackView({ tickets }) {
   const [input, setInput]       = useState("");
   const [result, setResult]     = useState(null);
@@ -198,6 +206,7 @@ function TrackView({ tickets }) {
           </div>
         )}
       </div>
+      <div style={{ textAlign:"center", marginTop:18 }}><TermsLink /></div>
     </div>
   );
 }
