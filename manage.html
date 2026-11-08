@@ -558,7 +558,11 @@ const uploadPdfToDrive = async (doc, name, folder) => {
     let j; try { j = await resp.json(); } catch { throw new Error("Drive script gave an unexpected answer (check the web app is deployed for 'Anyone')."); }
     if (!j.ok) throw new Error(j.error || "Drive script refused the file");
     return j.url;
-  } catch (e) { throw (e && e.name === "AbortError") ? new Error("Drive took too long to answer") : e; }
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("Drive took too long to answer");
+    if (e && /failed to fetch|networkerror|load failed/i.test(String(e.message))) throw new Error("couldn't reach the Drive script. Check the Web app URL ends in /exec and the deployment's access is set to \"Anyone\"");
+    throw e;
+  }
   finally { clearTimeout(timer); }
 };
 
@@ -2899,7 +2903,7 @@ function RepairManager() {
     catch (e) { console.error("Signed PDF:", e); alert("\u26A0\uFE0F The ticket was created, but the PDF couldn't be made: " + (e && e.message ? e.message : e) + "\nYou can retry from the ticket screen."); return; }
     const fname = driveFileName((t.createdAt ? t.createdAt.slice(0,10) : todayStr()), "Ticket " + t.id, t.customerName, t.customerPhone, t.signatureWaived ? "UNSIGNED (waived)" : "signed");
     try {
-      const url = await uploadPdfToDrive(doc, fname, "Repair Tickets/" + todayStr().slice(0, 7));
+      const url = await uploadPdfToDrive(doc, fname, "Repair Tickets");
       const latest = await loadArr("tpp-tickets-v1");
       const upd = latest.map(x => x.id === t.id ? { ...x, driveUrl: url, drivePdfAt: new Date().toISOString() } : x);
       await save("tpp-tickets-v1", upd);
@@ -6956,7 +6960,7 @@ function InvoicesTab() {
       setBusy("Saving PDF to Google Drive…");
       const saved = await saveInv(); if (!saved) return;
       const doc = await buildInvoicePdf(saved);
-      const url = await uploadPdfToDrive(doc, driveFileName(saved.date || todayStr(), "Pro Forma " + saved.id, saved.billTo && saved.billTo.name, saved.billTo && saved.billTo.attn), "Pro Forma Invoices/" + (saved.date || todayStr()).slice(0, 7));
+      const url = await uploadPdfToDrive(doc, driveFileName(saved.date || todayStr(), "Pro Forma " + saved.id, saved.billTo && saved.billTo.name, saved.billTo && saved.billTo.attn), "Pro Forma Invoices");
       await saveInv({ ...saved, driveUrl: url });
       alert("\u2705 PDF saved to Google Drive.");
     } catch (e) {
