@@ -544,6 +544,8 @@ const loadDriveSettings = async () => {
 };
 const saveDriveSettings = async (d) => { DRIVE_SETTINGS = { ...DRIVE_SETTINGS, ...d }; await save(DRIVE_KEY, DRIVE_SETTINGS); return DRIVE_SETTINGS; };
 // Sends a PDF (jsPDF doc) to Drive. Returns the file link; throws if not set up or if anything fails.
+// Builds a searchable Drive file name: "2026-11-08 - Ticket R-1234 - Customer Name - signed.pdf"
+const driveFileName = (...parts) => parts.filter(Boolean).join(" - ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() + ".pdf";
 const uploadPdfToDrive = async (doc, name, folder) => {
   const { url, secret } = await loadDriveSettings();
   if (!url) throw new Error("Google Drive isn't set up yet (Settings → Google Drive).");
@@ -583,6 +585,32 @@ const classifySaleWarranties = (sale) => {
 };
 // sale is optional — omit it (or pass nothing matchable) to fall back to showing every section,
 // which keeps this safe to call from anywhere that doesn't have cart-level detail on hand.
+// ── Extended warranty (per cart item: item.warrantyExt = { n, unit: days|weeks|months|years, note }) ──
+const WARRANTY_UNITS = ["days", "weeks", "months", "years"];
+const extLabel = (e) => { const n = parseFloat(e && e.n) || 0; if (!(n > 0)) return ""; const u = WARRANTY_UNITS.includes(e.unit) ? e.unit : "days"; return `+${n} ${n === 1 ? u.replace(/s$/, "") : u}`; };
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+// Standard warranty days that already apply to this item (0 when the shop has no fixed period for it).
+const itemBaseWarrantyDays = (item) => {
+  if (!item) return 0;
+  if (item.type === "ticket" || (typeof item.id === "string" && item.id.startsWith("svc-"))) return parseInt(WARRANTY_SETTINGS.repairDays) || 0;
+  if (item.type === "catalog_phone") return parseInt(WARRANTY_SETTINGS.phoneDays) || 0;
+  return 0;
+};
+// Last day the extended warranty covers: sale date + standard warranty + the extension.
+const extWarrantyUntil = (sale, item) => {
+  const e = item && item.warrantyExt; const n = parseFloat(e && e.n) || 0; if (!(n > 0)) return "";
+  const d = new Date((sale && sale.date ? sale.date : new Date().toISOString().slice(0, 10)) + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + itemBaseWarrantyDays(item));
+  if (e.unit === "weeks") d.setUTCDate(d.getUTCDate() + Math.round(n * 7));
+  else if (e.unit === "months") { const whole = Math.floor(n); d.setUTCMonth(d.getUTCMonth() + whole); if (n > whole) d.setUTCDate(d.getUTCDate() + Math.round((n - whole) * 30)); }
+  else if (e.unit === "years") { const whole = Math.floor(n); d.setUTCFullYear(d.getUTCFullYear() + whole); if (n > whole) d.setUTCDate(d.getUTCDate() + Math.round((n - whole) * 365)); }
+  else d.setUTCDate(d.getUTCDate() + Math.round(n));
+  return `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+const extWarrantyLines = (sale) => (sale && sale.items || []).filter(i => extLabel(i.warrantyExt)).map(i => {
+  const until = extWarrantyUntil(sale, i); const note = (i.warrantyExt.note || "").trim();
+  return `Extended warranty - ${itemPublicName(i) || i.name}: ${extLabel(i.warrantyExt)} (covered until ${until})${note ? ". " + note : ""}`;
+});
 const buildWarrantyFooterText = (sale) => {
   const has = sale ? classifySaleWarranties(sale) : { repairs: true, parts: true, accessories: true, phones: true };
   const anyMatched = has.repairs || has.parts || has.accessories || has.phones;
@@ -596,6 +624,7 @@ const buildWarrantyFooterText = (sale) => {
     lines.push(`• The Phone Plug is not responsible for data loss during repairs. Please back up before submission.`);
     lines.push(`• Devices uncollected after 3 days of notification may incur storage fees.`);
   }
+  extWarrantyLines(sale).forEach(l => lines.push("• " + l));
   lines.push(`Thank you for choosing The Phone Plug!`);
   return lines.join("\n");
 };
@@ -2868,7 +2897,7 @@ function RepairManager() {
     let doc;
     try { doc = await buildSignedTicketPdf(t); }
     catch (e) { console.error("Signed PDF:", e); alert("\u26A0\uFE0F The ticket was created, but the PDF couldn't be made: " + (e && e.message ? e.message : e) + "\nYou can retry from the ticket screen."); return; }
-    const fname = `Ticket-${t.id}-${t.signatureWaived ? "UNSIGNED-waived" : "signed"}.pdf`;
+    const fname = driveFileName((t.createdAt ? t.createdAt.slice(0,10) : todayStr()), "Ticket " + t.id, t.customerName, t.customerPhone, t.signatureWaived ? "UNSIGNED (waived)" : "signed");
     try {
       const url = await uploadPdfToDrive(doc, fname, "Repair Tickets/" + todayStr().slice(0, 7));
       const latest = await loadArr("tpp-tickets-v1");
@@ -5306,7 +5335,7 @@ function OwnerDashboard({
       addSheet("Cash Deposits", ["Date", "Amount (JMD)", "Bank", "Reference / Slip", "Notes", "Deposited By"], [...srcDep].sort((a, b) => a.date > b.date ? 1 : -1).map(d => [d.date, parseFloat(d.amount) || 0, d.bank || "", d.reference || "", d.notes || "", d.logged_by || ""]));
 
       // ── Sheet: Sales Ledger ────────────────────────────────────────────────
-      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)", "Backdated", "Entered On", "Backdate Reason", "Company", "Pro Forma"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s), s.backdated ? "Yes" : "No", s.backdated ? (s.enteredDate || "") : "", s.backdated ? (s.backdatedReason || "") : "", s.customerCompany || "", s.invoiceId || ""]));
+      addSheet("Sales Ledger", ["Sale ID", "Date", "Customer Name", "Phone", "Items", "Subtotal", "Discount", "Total (JMD)", "Cash", "Debit Card", "Credit Card", "NCB Transfer", "Scotia Transfer", "Other", "Type", "Served By", "Voided", "Revenue Effect (JMD)", "Backdated", "Entered On", "Backdate Reason", "Company", "Pro Forma", "Card Surcharge"], [...srcSales].sort((a, b) => a.date > b.date ? 1 : -1).map(s => [s.id, s.date || "", s.customerName || "", s.customerPhone || "", (s.items || []).map(i => `${i.name} x${i.qty || 1}`).join(", "), parseFloat(s.subtotal) || 0, parseFloat(s.totalDiscount) || 0, parseFloat(s.total) || 0, parseFloat(s.cash) || 0, parseFloat(s.debit_card) || 0, parseFloat(s.credit_card) || 0, parseFloat(s.ncb_transfer) || 0, parseFloat(s.scotia_transfer) || 0, parseFloat(s.other_payment) || 0, s.isReturn ? "Return" : s.isExchange ? "Exchange" : s.isDeposit ? "Repair Deposit" : s.isTicketPayment ? "Repair Payment" : "Sale", s.servedBy || "", s.voided ? "Yes" : "No", s.voided ? 0 : saleRevenue(s), s.backdated ? "Yes" : "No", s.backdated ? (s.enteredDate || "") : "", s.backdated ? (s.backdatedReason || "") : "", s.customerCompany || "", s.invoiceId || "", parseFloat(s.surcharge) || 0]));
 
       // ── Sheet: Rental Income ──────────────────────────────────────────────
       addSheet("Rental Income", ["Date", "Tenant", "Property/Unit", "Amount (JMD)", "Payment Method", "Logged By", "Notes"], [...srcRentals].sort((a, b) => a.date > b.date ? 1 : -1).map(r => [r.date || "", r.tenantName || "", r.unit || "", parseFloat(r.amount) || 0, r.paymentMethod || "", r.logged_by || "", r.notes || ""]));
@@ -6474,6 +6503,7 @@ const buildReceiptPdf = async (sale) => {
   const row = (label, val, bold) => { doc.setFont("helvetica", bold ? "bold" : "normal").setFontSize(bold ? 12 : 10).setTextColor(17,24,39); doc.text(label, cPrice + 4 - 40, y); doc.text(val, cAmt - 2, y, { align: "right" }); y += bold ? 7 : 5.5; };
   (sale.discounts || []).forEach(d => row(d.type + " discount", "-" + fmtMoney(d.amount)));
   if (parseFloat(sale.deliveryCost) > 0) row("Delivery" + (sale.deliveryZone && sale.deliveryZone !== "None" ? " (" + sale.deliveryZone + ")" : ""), fmtMoney(sale.deliveryCost));
+  if (parseFloat(sale.surcharge) > 0) row(sale.surchargeLabel || "Card surcharge", fmtMoney(sale.surcharge));
   y += 3; doc.setDrawColor(17,24,39).setLineWidth(0.5).line(cPrice - 36, y - 3.5, W - M, y - 3.5); y += 3.5;
   row("Total", fmtMoney(sale.total || 0), true);
   receiptPaymentsUsed(sale).forEach(([l, v]) => row("Paid — " + l, v));
@@ -6503,7 +6533,8 @@ const buildReceiptEmailParts = (sale) => {
     + (sale.items||[]).map(i=>`<tr><td valign="top" style="padding:9px 8px 9px 0;font-size:14px;color:#111;line-height:1.4;border-bottom:1px dashed #D9DEE5">${receiptEsc(itemPublicName(i))}</td><td valign="top" align="center" style="padding:9px 0;font-size:14px;color:#333;border-bottom:1px dashed #D9DEE5">${i.qty||1}</td><td valign="top" align="right" style="padding:9px 0 9px 8px;font-size:14px;font-weight:700;color:#111;white-space:nowrap;border-bottom:1px dashed #D9DEE5">${receiptEsc(fmtMoney(i.price*(i.qty||1)))}</td></tr>`).join("")
     + [
         ...(sale.discounts||[]).map(d=>[`${d.type} discount`, "-"+fmtMoney(d.amount), "#B91C1C"]),
-        ...((parseFloat(sale.deliveryCost)||0)>0?[[`Delivery${sale.deliveryZone&&sale.deliveryZone!=="None"?" ("+sale.deliveryZone+")":""}`, fmtMoney(sale.deliveryCost), "#111"]]:[])
+        ...((parseFloat(sale.deliveryCost)||0)>0?[[`Delivery${sale.deliveryZone&&sale.deliveryZone!=="None"?" ("+sale.deliveryZone+")":""}`, fmtMoney(sale.deliveryCost), "#111"]]:[]),
+        ...((parseFloat(sale.surcharge)||0)>0?[[sale.surchargeLabel||"Card surcharge", fmtMoney(sale.surcharge), "#111"]]:[])
       ].map(([l,v,c])=>`<tr><td valign="top" style="padding:9px 8px 9px 0;font-size:14px;color:#555;line-height:1.4;border-bottom:1px dashed #D9DEE5">${receiptEsc(l)}</td><td style="border-bottom:1px dashed #D9DEE5">&nbsp;</td><td valign="top" align="right" style="padding:9px 0 9px 8px;font-size:14px;font-weight:700;color:${c};white-space:nowrap;border-bottom:1px dashed #D9DEE5">${receiptEsc(v)}</td></tr>`).join("")
     + `</table>`;
   const paymentsHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">`
@@ -6664,6 +6695,7 @@ const receiptLines = (sale) => {
   });
   const discs = (sale.discounts||[]).filter(d=>d.amount>0);
   if (discs.length) { dash(); discs.forEach(d=>row(d.label||d.reason||(d.type?d.type+" discount":"Discount"), "-"+J(d.amount))); }
+  if (parseFloat(sale.surcharge) > 0) { dash(); row(sale.surchargeLabel||"Card surcharge", J(sale.surcharge)); }
   dash();
   row("Total", JS(sale.total), {b:true, big:true});
   if (sale.ticketId) add("Repair ticket: "+sale.ticketId+(sale.isDeposit ? (sale.ticketBalanceAfter>0 ? " | Balance due: "+J(sale.ticketBalanceAfter) : " | Balance due on collection") : " | Paid in full"));
@@ -6924,7 +6956,7 @@ function InvoicesTab() {
       setBusy("Saving PDF to Google Drive…");
       const saved = await saveInv(); if (!saved) return;
       const doc = await buildInvoicePdf(saved);
-      const url = await uploadPdfToDrive(doc, `${saved.id}.pdf`, "Pro Forma Invoices/" + (saved.date || todayStr()).slice(0, 7));
+      const url = await uploadPdfToDrive(doc, driveFileName(saved.date || todayStr(), "Pro Forma " + saved.id, saved.billTo && saved.billTo.name, saved.billTo && saved.billTo.attn), "Pro Forma Invoices/" + (saved.date || todayStr()).slice(0, 7));
       await saveInv({ ...saved, driveUrl: url });
       alert("\u2705 PDF saved to Google Drive.");
     } catch (e) {
@@ -7673,6 +7705,11 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const [deliveryZone,setDeliveryZone]=useState("None");
   const [deliveryCost,setDeliveryCost]=useState("");
   const [deliveryAddress,setDeliveryAddress]=useState("");
+  // Optional fee / surcharge on the whole receipt (e.g. card surcharge)
+  const [feeOn,setFeeOn]=useState(false);
+  const [feeLabel,setFeeLabel]=useState("Card surcharge");
+  const [feeMode,setFeeMode]=useState("pct"); // "pct" | "amt"
+  const [feeVal,setFeeVal]=useState("");
   // Payment
   const [cash,setCash]=useState("");
   const [debitCard,setDebitCard]=useState("");
@@ -7822,7 +7859,9 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const totalDiscount=discounts.reduce((s,d)=>s+(parseFloat(d.amount)||0),0);
   const deliveryCostNum=deliveryZone!=="None"?parseFloat(deliveryCost)||0:0;
   const subtotal=cart.reduce((s,i)=>s+(i.price*(i.qty||1)),0)+deliveryCostNum;
-  const total=Math.max(0,subtotal-totalDiscount-(appliedCredit?.amount||0));
+  const preFeeTotal=Math.max(0,subtotal-totalDiscount-(appliedCredit?.amount||0));
+  const surchargeNum=(feeOn&&!isExchange&&!isReturn)?Math.round((parseFloat(feeVal)||0)*100)/100:0;
+  const total=preFeeTotal+Math.max(0,surchargeNum);
   // Exchange diff calculated live — moved up so payment logic below can use it
   const exchOrigTotal=exchangeOrigSale?.total||0;
   const exchDiff=isExchange?total-exchOrigTotal:0;
@@ -7893,6 +7932,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerCompany("");setIsExistingCustomer(false);
     setDiscounts([]);setNewDiscType("General");setNewDiscAmt("");
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
+    setFeeOn(false);setFeeLabel("Card surcharge");setFeeMode("pct");setFeeVal("");
     setCash("");setDebitCard("");setCreditCard("");setNcbTransfer("");setScotiaTransfer("");setOtherPayment("");
     setNote("");setIsExchange(false);setIsReturn(false);setExchangeOrigSale(null);setReturnOrigSale(null);setReturnItems([]);
     setExchangeItems([]);
@@ -7902,7 +7942,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   const parkSale=async()=>{
     if(!cart.length){alert("Cart is empty.");return;}
-    const parked={id:Date.now().toString(),cart,customerName,customerPhone,customerEmail,discounts,deliveryZone,deliveryCost,deliveryAddress,note,parkedAt:new Date().toISOString(),parkedBy:user?.name||"Unknown"};
+    const parked={id:Date.now().toString(),cart,customerName,customerPhone,customerEmail,discounts,deliveryZone,deliveryCost,deliveryAddress,feeOn,feeLabel,feeMode,feeVal,note,parkedAt:new Date().toISOString(),parkedBy:user?.name||"Unknown"};
     const updated=[parked,...parkedSales];
     await save("tpp-parked-sales",updated);setParkedSales(updated);
     resetForm();alert(`✅ Sale parked as #${parked.id.slice(-4)}. Any staff member can retrieve it.`);
@@ -7913,6 +7953,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setCustomerEmail(parked.customerEmail||"");setDiscounts(parked.discounts||[]);
     setDeliveryZone(parked.deliveryZone||"None");setDeliveryCost(parked.deliveryCost||"");
     setDeliveryAddress(parked.deliveryAddress||"");setNote(parked.note||"");
+    setFeeOn(!!parked.feeOn);setFeeLabel(parked.feeLabel||"Card surcharge");setFeeMode(parked.feeMode||"pct");setFeeVal(parked.feeVal||"");
     const updated=parkedSales.filter(p=>p.id!==parked.id);
     await save("tpp-parked-sales",updated);setParkedSales(updated);
     setView("pos");
@@ -8041,6 +8082,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         id:saleId,customerName,customerPhone,customerEmail,...(customerCompany.trim()?{customerCompany:customerCompany.trim()}:{}),
         items:cart.map(i=>(i.type==="product"&&i.raw?.publicName)?{...i,publicName:i.raw.publicName}:i),subtotal,discounts,totalDiscount,total,
         deliveryZone,deliveryCost:deliveryCostNum,deliveryAddress,
+        ...(surchargeNum>0?{surcharge:surchargeNum,surchargeLabel:(feeLabel||"").trim()||"Card surcharge",}:{}),
         cash:parseFloat(cash)||0,debit_card:parseFloat(debitCard)||0,
         credit_card:parseFloat(creditCard)||0,ncb_transfer:parseFloat(ncbTransfer)||0,
         scotia_transfer:parseFloat(scotiaTransfer)||0,other_payment:parseFloat(otherPayment)||0,
@@ -8329,6 +8371,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         ),
         (selectedSale.discounts||[]).filter(d=>d.amount>0).map((d,i)=>E("div",{key:i,style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:2}},E("span",null,"Discount (",d.type,")"),E("span",null,"-"+fmtMoney(d.amount)))),
         selectedSale.deliveryCost>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:2}},E("span",null,"Delivery (",selectedSale.deliveryZone,")"),E("span",null,fmtMoney(selectedSale.deliveryCost))),
+        selectedSale.surcharge>0&&E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12,color:T.muted,marginBottom:2}},E("span",null,selectedSale.surchargeLabel||"Card surcharge"),E("span",null,fmtMoney(selectedSale.surcharge))),
+        extWarrantyLines(selectedSale).map((l,i)=>E("div",{key:"ew"+i,style:{fontSize:11,color:T.blue,marginBottom:2}},"🛡️ "+l)),
         E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:700,borderTop:`1px solid ${T.border}`,paddingTop:8,marginBottom:12}},E("span",null,"TOTAL"),E("span",{style:{color:selectedSale.isReturn?T.red:T.blue}},fmtMoney(Math.abs(selectedSale.total)))),
         E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:12}},
           selectedSale.cash>0&&E("div",{style:{background:"#F9FAFB",borderRadius:6,padding:"6px 10px"}},E("div",{style:{color:T.muted}},"Cash"),E("div",{style:{fontWeight:600}},fmtMoney(selectedSale.cash))),
@@ -8616,6 +8660,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       )
     ),
 
+    // Fee / surcharge (owner & management)
+    !(user&&user.role==="staff")&&!isExchange&&!isReturn&&E("div",{style:{marginBottom:12}},
+      E("label",{style:{display:"flex",alignItems:"center",gap:8,fontSize:13,fontWeight:600,cursor:"pointer"}},
+        E("input",{type:"checkbox",checked:feeOn,onChange:e=>{setFeeOn(e.target.checked); },style:{width:16,height:16}}),
+        "Add a fee / surcharge to this receipt"),
+      feeOn&&E("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginTop:8,alignItems:"end"}},
+        E(Field,{label:"Label (shown on receipt)"},E(Input,{value:feeLabel,onChange:e=>setFeeLabel(e.target.value),placeholder:"Card surcharge"})),
+        E(Field,{label:"Amount (JMD)"},E(Input,{type:"number",placeholder:"0",value:feeVal,onChange:e=>setFeeVal(e.target.value)}))),
+      feeOn&&surchargeNum>0&&E("div",{style:{fontSize:12,color:T.muted,marginTop:6}},`Adds ${fmtMoney(surchargeNum)} to the total.`)
+    ),
+
     linkedInv&&E("div",{style:{background:T.blueLt,border:`1px solid ${T.blue}`,borderRadius:10,padding:"10px 14px",marginBottom:12}},
       E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
         E("div",{style:{fontWeight:700,fontSize:13,color:T.blue}},`🧾 Converting pro forma ${linkedInv.id}`),
@@ -8664,7 +8719,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
             E("div",{style:{fontSize:13,fontWeight:500,marginBottom:4}},item.type==="ticket"?"🎫":item.type==="phone"?"📱":"📦"," ",item.name,item.type==="ticket"&&E("span",{style:{background:T.blue,color:"#fff",fontSize:9,padding:"1px 5px",borderRadius:3,marginLeft:6}},"REPAIR PAYMENT")),
             item.type==="ticket"&&E("div",{style:{fontSize:11,color:T.muted,marginBottom:4}},item.ticketCost>0?`Price ${fmtMoney(item.ticketCost)} · paid so far ${fmtMoney(item.ticketPaid||0)} · balance ${fmtMoney(item.ticketBalance||0)}. Amount below = what is being paid now.`:"No price set on this ticket. Enter the amount being paid now."),
             item.type==="phone"&&E(Input,{placeholder:"IMEI",value:item.imei||"",onChange:e=>updateCartField(idx,"imei",e.target.value),style:{fontSize:11,padding:"4px 8px",marginBottom:4}}),
-            E(Input,{placeholder:"Note (optional)",value:item.note||"",onChange:e=>updateCartField(idx,"note",e.target.value),style:{fontSize:11,padding:"4px 8px"}})
+            E(Input,{placeholder:"Note (optional)",value:item.note||"",onChange:e=>updateCartField(idx,"note",e.target.value),style:{fontSize:11,padding:"4px 8px"}}),
+            item.type!=="ticket"&&(item.warrantyExt
+              ?E("div",{style:{marginTop:6,padding:"8px 10px",background:T.blueLt,borderRadius:8}},
+                  E("div",{style:{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}},
+                    E("span",{style:{fontSize:11,fontWeight:700,color:T.blue}},"🛡️ Additional warranty:"),
+                    E("input",{type:"number",min:0,value:item.warrantyExt.n,onChange:e=>updateCartField(idx,"warrantyExt",{...item.warrantyExt,n:e.target.value}),style:{...iS,width:60,padding:"4px 6px",fontSize:12}}),
+                    E("select",{value:item.warrantyExt.unit||"days",onChange:e=>updateCartField(idx,"warrantyExt",{...item.warrantyExt,unit:e.target.value}),style:{...iS,padding:"4px 6px",fontSize:12}},WARRANTY_UNITS.map(u=>E("option",{key:u,value:u},u))),
+                    E("button",{onClick:()=>updateCartField(idx,"warrantyExt",null),style:{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:11,fontWeight:700}},"Remove")),
+                  E("input",{placeholder:"Notes on the additional warranty (prints on receipt)",value:item.warrantyExt.note||"",onChange:e=>updateCartField(idx,"warrantyExt",{...item.warrantyExt,note:e.target.value}),style:{...iS,width:"100%",boxSizing:"border-box",padding:"4px 8px",fontSize:11,marginTop:6}}),
+                  extLabel(item.warrantyExt)&&E("div",{style:{fontSize:11,color:T.muted,marginTop:4}},`Receipt will say: ${extLabel(item.warrantyExt)}, covered until ${extWarrantyUntil({date:todayStr()},item)}`))
+              :E("button",{onClick:()=>updateCartField(idx,"warrantyExt",{n:"",unit:"days",note:""}),style:{marginTop:6,background:"none",border:"none",color:T.blue,cursor:"pointer",fontSize:11,fontWeight:700,padding:0}},"🛡️ Add additional warranty"))
           ),
           E("div",{style:{display:"flex",alignItems:"center",gap:6,flexShrink:0}},
             item.type!=="ticket"&&E("input",{type:"number",min:1,value:item.qty||1,onChange:e=>updateCartField(idx,"qty",e.target.value),style:{...iS,width:48,textAlign:"center",padding:"6px"}}),
@@ -8731,6 +8796,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       E("div",{style:{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,fontSize:14,marginBottom:10}},
         totalDiscount>0&&E("div",{style:{color:T.muted}},"Subtotal: ",E("strong",null,fmtMoney(subtotal))),
         totalDiscount>0&&E("div",{style:{color:T.green}},"Discounts: ",E("strong",null,"-"+fmtMoney(totalDiscount))),
+        surchargeNum>0&&E("div",{style:{color:T.muted}},(feeLabel||"Surcharge")+": ",E("strong",null,"+"+fmtMoney(surchargeNum))),
         E("div",{style:{fontWeight:700,fontSize:18}},isExchange?"Amount Due: ":"Total: ",E("span",{style:{color:T.blue}},fmtMoney(amountDue))),
         !exchangeOwesCustomer&&totalPaid>=amountDue&&change>0&&E("div",{style:{color:T.green,fontWeight:700}},"💵 Change: ",fmtMoney(change)),
         !exchangeOwesCustomer&&totalPaid>0&&totalPaid<amountDue&&E("div",{style:{color:T.red,fontWeight:700}},"⚠️ Still owed: ",fmtMoney(amountDue-totalPaid))
