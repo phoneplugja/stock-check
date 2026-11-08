@@ -337,6 +337,8 @@
       const [errs,    setErrs]    = useState({});
       const [saving,  setSaving]  = useState(false);
       const [bookRef, setBookRef] = useState("");
+      const [agreed,  setAgreed]  = useState(false);
+      const [agreeErr,setAgreeErr]= useState(false);
 
       const set = (k,v) => { setFormS(p=>({...p,[k]:v})); setErrs(p=>({...p,[k]:""})); };
 
@@ -368,6 +370,7 @@
       };
 
       const submit = async () => {
+        if (!agreed) { setAgreeErr(true); return; }
         setSaving(true);
         try {
           const ref = genRef();
@@ -570,8 +573,12 @@
                 </Section>
               )}
             </Card>
-            <div style={{ background:"#f8fafc", border:`1px solid ${T.border}`, borderRadius:12, padding:"13px 16px", fontSize:13, color:T.muted, margin:"16px 0 20px", lineHeight:1.6 }}>
-              By submitting, you confirm this information is accurate and that you have read our <a href="/repair-terms.html" target="_blank" rel="noopener noreferrer" style={{ color:T.accent, fontWeight:700 }}>repair terms &amp; conditions</a>. We'll contact you to confirm your slot. Walk-ins also welcome.
+            <div style={{ background:agreeErr?T.redLt:"#f8fafc", border:`1px solid ${agreeErr?T.red:T.border}`, borderRadius:12, padding:"13px 16px", fontSize:13, color:T.muted, margin:"16px 0 20px", lineHeight:1.6 }}>
+              <label style={{ display:"flex", gap:10, alignItems:"flex-start", cursor:"pointer" }}>
+                <input type="checkbox" checked={agreed} onChange={e=>{ setAgreed(e.target.checked); setAgreeErr(false); }} style={{ width:18, height:18, marginTop:2, flexShrink:0, accentColor:T.accent, cursor:"pointer" }} />
+                <span>I confirm the information above is accurate and I agree to The Phone Plug's <a href="/repair-terms.html" target="_blank" rel="noopener noreferrer" style={{ color:T.accent, fontWeight:700 }}>repair terms &amp; conditions</a>. <span style={{ color:T.muted }}>We'll contact you to confirm your slot. Walk-ins also welcome.</span></span>
+              </label>
+              {agreeErr && <div style={{ color:T.red, fontSize:12, fontWeight:600, marginTop:8 }}>Please tick the box to agree before confirming your booking.</div>}
             </div>
             <div style={{ display:"flex", gap:10 }}>
               <Btn variant="ghost" onClick={()=>setStep(1)}>← Edit</Btn>
