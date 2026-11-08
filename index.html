@@ -233,6 +233,28 @@
     .mtab svg { width: 20px; height: 20px; flex-shrink: 0; }
     .mtab.active { color: var(--cyan); background: rgba(41,181,232,0.1); }
   }
+  .cat-chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 14px; margin-bottom: 4px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .cat-chips::-webkit-scrollbar { display: none; }
+  .chip { flex-shrink: 0; background: var(--black-3); border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); border-radius: 99px; padding: 9px 16px; font-family: 'Inter',sans-serif; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+  .chip:hover { border-color: var(--cyan); color: var(--cyan); }
+  .chip.active { background: linear-gradient(135deg, #22c2f2, #0e88bd); border-color: transparent; color: #fff; }
+  .model-head { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(41,181,232,0.25); }
+  .model-head:first-child { margin-top: 4px; }
+  .model-head h2 { font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; font-weight: 700; color: var(--white); }
+  .model-head span { font-size: 0.72rem; color: rgba(255,255,255,0.55); font-weight: 600; }
+  .oos-line { font-size: 0.75rem; color: rgba(255,255,255,0.5); margin: 2px 0 6px; line-height: 1.6; }
+  .model-empty { font-size: 0.85rem; color: rgba(255,255,255,0.75); padding: 6px 0 4px; }
+  .repair-box { background: var(--black-3); border: 1px solid rgba(41,181,232,0.25); border-radius: var(--radius-lg); padding: 1.1rem 1.25rem; margin: 18px 0 8px; }
+  .repair-box h3 { font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: var(--white); margin-bottom: 4px; }
+  .repair-box .rsub { font-size: 0.75rem; color: rgba(255,255,255,0.6); margin-bottom: 10px; }
+  .repair-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .repair-table th { text-align: right; font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,0.5); padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.12); }
+  .repair-table th:first-child, .repair-table td:first-child { text-align: left; }
+  .repair-table td { text-align: right; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); color: rgba(255,255,255,0.92); }
+  .repair-table td:first-child { font-weight: 600; }
+  .repair-table .ask { color: rgba(255,255,255,0.45); font-size: 0.75rem; }
+  .repair-note { margin-top: 12px; font-size: 0.8rem; color: rgba(255,255,255,0.85); line-height: 1.6; }
+  .repair-note a { color: #25D366; font-weight: 700; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -347,7 +369,7 @@
     </div>
     <div class="feature-item">
       <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></div>
-      <div><strong>Easy Search</strong>Search by name or SKU</div>
+      <div><strong>Easy Search</strong>Search by phone model or item</div>
     </div>
     <div class="feature-item">
       <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2.69h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 10a16 16 0 0 0 6.09 6.09l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
@@ -364,12 +386,12 @@
       <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="text" id="search" placeholder="e.g. S22, iPhone 13, or item number…" oninput="render()">
     </div>
-    <select id="cat-filter" onchange="onCatChange()"><option value="">All categories</option></select>
     <button class="refresh-btn" onclick="fetchAll()">
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
       Refresh
     </button>
   </div>
+  <div class="cat-chips" id="cat-chips"></div>
   <div class="grid" id="grid">
     <div class="loading-state"><div class="spinner"></div><p>Loading inventory…</p></div>
   </div>
@@ -473,77 +495,135 @@
     return url.replace("/upload/", `/upload/w_${size},h_${size},c_fill,g_auto,q_auto,f_auto/`);
   };
 
-  // Only these catalog categories are shown here (matches what customers browse in-store).
-  const ALLOWED_CATEGORIES = [
-    "Accessories- Samsung",
-    "Accessories- Apple",
-    "Accessories - Samsung Cases"
+  // ── Categories shown to customers (catalog category -> tab) ─────────────────
+  const normCat = c => String(c || "").toLowerCase().replace(/\s*-\s*/g, "-").replace(/\s+/g, " ").trim();
+  const TABS = [
+    { key: "samsung-cases", label: "Samsung Cases", cats: ["accessories-samsung cases"] },
+    { key: "samsung-acc",   label: "Samsung Accessories", cats: ["accessories-samsung"] },
+    { key: "apple-cases",   label: "Apple Cases", cats: ["accessories-apple cases"] },
+    { key: "apple-acc",     label: "Apple Accessories", cats: ["accessories-apple"] },
+    { key: "parts",         label: "Parts & Repairs", cats: ["parts & components"] }
   ];
+  const tabOfCategory = cat => { const n = normCat(cat); const t = TABS.find(t => t.cats.includes(n)); return t ? t.key : null; };
+  let activeTab = "";
 
-  // Same base-name / model-variant pattern the management app uses for its photo matching:
-  // "3 in 1 Heavy Duty Case Clear — S10" groups with "...— S10+" under one base-name card.
+  // ── Repairs price list ──────────────────────────────────────────────────────
+  // Edit this block to change what customers see. price = number (JMD, installed) or null / "" = "Ask".
+  // Anything not listed tells the customer to call or WhatsApp for price and availability.
+  const REPAIR_COLUMNS = [
+    { key: "screen",  label: "Screen" },
+    { key: "battery", label: "Battery" }
+  ];
+  const REPAIR_PRICES = [
+    { model: "iPhone X", screen: 7500, battery: null },
+    { model: "iPhone XS", screen: 7500, battery: 6500 },
+    { model: "iPhone XR", screen: 8000, battery: 6000 },
+    { model: "iPhone XS Max", screen: 8500, battery: 6500 },
+    { model: "iPhone 11", screen: 8000, battery: 6500 },
+    { model: "iPhone 11 Pro", screen: 8500, battery: 8000 },
+    { model: "iPhone 11 Pro Max", screen: 9000, battery: 8000 },
+    { model: "iPhone 12 mini", screen: 9500, battery: null },
+    { model: "iPhone 12", screen: 9500, battery: 8500 },
+    { model: "iPhone 12 Pro", screen: 9500, battery: 8500 },
+    { model: "iPhone 12 Pro Max", screen: 11000, battery: 9500 },
+    { model: "iPhone 13 mini", screen: 11000, battery: null },
+    { model: "iPhone 13", screen: 10500, battery: 9000 },
+    { model: "iPhone 13 Pro", screen: 11500, battery: 9000 },
+    { model: "iPhone 13 Pro Max", screen: 12500, battery: 10000 },
+    { model: "iPhone 14", screen: 11500, battery: 9500 },
+    { model: "iPhone 14 Plus", screen: 12000, battery: 10000 },
+    { model: "iPhone 14 Pro", screen: 13000, battery: 10000 },
+    { model: "iPhone 14 Pro Max", screen: 14500, battery: 10000 },
+    { model: "iPhone 15", screen: 12500, battery: 10000 },
+    { model: "iPhone 15 Plus", screen: 13000, battery: 10500 },
+    { model: "iPhone 15 Pro", screen: 14000, battery: 10000 },
+    { model: "iPhone 15 Pro Max", screen: 16500, battery: 10500 },
+    { model: "iPhone 16", screen: 16000, battery: 10500 },
+    { model: "iPhone 16 Plus", screen: 17500, battery: 12000 },
+    { model: "iPhone 16 Pro", screen: 18000, battery: 10500 },
+    { model: "iPhone 16 Pro Max", screen: 20000, battery: 12000 },
+    { model: "iPhone 17", screen: 21000, battery: "Call for price" },
+    { model: "iPhone 17 Pro", screen: 31000, battery: "Call for price" },
+    { model: "iPhone 17 Pro Max", screen: 36000, battery: "Call for price" },
+  ];
+  const REPAIR_NOTE = "Prices in JMD, installation included. OLED screens also available \u2014 just ask.";
+
+  // ── Model detection ─────────────────────────────────────────────────────────
+  // Turns text like "S22 Ultra", "A16 17 07 06 14" or "13 Pro Max" into canonical models:
+  // { fam:"s22", varKey:"ultra", label:"S22 Ultra", sort:[group, number, variantRank] }
+  const SAM_PREFIXES = ["s", "a", "m", "z", "note", "j"];
+  const VAR_RANK = { "": 0, s: 0.5, mini: 1, fe: 2, e: 3, "+": 4, plus: 4, pro: 5, "pro max": 6, ultra: 7, edge: 8, max: 6 };
+  function modelLabel(m) {
+    const pre = m.pre === "i" ? "iPhone " : m.pre === "note" ? "Note " : m.pre.toUpperCase();
+    const v = m.varKey === "+" ? "+" : (m.varKey === "e" || m.varKey === "s") ? m.varKey : (m.varKey ? " " + m.varKey.replace(/\b\w/g, c => c.toUpperCase()).replace("Fe", "FE") : "");
+    return pre + (m.numStr || m.num) + v;
+  }
+  function extractModels(text, defaultPre) {
+    let t = " " + String(text || "").toLowerCase().replace(/\./g, "").replace(/galaxy|samsung|apple|iphone|case|cases|glass|tempered|protector/g, m => m === "iphone" ? " i " : " ").replace(/[,/&]/g, " ").replace(/\s+/g, " ") + " ";
+    t = t.replace(/\s*\+/g, "+").replace(/\bpromax\b/g, "pro max");
+    const out = [];
+    let lastPre = defaultPre || "";
+    const re = /(?:^|[\s(])(?:(note|[samzj]|i)\s?-?)?(\d{1,3})(\+|\s?(?:plus|ultra|fe|edge|mini|pro max|pro|max)|[es])?(?![\w+])(?!\s?(?:watt|w\b|ft|mah|amp|in\b|pcs|pack))/g;
+    let m;
+    while ((m = re.exec(t))) {
+      let pre = m[1] || ""; const num = parseInt(m[2], 10);
+      if (!pre) { pre = lastPre; if (!pre) continue; }
+      else lastPre = pre;
+      if (pre === "i" && (num < 5 || num > 30)) continue;
+      if (pre !== "i" && pre !== "note" && num > 99) continue;
+      let v = (m[3] || "").trim();
+      if (v === "plus") v = "+";
+      if (!(v in VAR_RANK) && v !== "+") v = "";
+      const grp = pre === "i" ? 0 : (pre === "note" ? 2 : 1);
+      const fam = pre + num;
+      const mo = { pre, num, numStr: m[2], varKey: v, fam, grp };
+      mo.key = fam + "|" + v;
+      mo.label = modelLabel(mo);
+      mo.sort = [grp, (pre === "s" ? 0 : pre === "a" ? 1 : pre === "z" ? 2 : 3), num, VAR_RANK[v] != null ? VAR_RANK[v] : 9];
+      out.push(mo);
+    }
+    // iPhone bare words after the number ("11 pro max") are handled by the regex; X-series names
+    const xr = /\b(xs max|xs|xr|x)\b/g; let xm;
+    if ((defaultPre === "i" || /\bi\b/.test(t)) ) while ((xm = xr.exec(t))) {
+      const nm = xm[1]; const mo = { pre: "i", num: 10, varKey: nm, fam: "i" + nm, grp: 0, key: "i" + nm + "|", label: "iPhone " + nm.toUpperCase().replace("XS MAX", "XS Max"), sort: [0, 0, 10, nm === "x" ? 0 : nm === "xs" ? 1 : nm === "xr" ? 2 : 3] };
+      out.push(mo);
+    }
+    return out;
+  }
+  const dedupeModels = list => { const seen = new Set(); return list.filter(m => seen.has(m.key) ? false : (seen.add(m.key), true)); };
+  const cmpSort = (a, b) => { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] - b[i]; } return 0; };
+
+  // Same base-name / model-variant pattern the management app uses for photos & grouping
   const splitVariantName = (name) => {
     const m = String(name || "").match(/^(.*?)\s[-–—]\s(.+)$/);
     return m ? { base: m[1].trim(), variant: m[2].trim() } : { base: String(name || "").trim(), variant: null };
   };
 
-  let allItems = [], loaded = false;
+  let allProducts = [], loaded = false;
 
-  function buildDisplayItems(products) {
-    const accessories = products.filter(p =>
-      ALLOWED_CATEGORIES.some(c => c.toLowerCase() === String(p.category || "").toLowerCase())
-    );
-    const groups = new Map();
-    const standalone = [];
-    accessories.forEach(p => {
+  // Prepare each visible product once: tab, base style, models it fits.
+  function prepare(products) {
+    const out = [];
+    products.forEach(p => {
+      const tab = tabOfCategory(p.category);
+      if (!tab) return;
       const { base, variant } = splitVariantName(p.name);
-      if (variant) {
-        const key = base.toLowerCase();
-        if (!groups.has(key)) groups.set(key, { name: base, category: p.category, sku: p.sku, products: [] });
-        groups.get(key).products.push({ ...p, variantLabel: variant });
-      } else {
-        standalone.push(p);
+      const isApple = tab.startsWith("apple");
+      const defPre = isApple ? "i" : (tab === "parts" ? "" : "s");
+      let models = [];
+      if (tab !== "parts") {
+        models = variant ? extractModels(variant, isApple ? "i" : "") : [];
+        if (!models.length) models = extractModels(p.name, isApple ? "i" : "");
       }
-    });
-
-    const items = [];
-    groups.forEach(g => {
-      // If only one product ended up in a "group" (no sibling variants), treat it as standalone
-      // but keep its full name (base — model) rather than dropping the model off the card.
-      if (g.products.length < 2) {
-        const p = g.products[0];
-        items.push({
-          name: p.name, category: p.category, sku: p.sku || "",
-          image: p.image || null,
-          minPrice: p.price || 0, maxPrice: p.price || 0,
-          totalQty: p.stock || 0,
-          variants: null
-        });
-        return;
-      }
-      const withImage = g.products.find(p => p.image);
-      const inStockPrices = g.products.filter(p => (p.stock || 0) > 0).map(p => parseFloat(p.price) || 0).filter(x => x > 0);
-      items.push({
-        name: g.name,
-        category: g.category,
-        sku: g.products[0].sku || "",
-        image: withImage ? withImage.image : null,
-        minPrice: inStockPrices.length ? Math.min(...inStockPrices) : 0,
-        maxPrice: inStockPrices.length ? Math.max(...inStockPrices) : 0,
-        totalQty: g.products.reduce((s, p) => s + (p.stock || 0), 0),
-        variants: g.products.map(p => ({ label: p.variantLabel, qty: p.stock || 0 }))
+      models = dedupeModels(models);
+      out.push({
+        p, tab, base: variant ? base : p.name, variant, models,
+        stock: parseInt(p.stock, 10) || 0,
+        price: parseFloat(p.price) || 0,
+        hay: (String(p.name) + " " + (p.sku || "") + " " + (p.category || "")).toLowerCase().replace(/\./g, "")
       });
     });
-    standalone.forEach(p => {
-      items.push({
-        name: p.name, category: p.category, sku: p.sku || "",
-        image: p.image || null,
-        minPrice: p.price || 0, maxPrice: p.price || 0,
-        totalQty: p.stock || 0,
-        variants: null
-      });
-    });
-    return items;
+    return out;
   }
 
   function cardImageHtml(item) {
@@ -553,135 +633,185 @@
     }
     return '<div class="card-img-wrap"><div class="card-img-placeholder">📱</div></div>';
   }
-
   function priceTag(item) {
     if (!item.minPrice || item.minPrice <= 0) return '';
     const fmt = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const p = item.minPrice === item.maxPrice
-      ? 'JMD $' + fmt(item.minPrice)
-      : 'JMD $' + fmt(item.minPrice) + ' \u2013 $' + fmt(item.maxPrice);
+    const p = item.minPrice === item.maxPrice ? 'JMD $' + fmt(item.minPrice) : 'JMD $' + fmt(item.minPrice) + ' – $' + fmt(item.maxPrice);
     return '<span class="price-tag">' + p + '</span>';
   }
-
   function metaRow(item) {
     return '<div class="card-meta">' +
       (item.category ? '<span class="meta-tag">' + esc(item.category) + '</span>' : '') +
       (item.sku ? '<span class="meta-tag">SKU: ' + esc(item.sku) + '</span>' : '') +
-      priceTag(item) +
-    '</div>';
+      priceTag(item) + '</div>';
   }
-
   function whatsappBtn(itemName) {
     const msg = encodeURIComponent("Hi! I'd like to order: " + itemName);
     return '<a class="wa-btn" href="https://wa.me/18764905515?text=' + msg + '" target="_blank"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>Order via WhatsApp</a>';
   }
-
   const CTA = '<div class="card-cta">Don\'t see what you\'re looking for? Call or WhatsApp us at (876) 490-5515 to be sure</div>';
 
-  function buildCard(item) {
+  // One card per product (model view) — name shows style + model; always in stock here.
+  function productCard(r) {
+    const p = r.p;
+    const item = { name: p.name, category: p.category, sku: p.sku || "", image: p.image || null, minPrice: r.price, maxPrice: r.price };
+    return '<div class="card"><div class="card-body">' +
+      '<div><div class="card-top"><div class="card-name">' + esc(p.name) + '</div><span class="badge in">In stock</span></div>' + metaRow(item) + '</div>' +
+      '<div class="card-actions">' + whatsappBtn(p.name) + CTA + '</div></div>' + cardImageHtml(item) + '</div>';
+  }
+
+  // Style-grouped card (text searches): "Heavy Duty Case Clear" with its in-stock model variants.
+  function groupedCard(g) {
+    const inStock = g.rows.filter(r => r.stock > 0);
+    const prices = inStock.map(r => r.price).filter(x => x > 0);
+    const withImage = g.rows.find(r => r.p.image);
+    const item = { name: g.name, category: g.rows[0].p.category, sku: g.rows[0].p.sku || "", image: withImage ? withImage.p.image : null,
+      minPrice: prices.length ? Math.min(...prices) : 0, maxPrice: prices.length ? Math.max(...prices) : 0 };
     const imgHtml = cardImageHtml(item);
-    const hasVariants = item.variants && item.variants.length > 1;
-    const totalQty = item.totalQty || 0;
-
-    if (totalQty <= 0) {
-      return '<div class="card">' +
-        '<div class="card-body">' +
-          '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge out">Out of stock</span></div>' +
-          metaRow(item) + '</div>' +
-          '<div class="card-actions">' + CTA + '</div>' +
-        '</div>' + imgHtml + '</div>';
+    if (!inStock.length) {
+      return '<div class="card"><div class="card-body"><div><div class="card-top"><div class="card-name">' + esc(g.name) + '</div><span class="badge out">Out of stock</span></div>' + metaRow(item) + '</div><div class="card-actions">' + CTA + '</div></div>' + imgHtml + '</div>';
     }
-
-    if (hasVariants) {
-      const inStockVariants = item.variants.filter(v => v.qty > 0);
-      const varRows = inStockVariants.map(v => {
-        return '<div class="variant-row"><span class="variant-name">' + esc(v.label || 'Variant') + '</span><span class="badge in">In stock</span></div>';
-      }).join('');
-      return '<div class="card">' +
-        '<div class="card-body">' +
-          '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
-          metaRow(item) +
-          '<div class="variants">' + varRows + '</div></div>' +
-          '<div class="card-actions">' + whatsappBtn(item.name) + CTA + '</div>' +
-        '</div>' + imgHtml + '</div>';
-    }
-
-    return '<div class="card">' +
-      '<div class="card-body">' +
-        '<div><div class="card-top"><div class="card-name">' + esc(item.name) + '</div><span class="badge in">In stock</span></div>' +
-        metaRow(item) + '</div>' +
-        '<div class="card-actions">' + whatsappBtn(item.name) + CTA + '</div>' +
-      '</div>' + imgHtml + '</div>';
+    const varRows = g.grouped ? '<div class="variants">' + inStock.map(r => '<div class="variant-row"><span class="variant-name">' + esc(r.variant || 'Variant') + '</span><span class="badge in">In stock</span></div>').join('') + '</div>' : '';
+    return '<div class="card"><div class="card-body"><div><div class="card-top"><div class="card-name">' + esc(g.name) + '</div><span class="badge in">In stock</span></div>' + metaRow(item) + varRows + '</div><div class="card-actions">' + whatsappBtn(g.name) + CTA + '</div></div>' + imgHtml + '</div>';
   }
 
-  function onCatChange() {
-    document.getElementById('search').value = '';
-    showPrompt();
+  function groupRows(rows) {
+    const map = new Map(); const order = [];
+    rows.forEach(r => {
+      const k = r.variant ? "g:" + r.tab + ":" + r.base.toLowerCase() : "p:" + r.p.id;
+      if (!map.has(k)) { map.set(k, { name: r.variant ? r.base : r.p.name, grouped: !!r.variant, rows: [] }); order.push(k); }
+      map.get(k).rows.push(r);
+    });
+    return order.map(k => map.get(k));
   }
+
+  // ── Repairs section ─────────────────────────────────────────────────────────
+  const WA_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>';
+  const CALL_NOTE = '<div class="repair-note">Don\'t see your model or a part you need? <b>Call or WhatsApp us at (876) 490-5515</b> for prices and availability.</div><div style="margin-top:12px"><a class="wa-btn" href="https://wa.me/18764905515?text=' + encodeURIComponent("Hi, I have a repair related query") + '" target="_blank" rel="noopener">' + WA_ICON + 'WhatsApp us about a repair</a></div>';
+  function repairsHtml(q, forced) {
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
+    const qModels = q ? extractModels(q, "") .concat(extractModels(q, "i")) : [];
+    const rows = REPAIR_PRICES.filter(r => {
+      if (!tokens.length) return true;
+      const name = String(r.model).toLowerCase().replace(/\./g, "");
+      if (tokens.every(t => name.includes(t))) return true;
+      const rm = extractModels(r.model, /iphone/i.test(r.model) ? "i" : "");
+      return qModels.some(qm => rm.some(x => x.fam === qm.fam && (!qm.varKey || x.varKey === qm.varKey)));
+    });
+    if (!rows.length && !forced) return '';
+    const cell = v => (v === null || v === undefined || v === "") ? '<span class="ask">Ask</span>' : (typeof v === "number" ? '$' + v.toLocaleString('en-US') : esc(v));
+    let html = '<div class="repair-box"><h3>🔧 Repairs &amp; parts price list</h3><div class="rsub">' + esc(REPAIR_NOTE) + '</div>';
+    if (rows.length) {
+      html += '<table class="repair-table"><thead><tr><th>Model</th>' + REPAIR_COLUMNS.map(c => '<th>' + esc(c.label) + '</th>').join('') + '</tr></thead><tbody>' +
+        rows.map(r => '<tr><td>' + esc(r.model) + '</td>' + REPAIR_COLUMNS.map(c => '<td>' + cell(r[c.key]) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+    } else if (!REPAIR_PRICES.length) {
+      html += '<div class="model-empty">Our repair price list is being updated.</div>';
+    } else {
+      html += '<div class="model-empty">No repair prices listed for that search.</div>';
+    }
+    return html + CALL_NOTE + '</div>';
+  }
+
+  // ── Tabs ────────────────────────────────────────────────────────────────────
+  function renderChips() {
+    document.getElementById('cat-chips').innerHTML =
+      ['<button class="chip' + (activeTab === "" ? ' active' : '') + '" onclick="setTab(\'\')">All</button>']
+        .concat(TABS.map(t => '<button class="chip' + (activeTab === t.key ? ' active' : '') + '" onclick="setTab(\'' + t.key + '\')">' + esc(t.label) + '</button>')).join('');
+  }
+  function setTab(k) { activeTab = k; renderChips(); render(); }
 
   function showPrompt() {
-    document.getElementById('grid').innerHTML = '<div class="prompt-state"><div class="prompt-phone"><div class="prompt-phone-icon">🔍</div></div><strong>Type to search</strong><p>Search by phone model (e.g. S22) or item name / number</p></div>';
+    document.getElementById('grid').innerHTML = '<div class="prompt-state"><div class="prompt-phone"><div class="prompt-phone-icon">🔍</div></div><strong>Type to search</strong><p>Search by phone model (e.g. S22, iPhone 13), item name or number</p></div>';
   }
 
+  // ── Search ──────────────────────────────────────────────────────────────────
+  const ACC_WORDS = /^(case|cases|glass|tempered|protector|screen|cable|charger|adapter|cover|clear|armor|armour|shockproof|heavy|duty|kickstand|magsafe|otterbox|battery|lcd|oled)$/;
   function render() {
-    const q = document.getElementById('search').value.toLowerCase().trim();
-    const cleanQ = q.replace(/\./g, '');
-    const cat = document.getElementById('cat-filter').value;
+    const raw = document.getElementById('search').value;
+    const q = raw.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
     const grid = document.getElementById('grid');
     if (!loaded) return;
+    const inTab = r => !activeTab || r.tab === activeTab;
+
+    // Parts & Repairs tab: show the repairs price list (filtered by search), no catalog cards.
+    if (activeTab === "parts") {
+      grid.innerHTML = repairsHtml(q, true);
+      return;
+    }
     if (!q) { showPrompt(); return; }
 
-    let filtered = allItems.filter(item => {
-      const variantMatch = (item.variants || []).some(v => {
-        const vName = (v.label || '').toLowerCase().trim();
-        return vName === q && v.qty > 0;
-      });
-      const cleanName = item.name.toLowerCase().replace(/\./g, '');
-      const matchQ = cleanName.includes(cleanQ) || (item.sku||'').toLowerCase().includes(q) || variantMatch;
-      const matchC = !cat || item.category === cat;
-      return matchQ && matchC;
-    });
+    const tabRows = products_prepared.filter(inTab).filter(r => r.tab !== "parts");
+    const defPre = activeTab.startsWith("apple") ? "i" : "";
+    let qModels = dedupeModels(extractModels(q, defPre));
+    if (!qModels.length && /^\d{1,2}(\s|$)/.test(q)) qModels = dedupeModels(extractModels(q, "i"));
 
-    if (!filtered.length) {
+    let html = '';
+    if (qModels.length) {
+      // Words left over once the model text is removed (e.g. "case", "glass") narrow the results
+      const rest = q.replace(/(note|[samzj]|iphone|i)?\s?-?\d{1,3}(\+|\s?(plus|ultra|fe|edge|mini|pro max|promax|pro|max)|[es](?![a-z]))?/g, ' ').split(/\s+/).filter(w => w && w !== 'galaxy' && w !== 'samsung' && w !== 'apple');
+      const matchesModel = (rm) => qModels.some(qm => {
+        const endsDigit = /\d$/.test(q.replace(/[^a-z0-9+]/g, ''));
+        if (rm.fam !== qm.fam && !(endsDigit && !qm.varKey && !/^0/.test(qm.numStr) && rm.fam.startsWith(qm.fam))) return false;
+        if (/\d$/.test(q.replace(/[^a-z0-9+]/g, '')) && !qm.varKey) return true;   // "s22" → whole family
+        return qm.varKey ? rm.varKey === qm.varKey : true;
+      });
+      const hits = [];
+      tabRows.forEach(r => {
+        const ms = r.models.filter(matchesModel);
+        if (!ms.length) return;
+        if (rest.length && !rest.every(w => r.hay.includes(w) || (w.endsWith('s') && r.hay.includes(w.slice(0, -1))))) return;
+        ms.forEach(m => hits.push({ r, m }));
+      });
+      // Group by model, ordered: S22, S22 FE, S22+, S22 Ultra … (iPhones: 13, 13 mini, 13 Pro, 13 Pro Max)
+      const byModel = new Map();
+      hits.forEach(h => { if (!byModel.has(h.m.key)) byModel.set(h.m.key, { m: h.m, rows: [] }); byModel.get(h.m.key).rows.push(h.r); });
+      const secs = [...byModel.values()].sort((a, b) => cmpSort(a.m.sort, b.m.sort));
+      // Models we don't stock at all (e.g. no S22 FE products) simply don't appear.
+      secs.forEach(sec => {
+        const inStock = sec.rows.filter(r => r.stock > 0).sort((a, b) => a.p.name.localeCompare(b.p.name, undefined, { numeric: true }));
+        const out = sec.rows.filter(r => r.stock <= 0);
+        html += '<div class="model-head"><h2>' + esc(sec.m.label) + '</h2><span>' + inStock.length + ' in stock</span></div>';
+        if (inStock.length) html += inStock.map(productCard).join('');
+        else html += '<div class="model-empty">Nothing in stock right now for the ' + esc(sec.m.label) + '. <b>Call or WhatsApp (876) 490-5515</b> and we\'ll check.</div>';
+        if (out.length) html += '<div class="oos-line">Currently out of stock: ' + out.map(r => esc(r.base)).filter((v, i, a) => a.indexOf(v) === i).join(', ') + '</div>';
+      });
+    } else {
+      // Plain text search (cable, adapter, otterbox, SKU …): every word must match
+      const words = q.split(' ');
+      const rows = tabRows.filter(r => words.every(w => r.hay.includes(w) || (r.variant || '').toLowerCase().includes(w)));
+      const groups = groupRows(rows).sort((a, b) => {
+        const ia = a.rows.some(r => r.stock > 0) ? 0 : 1, ib = b.rows.some(r => r.stock > 0) ? 0 : 1;
+        if (ia !== ib) return ia - ib;
+        const sc = g => { const n = g.name.toLowerCase(); return n === q ? 0 : n.startsWith(q) ? 1 : 2; };
+        return sc(a) - sc(b) || a.name.localeCompare(b.name, undefined, { numeric: true });
+      });
+      html += groups.map(groupedCard).join('');
+    }
+
+    // Repairs hint when the search looks like a model/part and a repair row matches
+    if (!activeTab || activeTab === "parts") html += repairsHtml(q, false);
+
+    if (!html) {
       grid.innerHTML = '<div class="empty-state">No items found. <span style="color:var(--cyan)">Call or WhatsApp us at (876) 490-5515</span> to confirm availability.</div>';
       return;
     }
-
-    filtered.sort((a, b) => {
-      function score(item) {
-        const name = item.name.toLowerCase().replace(/\./g, '').trim();
-        const sku = (item.sku || '').toLowerCase();
-        const words = name.split(/\s+/);
-        const firstWord = words[0] || '';
-        if (name === cleanQ || sku === cleanQ) return 0;
-        if (firstWord === cleanQ) return 1;
-        if (words.some(w => w === cleanQ)) return 2;
-        if (firstWord.startsWith(cleanQ)) return 3;
-        if (words.some(w => w.startsWith(cleanQ))) return 4;
-        return 5;
-      }
-      return score(a) - score(b);
-    });
-
-    grid.innerHTML = filtered.map(item => buildCard(item)).join('');
+    grid.innerHTML = html;
   }
 
-  function populateCats() {
-    const cats = [...new Set(allItems.map(i => i.category).filter(Boolean))].sort();
-    const sel = document.getElementById('cat-filter');
-    sel.innerHTML = '<option value="">All categories</option>' + cats.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
-  }
-
+  let products_prepared = [];
   async function fetchAll() {
     document.getElementById('grid').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading inventory&hellip;</p></div>';
     document.getElementById('error-area').innerHTML = '';
     try {
       const products = await loadAllProducts();
       if (!Array.isArray(products)) throw new Error('Could not read the catalog. Please try again shortly.');
-      allItems = buildDisplayItems(products);
+      // The same product must only appear once
+      const seen = new Set();
+      allProducts = products.filter(p => { const id = p && p.id; if (id == null) return true; if (seen.has(id)) return false; seen.add(id); return true; });
+      products_prepared = prepare(allProducts);
       loaded = true;
-      populateCats();
-      showPrompt();
+      renderChips();
+      if (document.getElementById('search').value.trim() || activeTab === "parts") render(); else showPrompt();
       document.getElementById('last-sync').textContent = 'Last synced: ' + new Date().toLocaleTimeString();
     } catch(err) {
       document.getElementById('error-area').innerHTML = '<div class="error-box">&#9888; ' + err.message + '</div>';
@@ -689,8 +819,9 @@
     }
   }
 
-  function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function esc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+  renderChips();
   fetchAll();
   setInterval(fetchAll, 300000);
 </script>
