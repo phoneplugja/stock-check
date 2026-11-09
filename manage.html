@@ -12476,6 +12476,18 @@ const matchCatalogForLine = (catalog, lineName) => {
   });
   return bestScore >= 0.8 ? best : null;
 };
+// Numbered case lines ("77. Antifall Case Gray and Green - 16 Pro Max") that aren't in the catalog yet: use the category
+// of the same-numbered case if it exists, otherwise tell Apple from Samsung by the model.
+const guessCaseCategory = (catalog, name) => {
+  const m = String(name || "").match(/^(\d+)\.\s(.*?)\s[-–—]\s(.+)$/);
+  if (!m) return null;
+  const same = (catalog || []).find(p => /cases$/i.test(String(p.category || "")) && (String(p.name || "").match(/^(\d+)\./) || [])[1] === m[1]);
+  if (same) return same.category;
+  const model = m[3].trim();
+  if (/iphone/i.test(model) || /^\d{1,2}(\s?(pro|plus|max|mini|e))*(\s|$)/i.test(model)) return "Accessories - Apple Cases";
+  if (/^[sazm]\d/i.test(model) || /galaxy/i.test(model)) return "Accessories - Samsung Cases";
+  return null;
+};
 const guessPoCategory = (kind) => ({ phone:"Like New Samsung", part:"Parts & Components", gadget:"Gadgets", accessory:"Accessories - Other" }[String(kind||"").toLowerCase()] || "Accessories - Other");
 const readSupplierDocWithAI = async (file, apiKey) => {
   const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = () => rej(new Error("Couldn't read the file.")); r.readAsDataURL(file); });
@@ -12500,7 +12512,7 @@ Rules: one entry in "lines" for every item row; ignore summary/subtotal rows so 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method:"POST",
     headers:{ "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
-    body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:4096, messages:[{ role:"user", content:[ block, { type:"text", text:prompt } ] }] })
+    body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:16000, messages:[{ role:"user", content:[ block, { type:"text", text:prompt } ] }] })
   });
   if (resp.status === 401) throw new Error("Your Anthropic API key was rejected. Check it in Settings.");
   const data = await resp.json();
@@ -12538,6 +12550,7 @@ function PurchasesTab() {
   });
   const [po, setPOS] = useState(emptyPO());
   const setPO = (k,v) => setPOS(p=>({...p,[k]:v}));
+  const [editingPOId, setEditingPOId] = useState(null); // set while an existing, not-yet-received PO is being edited
   const [showAddLine, setShowAddLine] = useState(false);
   const [newLine, setNewLineS] = useState({ name:"", category:"Like New Samsung", qty:"1", unitCost:"" });
   const setNL = (k,v) => setNewLineS(p=>({...p,[k]:v}));
@@ -12574,7 +12587,7 @@ function PurchasesTab() {
       const rawLines = Array.isArray(r.lines) ? r.lines : [];
       const lines = rawLines.filter(l => l && String(l.name || "").trim()).map((l, i) => {
         const m = matchCatalogForLine(catalog, l.name);
-        return { id:`${Date.now()}-${i}`, name: m ? m.name : String(l.name).trim(), category: m ? m.category : guessPoCategory(l.kind),
+        return { id:`${Date.now()}-${i}`, name: m ? m.name : String(l.name).trim(), category: m ? m.category : (guessCaseCategory(catalog, l.name) || guessPoCategory(l.kind)),
                  qty: Math.max(1, parseInt(l.qty) || 1), unitCost: parseFloat(l.unit_cost) || 0, productId: m ? m.id : undefined, scannedName: String(l.name).trim() };
       });
       if (!lines.length) { setScanMsg({ kind:"err", text:"I couldn't find any item lines on that document. Try a clearer photo or a different file." }); return; }
@@ -12601,6 +12614,31 @@ function PurchasesTab() {
     if (!po.lines?.length) { alert("Add at least one line item."); return; }
     if (!po.paymentMethod) { alert("Select a payment method."); return; }
     if (po.currency !== "JMD" && !(parseFloat(po.fxRate) > 0)) { alert(`Enter the exchange rate (JMD per 1 ${po.currency}) — the books and unit costs are kept in JMD.`); return; }
+    if (editingPOId) {
+      // Editing a PO that hasn't been received yet: update the order itself and its Purchases Ledger entry.
+      const all = await loadArr("tpp-purchase-orders");
+      const cur = all.find(x => x.id === editingPOId);
+      if (!cur) { alert("That purchase order can't be found any more."); return; }
+      if (cur.status === "Received" || cur.status === "Voided") { alert(`This PO is already ${cur.status}, so it can't be edited here.`); return; }
+      const lineSub = po.lines.reduce((sum, l) => sum + (parseFloat(l.unitCost) || 0) * (parseInt(l.qty) || 0), 0);
+      const invTotal = lineSub + shippingAmt + taxAmt;
+      const fxNew = po.currency === "JMD" ? 1 : (parseFloat(po.fxRate) || 0);
+      const updatedPO = { ...cur, supplier: po.supplier, poRef: po.poRef, date: po.date || cur.date, currency: po.currency, fxRate: fxNew,
+        shipping: shippingAmt, tax: taxAmt, paymentMethod: po.paymentMethod, notes: po.notes, lines: po.lines, invoiceTotal: invTotal, editedAt: new Date().toISOString() };
+      await save("tpp-purchase-orders", all.map(x => x.id === editingPOId ? updatedPO : x));
+      try {
+        const ledger = await loadArr("tpp-purchases-ledger");
+        const fx = poFxRate(updatedPO);
+        const patched = ledger.map(e => e && e.poId === editingPOId ? { ...e, date: updatedPO.date, payment_method: updatedPO.paymentMethod,
+          amount: round2(invTotal * (fx || 1)), amountOriginal: invTotal, currency: updatedPO.currency, fxRate: fx || 0, fxMissing: !fx,
+          supplier: updatedPO.supplier, poRef: updatedPO.poRef, details: `PO ${updatedPO.poRef || updatedPO.id} — ${updatedPO.supplier}${updatedPO.currency !== "JMD" ? ` (${updatedPO.currency})` : ""}` } : e);
+        await save("tpp-purchases-ledger", patched);
+      } catch (e) { console.error("PO ledger update error:", e); }
+      setPos(pos.map(x => x.id === editingPOId ? updatedPO : x));
+      setEditingPOId(null); setPOS(emptyPO()); setView("pos");
+      alert(`✅ Purchase Order updated — ${poInline(updatedPO.invoiceTotal, updatedPO.currency, updatedPO.fxRate)}`);
+      return;
+    }
     const record = await createPurchaseOrder({
       supplier: po.supplier, poRef: po.poRef, date: po.date, currency: po.currency, fxRate: po.fxRate,
       shipping: shippingAmt, tax: taxAmt, paymentMethod: po.paymentMethod, notes: po.notes,
@@ -12815,6 +12853,13 @@ function PurchasesTab() {
       viewingPO.notes && E("div",{style:{fontSize:12,color:T.muted,fontStyle:"italic",marginBottom:16}},viewingPO.notes),
       E("div", { style:{ display:"flex", gap:8 } },
         E(Btn,{variant:"ghost",onClick:()=>setViewingPO(null)},"Close"),
+        viewingPO.status!=="Voided"&&viewingPO.status!=="Received"&&E(Btn,{variant:"ghost",onClick:()=>{
+          const v=viewingPO;
+          setPOS({ supplier:v.supplier||"", poRef:v.poRef||"", date:v.date||todayStr(), currency:v.currency||"JMD", fxRate:v.fxRate?String(v.fxRate):"",
+            shipping:v.shipping?String(v.shipping):"", shippingPct:false, tax:v.tax?String(v.tax):"", taxPct:false,
+            paymentMethod:v.paymentMethod||"Cash", notes:v.notes||"", lines:(v.lines||[]).map(l=>({...l})) });
+          setEditingPOId(v.id); setViewingPO(null); setView("new");
+        }},"✏️ Edit"),
         viewingPO.status!=="Voided"&&viewingPO.status!=="Received"&&E(Btn,{variant:"ghost",style:{color:T.green},onClick:()=>{setViewingPO(null);setView("receive");}},"📥 Receive Stock"),
         viewingPO.status==="Received"&&E(Btn,{variant:"ghost",onClick:()=>openPOLabels(viewingPO)},"🏷️ Print labels"),
         viewingPO.status!=="Voided"&&E(Btn,{variant:"danger",onClick:()=>voidPO(viewingPO.id)},"🚫 Void")
@@ -12880,8 +12925,8 @@ function PurchasesTab() {
   // ── New PO Form ─────────────────────────────────────────────────────────────
   if (view==="new") return E("div", { style:{ maxWidth:640, margin:"0 auto" } },
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}},
-      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"📄 New Purchase Order"),
-      E("button",{onClick:()=>setView("pos"),style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
+      E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},editingPOId?"✏️ Edit Purchase Order":"📄 New Purchase Order"),
+      E("button",{onClick:()=>{ if(editingPOId){ setEditingPOId(null); setPOS(emptyPO()); } setView("pos"); },style:{background:"none",border:"none",color:T.blue,fontWeight:700,fontSize:13,cursor:"pointer",padding:0}},"← Back")
     ),
     E(Card,{style:{marginBottom:16,border:`1.5px dashed ${T.blue}`,background:T.blueLt}},
       E("div",{style:{fontWeight:700,fontSize:14,marginBottom:4}},"📎 Read an invoice with AI"),
@@ -12938,6 +12983,14 @@ function PurchasesTab() {
               ),
               E("div",{style:{display:"flex",alignItems:"center",gap:8}},
                 E("div",{style:{fontWeight:700,fontSize:13,textAlign:"right"}},poAmtEls(E,l.unitCost*l.qty,po.currency,po.fxRate)),
+                E("button",{title:"Edit this line",onClick:()=>{
+                  const nm=prompt("Item name:",l.name); if(nm===null) return;
+                  const q=prompt("Quantity:",String(l.qty)); if(q===null) return;
+                  const c=prompt(`Unit cost (${po.currency}):`,String(l.unitCost)); if(c===null) return;
+                  const qn=parseInt(q), cn=parseFloat(c);
+                  if(!nm.trim()||!(qn>0)||isNaN(cn)||cn<0){ alert("Enter a name, a quantity above 0 and a valid cost."); return; }
+                  setPO("lines",(po.lines||[]).map((x,j)=>j===i?{...x,name:nm.trim(),qty:qn,unitCost:cn}:x)); },
+                  style:{background:"#F3F4F6",color:T.text,border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}},"✏️"),
                 E("button",{onClick:()=>setPO("lines",(po.lines||[]).filter((_,j)=>j!==i)),style:{background:T.redLt,color:T.red,border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontSize:12}},"✕")
               )
             ))
@@ -12949,7 +13002,7 @@ function PurchasesTab() {
         E("div",{style:{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700}},E("span",null,"Total"),E("span",{style:{color:T.blue,textAlign:"right"}},poAmtEls(E,invoiceTotal,po.currency,po.fxRate)))
       )
     ),
-    E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},"💾 Save Purchase Order")
+    E(Btn,{full:true,onClick:savePO,disabled:!po.supplier.trim()||!(po.lines||[]).length},editingPOId?"💾 Save Changes":"💾 Save Purchase Order")
   );
 
   // ── Main PO List ──────────────────────────────────────────────────────────────
@@ -12979,7 +13032,7 @@ function PurchasesTab() {
       E("div",{style:{display:"flex",gap:8}},
         E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("ledger")},"📒 Purchases Ledger"),
         E(Btn,{variant:"ghost",style:{fontSize:12},onClick:()=>setView("ai")},"🤖 AI Invoice"),
-        E(Btn,{onClick:()=>setView("new")},"+ New PO")
+        E(Btn,{onClick:()=>{ setEditingPOId(null); setView("new"); }},"+ New PO")
       )
     ),
     E("div",{style:{display:"flex",gap:0,background:"#F3F4F6",borderRadius:10,padding:4,marginBottom:16}},
@@ -13361,7 +13414,15 @@ function ReceiveStockTab({ onCatalogUpdate }) {
           ),
           E("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}},
             E(Field,{label:`Unit Cost (${selectedPO?.currency||"JMD"})`},E(Input,{type:"number",placeholder:"0",value:line.unitCost,onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,unitCost:e.target.value}:l))}),
-              poForeign(selectedPO?.currency,poFxRate(selectedPO)) && E("div",{style:{fontSize:11,color:T.green,fontWeight:600,marginTop:4}},`Recorded in your books and POS as ${fmtMoney((parseFloat(line.unitCost)||0)*poLandedFactor(selectedPO))} per unit (JMD, incl. shipping/tax)`)),
+              poForeign(selectedPO?.currency,poFxRate(selectedPO)) && (()=>{
+                const factor=poLandedFactor(selectedPO), fx=poFxRate(selectedPO);
+                const unitJ=(parseFloat(line.unitCost)||0)*factor, q=parseInt(line.receivedQty)||0;
+                const withFees=factor>fx*1.0001;
+                return E("div",{style:{marginTop:6,background:T.greenLt,border:"1px solid rgba(5,150,105,0.3)",borderRadius:8,padding:"8px 10px"}},
+                  E("div",{style:{fontSize:13,fontWeight:800,color:T.green}},`${fmtMoney(unitJ)} per unit in JMD`),
+                  E("div",{style:{fontSize:11,color:T.green,fontWeight:600,marginTop:2}},`${q} × ${fmtMoney(unitJ)} = ${fmtMoney(unitJ*q)} · rate ${fx}${withFees?" · includes shipping/tax":""}`),
+                  E("div",{style:{fontSize:10,color:T.muted,marginTop:2}},"This JMD cost is what's saved to your books, inventory and reports."));
+              })()),
             E(Field,{label:"Sell Price"},E(Input,{type:"number",placeholder:"Leave blank = Variable",value:line.sellPrice||"",onChange:e=>setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,sellPrice:e.target.value}:l))}))
           ),
           isImei
@@ -13728,7 +13789,8 @@ function CatalogSubTab({ catalog, saveCatalogFn, onSelectPhone }) {
                     E("div",{style:{fontSize:11,color:T.muted,marginTop:2}},
                       `Stock: ${avail}`,
                       product.barcode?` · ${product.barcode}`:"",
-                      product.variable_price?" · Variable":""
+                      product.variable_price?" · Variable":"",
+                      (parseFloat(product.cost)>0)?` · Cost ${fmtMoney(product.cost)}`:""
                     )
                   ),
                   E("div",{style:{display:"flex",alignItems:"center",gap:8}},
