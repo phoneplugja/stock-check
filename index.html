@@ -628,6 +628,11 @@
   // Prepare each visible product once: tab, base style, models it fits.
   function prepare(products) {
     const out = [];
+    // A model with no photo of its own shares the photo of another model of the same case style.
+    const styleKey = p => { if (p.parentId) return "par|" + p.parentId; const m = String(p.name || "").match(/^(.*?)\s[-–—]\s(.+)$/); return m ? String(p.category) + "|" + m[1].trim().toLowerCase().replace(/[^a-z0-9]/g, "") : ""; };
+    const styleImg = new Map();
+    products.forEach(p => { const k = styleKey(p); if (k && p.image && !styleImg.has(k)) styleImg.set(k, p.image); });
+    products = products.map(p => { if (p.image) return p; const k = styleKey(p); return (k && styleImg.has(k)) ? { ...p, image: styleImg.get(k) } : p; });
     products.forEach(p => {
       const tab = tabOfCategory(p.category);
       if (!tab) return;
