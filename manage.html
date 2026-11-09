@@ -13377,6 +13377,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
             )
           ),
           E("div",{style:{marginBottom:10}},
+            E(Input,{placeholder:"🔍 Search cases — number, name or phone model (e.g. 45, otterbox, S23)",value:line.attrQ||"",onChange:e=>{const v=e.target.value; setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,attrQ:v}:l));},style:{marginBottom:6}}),
             E(Field,{label:"Attributing To"},
               E(Sel,{
                 value: line.addModel ? "__newmodel" : (line.matchedProductId||""),
@@ -13386,7 +13387,9 @@ function ReceiveStockTab({ onCatalogUpdate }) {
               },
                 E("option",{value:""},"+ Create New Product"),
                 !isImei&&listParents(catalog).length>0&&E("option",{value:"__newmodel"},"＋ Add as a new model of an existing case"),
-                (()=>{ const inCat=catalog.filter(p=>p.category===line.category);
+                (()=>{ const terms=String(line.attrQ||"").toLowerCase().split(/\s+/).filter(Boolean);
+                  const hit=p=>!terms.length||p.id===line.matchedProductId||terms.every(t=>[p.name,p.variant,p.parentName,p.barcode,p.sku].join(" ").toLowerCase().includes(t));
+                  const inCat=catalog.filter(p=>p.category===line.category&&hit(p));
                   const lab=p=>`${p.variant||p.name} — stock: ${getAvailableStock(p)}`;
                   const byParent=new Map(); inCat.filter(p=>p.parentId).forEach(p=>{ if(!byParent.has(p.parentId))byParent.set(p.parentId,[]); byParent.get(p.parentId).push(p); });
                   return [
@@ -13400,7 +13403,7 @@ function ReceiveStockTab({ onCatalogUpdate }) {
                 E(Field,{label:"Case"},
                   E(Sel,{value:line.modelParentId||"",onChange:e=>{const v=e.target.value; setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,modelParentId:v}:l));}},
                     E("option",{value:""},"— Choose the case —"),
-                    (listParents(catalog,line.category).length?listParents(catalog,line.category):listParents(catalog)).map(pr=>E("option",{key:pr.parentId,value:pr.parentId},pr.parentName))
+                    (listParents(catalog,line.category).length?listParents(catalog,line.category):listParents(catalog)).filter(pr=>{const ts=String(line.attrQ||'').toLowerCase().split(/\s+/).filter(Boolean);return !ts.length||pr.parentId===line.modelParentId||ts.every(t=>String(pr.parentName).toLowerCase().includes(t));}).map(pr=>E("option",{key:pr.parentId,value:pr.parentId},pr.parentName))
                   )),
                 E(Field,{label:"Phone model"},E(Input,{placeholder:"e.g. S23 Ultra",value:line.modelName||"",onChange:e=>{const v=e.target.value; setReceiveLines(prev=>prev.map((l,i)=>i===li?{...l,modelName:v}:l));}}))
               ),
