@@ -8123,7 +8123,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
   // exchangeRefundMethod: "cash" | "ncb" | "store_credit" — required whenever isExchange && exchDiff<0.
   // Cancelling out of the refund-method modal never calls checkout(), so nothing is saved.
+  // Double-submit guard: holding Enter on the Complete button fires many clicks before React re-renders, so a
+  // state flag is too slow. A ref lock blocks overlapping calls, plus a short cooldown right after a sale.
+  const checkoutLock=useRef({busy:false,last:0});
   const checkout=async(exchangeRefundMethod)=>{
+    const lk=checkoutLock.current;
+    if(lk.busy||Date.now()-lk.last<2500)return;
+    lk.busy=true;
+    try{ await checkoutInner(exchangeRefundMethod); }
+    finally{ lk.busy=false; lk.last=Date.now(); }
+  };
+  const checkoutInner=async(exchangeRefundMethod)=>{
     if(!canCheckout)return;
     // ── Backdating (owner only, current month only, normal sales only) ──
     const useBd=bdOn&&isOwnerUser;
@@ -8288,14 +8298,14 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     }finally{setProcessing(false);}
   };
 
-  const voidSale=async(sale)=>{
-    if(sale.voided){alert("This receipt is already voided.");return;}
+  const voidSale=async(sale,presetReason)=>{
+    if(sale.voided){if(!presetReason)alert("This receipt is already voided.");return;}
     // A receipt that has returns/exchanges against it can't be voided on its own — the later documents depend on it.
     const linked=sales.filter(x=>!x.voided&&(x.returnOrigSaleId===sale.id||x.exchangeOrigSaleId===sale.id));
     if(linked.length){alert(`❌ Can't void ${sale.id}: it has ${linked.length} linked return/exchange receipt(s) (${linked.map(x=>x.id).join(", ")}). Void those first.`);return;}
     const special=sale.isReturn||sale.isExchange;
     if(special&&!confirm(`${sale.isReturn?"Voiding a return":"Voiding an exchange"} will NOT automatically undo the stock movement, store credit or refund that went with it — those must be adjusted by hand.\n\nVoid anyway?`))return;
-    const reason=prompt("Reason for voiding?");
+    const reason=presetReason||prompt("Reason for voiding?");
     if(!reason)return;
     const allSales=await loadSalesForWrite();
     const updated=allSales.map(x=>x.id===sale.id?{...x,voided:true,voidReason:reason,voidedAt:new Date().toISOString()}:x);
@@ -8335,6 +8345,18 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
       }
     }catch(e){console.error("Void sale inventory restore:",e);alert("The receipt was voided, but stock couldn't be restored automatically — please check the Catalog.");}
     if(selectedSale?.id===sale.id)setSelectedSale({...sale,voided:true,voidReason:reason});
+  };
+
+  // Owner-only: void every normal, un-voided receipt matching the History search (e.g. a customer's accidental duplicates).
+  const bulkVoidMatching=async(list)=>{
+    const ok=list.filter(x=>!x.voided&&!x.isReturn&&!x.isExchange&&!x.isDeposit&&!x.isTicketPayment&&!x.ticketId);
+    if(!ok.length){alert("No normal, un-voided receipts match this search.");return;}
+    const sum=ok.reduce((n,x)=>n+(parseFloat(x.total)||0),0);
+    if(!confirm(`Void ${ok.length} receipt(s) matching "${historySearch}" — total ${fmtMoney(sum)}?\n\nStock goes back into inventory.\n${ok.slice(0,12).map(x=>x.id).join(", ")}${ok.length>12?" …":""}`))return;
+    const reason=prompt("Reason for voiding all of these?","Duplicate sale — Enter key held down");
+    if(!reason)return;
+    for(const x of ok){ await voidSale(x,reason); }
+    alert(`Done — ${ok.length} receipt(s) voided.`);
   };
 
   // Exchange
@@ -8504,6 +8526,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         )
       ),
       E(Input,{placeholder:"🔍 Receipt ID, customer name or phone...",value:historySearch,onChange:e=>setHistorySearch(e.target.value),style:{marginBottom:12}}),
+      isOwnerUser&&historySearch.trim()&&filtered.some(x=>!x.voided&&!x.isReturn&&!x.isExchange)&&E("button",{onClick:()=>bulkVoidMatching(sales.filter(x=>!x.voided).filter(x=>(x.customerName||"").toLowerCase().includes(historySearch.toLowerCase())||(x.id||"").toLowerCase().includes(historySearch.toLowerCase())||(x.customerPhone||"").includes(historySearch))),style:{background:T.red,color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",marginBottom:12}},"🚫 Void all receipts matching this search"),
       filtered.length===0?E("div",{style:{textAlign:"center",padding:"40px 20px",color:T.muted}},"No sales found."):
       E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
         filtered.map((s,i)=>E("div",{key:i,onClick:()=>setSelectedSale(s),style:{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 16px",cursor:"pointer",opacity:s.voided?0.55:1,borderLeft:`3px solid ${s.isReturn?T.blue:s.isDeposit?"#F59E0B":s.isExchange?"#7C3AED":s.voided?T.red:T.green}`}},
