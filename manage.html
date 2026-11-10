@@ -5178,7 +5178,10 @@ function OwnerDashboard({
     const t = parseFloat(sale.total) || 0;
     if (sale.isExchange && sale.exchangeOrigSaleId) {
       const o = salesById.get(sale.exchangeOrigSaleId);
-      return t - (o && !o.voided ? parseFloat(o.total) || 0 : 0);
+      // New exchanges store the exact credit given for the traded-in item(s) (partial exchanges only credit the
+      // ticked items); older ones credited the whole original bill.
+      const credit = sale.exchangeCredit != null ? parseFloat(sale.exchangeCredit) || 0 : (parseFloat(o && o.total) || 0);
+      return t - (o && !o.voided ? credit : 0);
     }
     return t;
   };
@@ -8217,6 +8220,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         isExchange,isReturn,isDeposit:ticketIsDeposit,
         ...(hasTicket?(()=>{const tl=cart.find(i=>i.type==="ticket");const amt=(parseFloat(tl.price)||0)*(tl.qty||1);const cost=parseFloat(tl.ticketCost)||0;return {ticketId:tl.ticketId,isTicketPayment:true,ticketFinal:!ticketIsDeposit,...(cost>0?{ticketBalanceAfter:Math.max(0,cost-(parseFloat(tl.ticketPaid)||0)-amt)}:{})};})():{}),
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
+        ...(isExchange?{exchangeCredit:exchOrigTotal}:{}),
         // Cost of the original item(s) handed back on an exchange (snapshot at sale time) so COGS can be
         // reversed for them — the goods are back in stock (or written off if damaged), not sold.
         ...(isExchange?{exchangeHandedBack:exchSel.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"}))}:{}),
