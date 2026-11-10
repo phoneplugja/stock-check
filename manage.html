@@ -7855,6 +7855,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   // Original-sale items being handed back on an exchange — same resellable/damaged reconciliation
   // as a standalone return, kept separate from `returnItems` since exchanges use their own flow.
   const [exchangeItems,setExchangeItems]=useState([]);
+  const [exchCreditOverride,setExchCreditOverride]=useState("");
+  const [exchDiscSel,setExchDiscSel]=useState([]); // which of the original bill's discounts go back with the traded-in items
   const [exchangeDiff,setExchangeDiff]=useState(0);
   const [showExchangeRefundModal,setShowExchangeRefundModal]=useState(false);
 
@@ -7978,11 +7980,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const exchOrigTotal=(()=>{
     const ot=parseFloat(exchangeOrigSale?.total)||0;
     if(!isExchange||!exchangeItems.length)return ot;
+    if(exchCreditOverride!==""&&isFinite(parseFloat(exchCreditOverride)))return Math.max(0,parseFloat(exchCreditOverride));
     const val=l=>l.reduce((n,i)=>n+(parseFloat(i.price)||0)*(i.returnQty||i.qty||1),0);
     const full=exchangeItems.reduce((n,i)=>n+(parseFloat(i.price)||0)*(i.qty||1),0);
     const allFull=exchangeItems.every(i=>i.selected!==false&&(i.returnQty||i.qty||1)===(i.qty||1));
-    if(allFull||full<=0)return ot;
-    return Math.round(val(exchSel)*(ot/full)*100)/100;
+    const origDiscs=(exchangeOrigSale?.discounts||[]);
+    const discOn=origDiscs.map((d,k)=>exchDiscSel[k]!==false);
+    if((allFull&&discOn.every(Boolean))||full<=0)return ot;
+    if(exchCreditOverride!==""&&isFinite(parseFloat(exchCreditOverride)))return Math.max(0,parseFloat(exchCreditOverride));
+    // credit = ticked items at listed price, minus only the original discounts you ticked as applying to them
+    const dsum=origDiscs.reduce((n,d,k)=>n+(discOn[k]?(parseFloat(d.amount)||0):0),0);
+    return Math.max(0,Math.round((val(exchSel)-dsum)*100)/100);
   })();
   const exchDiff=isExchange?total-exchOrigTotal:0;
   const exchangeOwesCustomer=isExchange&&exchDiff<0;
@@ -8048,7 +8056,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   },[]);
 
   const resetForm=()=>{
-    setLinkedInv(null);
+    setLinkedInv(null);setExchCreditOverride("");setExchDiscSel([]);
     setCart([]);setCustomerName("");setCustomerPhone("");setCustomerEmail("");setCustomerCompany("");setIsExistingCustomer(false);
     setDiscounts([]);setNewDiscType("General");setNewDiscAmt("");
     setDeliveryZone("None");setDeliveryCost("");setDeliveryAddress("");
@@ -8379,7 +8387,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setCustomerName(origSale.customerName||"");setCustomerPhone(origSale.customerPhone||"");setCustomerEmail(origSale.customerEmail||"");
     // The whole original sale is being traded in — default every item to resellable; staff can
     // flip individual items to Damaged in the exchange condition panel before completing checkout.
-    setExchangeItems((origSale.items||[]).map(i=>({...i,condition:"resellable",selected:true,returnQty:i.qty||1})));
+    setExchangeItems((origSale.items||[]).map(i=>({...i,condition:"resellable",selected:true,returnQty:i.qty||1})));setExchCreditOverride("");setExchDiscSel((origSale.discounts||[]).map(()=>true));
     setView("pos");setSelectedSale(null);
   };
 
@@ -8727,7 +8735,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
       E("div",null,
         E("h2",{style:{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:20,margin:0}},"💰 Point of Sale"),
-        isExchange&&E("div",{style:{fontSize:12,color:T.amber,fontWeight:700,marginTop:2}},"⟳ Exchange from receipt ",exchangeOrigSale?.id,exchDiff>0?` — J$${fmtMoney(exchDiff)} due`:exchDiff<0?` — ${fmtMoney(Math.abs(exchDiff))} credit/refund`:" — same value")
+        isExchange&&E("div",{style:{fontSize:12,color:T.amber,fontWeight:700,marginTop:2}},"⟳ Exchange from receipt ",exchangeOrigSale?.id,exchDiff>0?` — ${fmtMoney(exchDiff)} due`:exchDiff<0?` — ${fmtMoney(Math.abs(exchDiff))} credit/refund`:" — same value")
       ),
       E("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
         E(Btn,{variant:"ghost",style:{fontSize:12,padding:"7px 10px"},onClick:()=>setView("services")},"🔧 Services"),
@@ -8901,19 +8909,19 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
     // Exchange comparison banner
     isExchange&&cart.length>0&&E("div",{style:{background:exchDiff>0?"#FEF3C7":"#EFF6FF",border:`1px solid ${exchDiff>0?"#FDE68A":"#BFDBFE"}`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,fontWeight:600,color:exchDiff>0?"#92400E":"#1D4ED8"}},
-      exchDiff>0?`⬆ Customer owes J$${fmtMoney(exchDiff)} more (new total higher than original)`:
+      exchDiff>0?`⬆ Customer owes ${fmtMoney(exchDiff)} more (new total higher than original)`:
       exchDiff<0?`⬇ Store owes customer ${fmtMoney(Math.abs(exchDiff))} — refund or store credit on checkout`:
       "✓ Same value — no balance due"
     ),
 
     // Original item(s) being traded in — condition determines resellable restock vs. write-off
     isExchange&&exchangeItems.length>0&&E(Card,{style:{marginBottom:12}},
-      E(ST,null,"Tick the item(s) being traded in — ",exchangeOrigSale?.id),
+      E(ST,null,"Tick the item(s) being traded in — ",exchangeOrigSale?.id," · v4"),
       E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
         exchangeItems.map((item,i)=>E("div",{key:i,style:{border:`1px solid ${item.selected!==false?T.border:"transparent"}`,borderRadius:8,padding:"8px 12px",opacity:item.selected!==false?1:0.5}},
           E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
             E("label",{style:{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,fontSize:13,fontWeight:500}},
-              E("input",{type:"checkbox",checked:item.selected!==false,onChange:e=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,selected:e.target.checked}:x))}),
+              E("input",{type:"checkbox",checked:item.selected!==false,onChange:e=>{const on=e.target.checked;const next=exchangeItems.map((x,j)=>j===i?{...x,selected:on}:x);setExchangeItems(next);setExchDiscSel((exchangeOrigSale?.discounts||[]).map(()=>next.every(x=>x.selected!==false)));}}),
               E("span",null,item.name,item.imei&&E("span",{style:{fontSize:10,color:T.muted,marginLeft:6}},"IMEI: ",item.imei))),
             E("div",{style:{display:"flex",alignItems:"center",gap:8,fontSize:12}},
               item.selected!==false&&(item.qty||1)>1&&E("span",null,"Qty:",E("input",{type:"number",min:1,max:item.qty,value:item.returnQty||item.qty,onChange:e=>{const v=Math.max(1,Math.min(item.qty||1,parseInt(e.target.value)||1));setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,returnQty:v}:x));},style:{width:44,marginLeft:4,padding:"2px 4px"}})),
@@ -8924,7 +8932,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
           )
         ))
       ),
-      E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Only ticked items are taken back; unticked items stay with the customer. Exchange credit = the ticked items' share of the bill ("+fmtMoney(exchOrigTotal)+"). Resellable phones go to Under Testing before resale; resellable accessories go back into stock. Damaged items are logged as an inventory write-off instead.")
+      (exchangeOrigSale?.discounts||[]).length>0&&E("div",{style:{marginTop:10,padding:"8px 12px",border:`1px dashed ${T.border}`,borderRadius:8}},
+        E("div",{style:{fontSize:12,fontWeight:700,marginBottom:6}},"Discounts on the original bill — tick the ones that belong to the traded-in item(s):"),
+        (exchangeOrigSale.discounts||[]).map((d,k)=>E("label",{key:k,style:{display:"flex",alignItems:"center",gap:8,fontSize:12,cursor:"pointer",marginBottom:4}},
+          E("input",{type:"checkbox",checked:exchDiscSel[k]!==false,onChange:e=>setExchDiscSel(prev=>(exchangeOrigSale.discounts||[]).map((_,m)=>m===k?e.target.checked:prev[m]!==false))}),
+          E("span",null,`${d.type||d.label||"Discount"} −${fmtMoney(parseFloat(d.amount)||0)}`),
+          E("span",{style:{color:T.muted}},exchDiscSel[k]!==false?"(comes off the credit)":"(stays with the items the customer keeps)")))),
+      E("div",{style:{display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:12}},
+        E("b",null,"Exchange credit:"),
+        E("input",{type:"number",placeholder:String(exchOrigTotal),value:exchCreditOverride,onChange:e=>setExchCreditOverride(e.target.value),style:{width:130,padding:"6px 8px",borderRadius:6,border:`1px solid ${T.border}`}}),
+        E("span",{style:{color:T.muted}},`currently ${fmtMoney(exchOrigTotal)} — type an amount to override (e.g. if the bill had a discount)`)),
+      E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Only ticked items are taken back; unticked items stay with the customer. Resellable phones go to Under Testing before resale; resellable accessories go back into stock. Damaged items are logged as an inventory write-off instead.")
     ),
 
     // Payment
