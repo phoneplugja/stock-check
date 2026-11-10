@@ -7970,7 +7970,17 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const surchargeNum=(feeOn&&!isExchange&&!isReturn)?Math.round((parseFloat(feeVal)||0)*100)/100:0;
   const total=preFeeTotal+Math.max(0,surchargeNum);
   // Exchange diff calculated live — moved up so payment logic below can use it
-  const exchOrigTotal=exchangeOrigSale?.total||0;
+  // Only the ticked items (and quantities) on the original bill are being traded in; credit = their share of the bill.
+  const exchSel=exchangeItems.filter(i=>i.selected!==false);
+  const exchOrigTotal=(()=>{
+    const ot=parseFloat(exchangeOrigSale?.total)||0;
+    if(!isExchange||!exchangeItems.length)return ot;
+    const val=l=>l.reduce((n,i)=>n+(parseFloat(i.price)||0)*(i.returnQty||i.qty||1),0);
+    const full=exchangeItems.reduce((n,i)=>n+(parseFloat(i.price)||0)*(i.qty||1),0);
+    const allFull=exchangeItems.every(i=>i.selected!==false&&(i.returnQty||i.qty||1)===(i.qty||1));
+    if(allFull||full<=0)return ot;
+    return Math.round(val(exchSel)*(ot/full)*100)/100;
+  })();
   const exchDiff=isExchange?total-exchOrigTotal:0;
   const exchangeOwesCustomer=isExchange&&exchDiff<0;
   // For exchanges, the amount actually collectable at the register is only the
@@ -7979,7 +7989,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
   const amountDue=isExchange?Math.max(0,exchDiff):total;
   const totalPaid=(parseFloat(cash)||0)+(parseFloat(debitCard)||0)+(parseFloat(creditCard)||0)+(parseFloat(ncbTransfer)||0)+(parseFloat(scotiaTransfer)||0)+(parseFloat(otherPayment)||0);
   const change=Math.max(0,(parseFloat(cash)||0)-(amountDue-(parseFloat(debitCard)||0)-(parseFloat(creditCard)||0)-(parseFloat(ncbTransfer)||0)-(parseFloat(scotiaTransfer)||0)-(parseFloat(otherPayment)||0)));
-  const canCheckout=cart.length>0&&(amountDue<=0||totalPaid>=amountDue);
+  const canCheckout=cart.length>0&&(!isExchange||exchangeItems.length===0||exchSel.length>0)&&(amountDue<=0||totalPaid>=amountDue);
 
   // strict=true (explicit "Save Customer" actions) returns {errors} and refuses to save when
   // invalid. strict=false (default, used by the automatic post-checkout save) silently skips
@@ -8209,7 +8219,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
         exchangeOrigSaleId:exchangeOrigSale?.id||null,
         // Cost of the original item(s) handed back on an exchange (snapshot at sale time) so COGS can be
         // reversed for them — the goods are back in stock (or written off if damaged), not sold.
-        ...(isExchange?{exchangeHandedBack:exchangeItems.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"}))}:{}),
+        ...(isExchange?{exchangeHandedBack:exchSel.map(i=>({id:i.id,name:i.name,imei:i.imei||"",qty:i.returnQty||i.qty||1,cost:(i.type==="catalog_phone"?parseFloat(i.raw?.unit?.cost):parseFloat(i.raw?.cost))||0,condition:i.condition||"resellable"}))}:{}),
         returnOrigSaleId:returnOrigSale?.id||null,
         appliedCreditId:appliedCredit?.id||null,
         exchangeRefundMethod:isExchange&&exchDiff<0?exchangeRefundMethod:null,
@@ -8255,8 +8265,8 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
       // Reconcile the original item(s) traded in on an exchange (resellable → Under Testing /
       // restocked, damaged → write-off expense) — separate from the new item(s) just sold above.
-      if(isExchange&&exchangeItems.length>0){
-        await reconcileHandedBackItems(exchangeItems,exchangeOrigSale?.id||saleId);
+      if(isExchange&&exchSel.length>0){
+        await reconcileHandedBackItems(exchSel,exchangeOrigSale?.id||saleId);
       }
 
       // Log the payment against the ticket (and, if you chose, mark it Collected)
@@ -8365,7 +8375,7 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
     setCustomerName(origSale.customerName||"");setCustomerPhone(origSale.customerPhone||"");setCustomerEmail(origSale.customerEmail||"");
     // The whole original sale is being traded in — default every item to resellable; staff can
     // flip individual items to Damaged in the exchange condition panel before completing checkout.
-    setExchangeItems((origSale.items||[]).map(i=>({...i,condition:"resellable"})));
+    setExchangeItems((origSale.items||[]).map(i=>({...i,condition:"resellable",selected:true,returnQty:i.qty||1})));
     setView("pos");setSelectedSale(null);
   };
 
@@ -8894,17 +8904,23 @@ function POSSystem({phones=[],onPhonesUpdate,user}){
 
     // Original item(s) being traded in — condition determines resellable restock vs. write-off
     isExchange&&exchangeItems.length>0&&E(Card,{style:{marginBottom:12}},
-      E(ST,null,"Item(s) being traded in — ",exchangeOrigSale?.id),
+      E(ST,null,"Tick the item(s) being traded in — ",exchangeOrigSale?.id),
       E("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-        exchangeItems.map((item,i)=>E("div",{key:i,style:{border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 12px"}},
-          E("div",{style:{fontSize:13,fontWeight:500}},item.name,item.imei&&E("span",{style:{fontSize:10,color:T.muted,marginLeft:6}},"IMEI: ",item.imei)),
-          (item.type==="catalog_phone"||item.type==="product")&&E("div",{style:{display:"flex",gap:6,marginTop:6}},
+        exchangeItems.map((item,i)=>E("div",{key:i,style:{border:`1px solid ${item.selected!==false?T.border:"transparent"}`,borderRadius:8,padding:"8px 12px",opacity:item.selected!==false?1:0.5}},
+          E("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
+            E("label",{style:{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1,fontSize:13,fontWeight:500}},
+              E("input",{type:"checkbox",checked:item.selected!==false,onChange:e=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,selected:e.target.checked}:x))}),
+              E("span",null,item.name,item.imei&&E("span",{style:{fontSize:10,color:T.muted,marginLeft:6}},"IMEI: ",item.imei))),
+            E("div",{style:{display:"flex",alignItems:"center",gap:8,fontSize:12}},
+              item.selected!==false&&(item.qty||1)>1&&E("span",null,"Qty:",E("input",{type:"number",min:1,max:item.qty,value:item.returnQty||item.qty,onChange:e=>{const v=Math.max(1,Math.min(item.qty||1,parseInt(e.target.value)||1));setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,returnQty:v}:x));},style:{width:44,marginLeft:4,padding:"2px 4px"}})),
+              E("span",{style:{fontWeight:600}},fmtMoney((parseFloat(item.price)||0)*(item.returnQty||item.qty||1))))),
+          item.selected!==false&&(item.type==="catalog_phone"||item.type==="product")&&E("div",{style:{display:"flex",gap:6,marginTop:6}},
             E("button",{type:"button",onClick:()=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"resellable"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${(item.condition||"resellable")==="resellable"?T.green:T.border}`,background:(item.condition||"resellable")==="resellable"?T.greenLt:"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:(item.condition||"resellable")==="resellable"?T.green:T.muted}},"✓ Resellable"),
             E("button",{type:"button",onClick:()=>setExchangeItems(prev=>prev.map((x,j)=>j===i?{...x,condition:"damaged"}:x)),style:{padding:"4px 10px",borderRadius:6,border:`1px solid ${item.condition==="damaged"?T.red:T.border}`,background:item.condition==="damaged"?"#FEF2F2":"transparent",fontWeight:700,fontSize:11,cursor:"pointer",fontFamily:"inherit",color:item.condition==="damaged"?T.red:T.muted}},"✕ Damaged / Not Resellable")
           )
         ))
       ),
-      E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Resellable phones go to Under Testing before resale; resellable accessories go back into stock. Damaged items are logged as an inventory write-off instead.")
+      E("div",{style:{fontSize:11,color:T.muted,marginTop:8}},"Only ticked items are taken back; unticked items stay with the customer. Exchange credit = the ticked items' share of the bill ("+fmtMoney(exchOrigTotal)+"). Resellable phones go to Under Testing before resale; resellable accessories go back into stock. Damaged items are logged as an inventory write-off instead.")
     ),
 
     // Payment
